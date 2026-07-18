@@ -10,7 +10,7 @@ from kiki_control.adapters.mercado_libre import normalizar_mercado_libre
 from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
 from kiki_control.domain.enums import TipoFuente
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
-from kiki_control.presentation.reconciliation_view import clave_resultado, detalle_presentacion, filas_presentacion, filtrar_filas, resumen_kpis
+from kiki_control.presentation.reconciliation_view import clave_resultado, cobertura_archivos, detalle_presentacion, filas_presentacion, filtrar_filas, resumen_kpis
 from kiki_control.reconciliation import reconciliar
 
 ZONA_DEFAULT = "America/Argentina/Cordoba"
@@ -76,6 +76,7 @@ def _inspeccionar_upload(clave: str, upload: Any, fuente_esperada: TipoFuente) -
         st.session_state[hash_key] = hash_actual
         st.session_state.pop("reporte", None)
         st.session_state.pop("normalizacion", None)
+        st.session_state.pop("cobertura", None)
     st.markdown(f"**Fuente detectada:** {inspeccion.fuente_detectada.value}")
     st.write(f"Filas: {inspeccion.metadatos.cantidad_filas} · Columnas: {len(inspeccion.metadatos.columnas_encontradas)}")
     st.write(f"Tamaño: {inspeccion.metadatos.tamaño_bytes} bytes · SHA-256: `{hash_actual[:12]}`")
@@ -136,6 +137,7 @@ def _procesar(info_ml: dict[str, Any], info_mp: dict[str, Any], zona: str, toler
         if not mp.movimientos:
             st.error("No quedaron movimientos financieros válidos para conciliar.")
             return
+        st.session_state["cobertura"] = cobertura_archivos(ml.operaciones, mp.movimientos)
         st.session_state["reporte"] = reconciliar(ml.operaciones, mp.movimientos, tolerancia)
         st.success("Conciliación finalizada.")
 
@@ -151,9 +153,24 @@ def _mostrar_normalizacion(nombre: str, resultado: Any) -> None:
                 st.write(f"Fila {rechazada.numero_fila_origen}: {mensajes}")
 
 
+
+def _mostrar_cobertura(cobertura: Any) -> None:
+    st.header("Cobertura de los archivos")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Período de ventas informado por Mercado Libre", cobertura.periodo_ventas_ml.texto)
+    c2.metric("Período de origen de movimientos informado por Mercado Pago", cobertura.periodo_origen_mp.texto)
+    c3.metric("Período de liquidación informado por Mercado Pago", cobertura.periodo_liquidacion_mp.texto)
+    c4.metric("Movimientos sin fecha de liquidación", cobertura.movimientos_sin_fecha_liquidacion)
+    if cobertura.advertencia_origenes:
+        st.info(cobertura.advertencia_origenes)
+
 def _mostrar_resultados() -> None:
     reporte = st.session_state["reporte"]
+    if "cobertura" in st.session_state:
+        _mostrar_cobertura(st.session_state["cobertura"])
+
     st.header("Resumen ejecutivo")
+    st.caption("Las métricas comparables usan solo resultados con diferencia_control calculada. Los grupos financieros sin operación comercial se informan separados; devoluciones y reclamos pueden integrar ese grupo por ausencia comercial aunque su estado prioritario sea Devuelta o En reclamo. Los movimientos de fondos se mantienen separados y no se tratan como pérdidas comerciales.")
     kpis = resumen_kpis(reporte)
     for bloque in (list(kpis.items())[:5], list(kpis.items())[5:10], list(kpis.items())[10:]):
         cols = st.columns(len(bloque))

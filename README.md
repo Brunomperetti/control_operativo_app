@@ -61,7 +61,21 @@ streamlit run app.py
 5. Presionar **Procesar y conciliar** cuando ambos archivos sean válidos.
 6. La app normaliza ambas fuentes, informa filas recibidas, normalizadas y rechazadas, y permite conciliación parcial si quedan registros válidos.
 7. El motor de conciliación produce el reporte por operación.
-8. La pantalla muestra resumen ejecutivo, tabla filtrable y detalle de cada resultado.
+8. La pantalla muestra la cobertura temporal de ambos archivos, resumen ejecutivo, tabla filtrable y detalle de cada resultado.
+
+
+## Cobertura y alcance de métricas
+
+La cobertura comercial y la cobertura financiera pueden ser distintas porque el CSV de Mercado Libre informa el período de ventas incluido, mientras que el XLSX de Mercado Pago informa movimientos por fecha de origen y por fecha de liquidación. La interfaz muestra esos tres rangos antes del resumen ejecutivo y cuenta los movimientos sin fecha de liquidación.
+
+Cuando los períodos de origen no coinciden, la aplicación emite una advertencia informativa y continúa la conciliación sin inventar reglas de recorte. Un movimiento financiero sin contraparte comercial puede corresponder a otro período de archivo y requiere análisis manual; no se clasifica automáticamente como pérdida comercial ni como error.
+
+El resumen ejecutivo separa los alcances:
+
+- **Operaciones comparables:** resultados con `diferencia_control` calculada. Sus métricas incluyen neto comercial, neto aprobado de Mercado Pago y diferencia de control solo para ese universo.
+- **Grupos financieros sin operación en el archivo comercial:** resultados sin operación comercial asociada, excluyendo `MOVIMIENTO_DE_FONDOS`. Pueden incluir devoluciones o reclamos aunque su estado final sea `DEVUELTA` o `EN_RECLAMO` por prioridad.
+- **Operaciones comerciales sin movimiento financiero:** ventas presentes en Mercado Libre sin movimientos financieros asociados.
+- **Movimientos de fondos:** se mantienen separados y no se tratan como pérdidas comerciales.
 
 ## Privacidad
 
@@ -73,7 +87,7 @@ La tabla y el detalle de interfaz evitan datos personales, documentos, tarjetas,
 
 ## Utilidad informada
 
-La **utilidad informada por Mercado Libre** se muestra únicamente como valor provisto por la fuente comercial. No representa ganancia definitiva, resultado contable ni métrica fiscal validada.
+La **utilidad informada por Mercado Libre** se muestra únicamente como valor provisto por la fuente comercial. No representa ganancia definitiva, resultado contable, resultado operativo definitivo ni métrica fiscal validada.
 
 El sistema no recalcula impuestos, utilidad ni resultado operativo definitivo. Los componentes financieros de Mercado Pago se exhiben como impactos separados para control y revisión.
 
