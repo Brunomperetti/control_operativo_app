@@ -802,3 +802,69 @@ Este documento debe actualizarse cuando ocurra cualquiera de los siguientes even
 - Se formaliza una nueva versión del roadmap.
 
 Toda implementación futura debe poder vincularse con una sección de este documento o proponer su actualización.
+
+## 30. Regla inicial de conciliación Mercado Libre / Mercado Pago
+
+La primera regla implementada del motor de conciliación es `ML_MP_ID_ORDER_NETO_V1`. La regla trabaja únicamente con modelos normalizados internos y relaciona `OperacionComercial` con `MovimientoFinanciero` mediante `id_orden` como clave principal. El motor no lee archivos CSV/XLSX, no depende de Streamlit, no expone DataFrames y no implementa persistencia, dashboards, exportaciones ni fórmulas fiscales nuevas.
+
+### 30.1 Diferencia de control
+
+La comparación principal utiliza únicamente pagos aprobados:
+
+```text
+neto_pagos_aprobados = suma(monto_neto_impactado de PAGO_APROBADO)
+diferencia_control = neto_pagos_aprobados - neto_comercial_informado
+```
+
+El signo se interpreta así:
+
+- Positivo: Mercado Pago informa más neto que la fuente comercial.
+- Negativo: Mercado Pago informa menos neto que la fuente comercial.
+- Cero: coincidencia exacta.
+
+La tolerancia inicial por defecto es `Decimal("0.01")`. Una diferencia exacta de cero genera `CONCILIADA`; una diferencia no nula con valor absoluto menor o igual a la tolerancia genera `CONCILIADA_CON_DIFERENCIA_MENOR`; una diferencia que supera la tolerancia genera `CONCILIADA_CON_DIFERENCIA`.
+
+### 30.2 Prioridad de estados
+
+La prioridad centralizada de estados, de mayor a menor, es:
+
+1. `DUPLICADA`
+2. `EN_REVISION`
+3. `EN_RECLAMO`
+4. `DEVUELTA`
+5. `MOVIMIENTO_DE_FONDOS`
+6. `MOVIMIENTO_SIN_OPERACION_COMERCIAL`
+7. `OPERACION_SIN_MOVIMIENTO_FINANCIERO`
+8. `PENDIENTE_ACREDITACION`
+9. `CONCILIADA_CON_DIFERENCIA`
+10. `CONCILIADA_CON_DIFERENCIA_MENOR`
+11. `CONCILIADA`
+
+La prioridad evita condicionales dispersos y permite explicar por qué una condición prevalece sobre otra.
+
+### 30.3 Pago dividido como indicador
+
+`PAGO_DIVIDIDO` no es un estado final excluyente. Si existe más de un `PAGO_APROBADO` para una orden, el motor suma sus importes, marca `es_pago_dividido = True`, agrega el motivo `PAGO_DIVIDIDO` y luego determina el estado por las reglas generales y la prioridad documentada. Un pago dividido puede quedar correctamente `CONCILIADA` si la suma coincide con el neto comercial informado.
+
+### 30.4 Componentes financieros auditables
+
+El motor calcula y conserva componentes separados por orden:
+
+- Pagos aprobados para el control principal.
+- Pagos de envío (`PAGO_ENVIO`).
+- Devoluciones (`DEVOLUCION_DINERO` y `DEVOLUCION_ENVIO`).
+- Reclamos y disputas (`RECLAMO` y `DISPUTA_ENVIO`).
+- Otros movimientos asociados a la orden.
+- Neto financiero total de todos los movimientos asociados.
+
+Estos componentes explican el resultado, pero todavía no recalculan costos, utilidad ni resultado contable definitivo.
+
+### 30.5 PAYOUTS y movimientos sin orden
+
+Un `PAYOUT` sin `id_orden` se clasifica como `MOVIMIENTO_DE_FONDOS` con motivo `PAYOUT_SIN_ORDEN`. No se considera pérdida comercial, no se fuerza contra una venta y no genera diferencia de conciliación contra Mercado Libre.
+
+Los demás movimientos sin `id_orden` se conservan individualmente como `MOVIMIENTO_SIN_OPERACION_COMERCIAL` con motivo `ORDEN_AUSENTE`, para evitar mezclar eventos diferentes solo porque no tienen orden.
+
+### 30.6 Límites contables actuales
+
+El motor conserva `utilidad_neta_informada` como valor informado por Mercado Libre. No la recalcula, no calcula resultado operativo definitivo y no implementa todavía un resultado contable validado. Cualquier fórmula fiscal o contable definitiva queda pendiente de validación posterior.
