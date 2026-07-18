@@ -10,6 +10,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from kiki_control.adapters.column_aliases import canonizar_fila
 from kiki_control.domain.enums import SeveridadValidacion, TipoFuente
 from kiki_control.domain.financial_movement import DetalleImpuesto, MovimientoFinanciero, TipoOperacionFinanciera
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
@@ -73,7 +74,8 @@ def normalizar_mercado_pago(nombre_archivo: str, contenido: bytes, zona_horaria:
     errores_globales: list[ProblemaValidacion] = []
     advertencias = list(inspeccion.advertencias)
     for numero, fila in filas:
-        mov, errores, avisos = _normalizar_fila(fila, numero, inspeccion.metadatos.sha256, inspeccion.metadatos.nombre_hoja or "", zona)
+        fila_canonica = canonizar_fila(fila, TipoFuente.MERCADO_PAGO)
+        mov, errores, avisos = _normalizar_fila(fila_canonica, numero, inspeccion.metadatos.sha256, inspeccion.metadatos.nombre_hoja or "", zona)
         advertencias.extend(avisos)
         if errores:
             rechazadas.append(FilaRechazadaMercadoPago(numero, tuple(errores)))

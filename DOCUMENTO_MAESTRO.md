@@ -689,6 +689,36 @@ Las carpetas futuras de interfaz, normalización, conciliación, análisis, expo
 - Excluida.
 - Movimiento de fondos.
 
+
+### 21.4 Política de alias de columnas externas
+
+Los adaptadores deben resolver variantes de encabezados únicamente en la frontera de inspección y normalización, sin renombrar ni modificar los archivos recibidos. El dominio interno debe seguir dependiendo solo de nombres canónicos y modelos normalizados.
+
+Para Mercado Libre, se reconocen como equivalentes confirmadas:
+
+| Encabezado confirmado | Nombre canónico interno |
+|---|---|
+| `Iva` | `IVA` |
+| `Costo unitario (Con IVA) ($)` | `Costo Unitario (Con IVA) ($)` |
+| `Bonificación por envío` | `Bonificación envío ($)` |
+| `precio_equilibrio ($)` | `Precio de equilibrio ($)` |
+| `Rentabilidad (precio de venta)` | `Rentabilidad s/ precio venta` |
+| `Rentabilidad (costo de producto)` | `Rentabilidad s/ costo producto` |
+| `Rentabilidad (suma de costos)` | `Rentabilidad s/ suma costos` |
+| `Comisión MeLi (%)` | `% Comisión MeLi` |
+| `Costo de envío (%)` | `% Costo de envío` |
+
+Para Mercado Pago, se reconocen como equivalentes confirmadas:
+
+| Encabezado confirmado | Nombre canónico interno |
+|---|---|
+| `MONTO RECIBIDO POR COMPRAS POR SPLIT` | `MONTO RECIBIDO POR SPLIT` |
+| `MONEDA DE LA LIQUIDACIÓN` | `MONEDA DE LIQUIDACIÓN` |
+| `ID DEL ENVÍO` | `ID DE ENVÍO` |
+| `ID DEL PAQUETE` | `ID DE PAQUETE` |
+
+Las columnas sensibles de Mercado Pago pueden reconocerse estructuralmente para validar el contrato completo de exportación, pero no deben incorporarse a `MovimientoFinanciero`, mostrarse en la interfaz, persistirse ni aparecer en resultados públicos, detalles, logs o mensajes. Esto incluye datos de pagador, documentos, tarjetas y cualquier otro dato personal.
+
 ## 22. Privacidad, seguridad de datos y zonas horarias
 
 - Los archivos reales exportados de Mercado Libre y Mercado Pago no deben incorporarse al repositorio.
