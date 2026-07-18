@@ -19,6 +19,10 @@ dev = [
     "pytest",
 ]
 
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["kiki_control", "kiki_control.*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
