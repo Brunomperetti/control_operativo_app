@@ -925,3 +925,20 @@ La etiqueta genérica “sin contraparte” no debe usarse como total único por
 ### 30.7 Límites contables actuales
 
 El motor conserva `utilidad_neta_informada` como valor informado por Mercado Libre. No la recalcula, no calcula resultado operativo definitivo y no implementa todavía un resultado contable validado. Cualquier fórmula fiscal o contable definitiva queda pendiente de validación posterior.
+
+## 31. Ciclo seguro de sesión en Streamlit
+
+La interfaz de carga debe evitar que Streamlit muestre resultados obsoletos cuando cambia la entrada que originó una conciliación. Ambos `file_uploader` deben tener claves explícitas y el procesamiento debe quedar asociado a una firma determinista compuesta por:
+
+- SHA-256 del archivo de Mercado Libre.
+- SHA-256 del archivo de Mercado Pago.
+- Zona horaria operativa configurada.
+- Tolerancia monetaria normalizada como `Decimal` y texto canónico.
+
+Al completar correctamente una conciliación, la aplicación guarda esa firma junto con el reporte. Si se elimina o reemplaza cualquiera de los archivos, si cambia la zona horaria o si cambia la tolerancia monetaria, la aplicación debe invalidar inmediatamente normalizaciones, cobertura temporal, reporte, firma, filtros y selección de detalle. Nunca debe mostrarse un reporte cuya firma no coincida con los archivos y configuración actuales; si se elimina un archivo, el resultado anterior debe desaparecer aunque el otro archivo continúe cargado.
+
+La interfaz debe ofrecer un botón visible **Limpiar archivos y resultados**. El botón elimina del estado de sesión mantenido por la aplicación los archivos cargados, hashes, normalizaciones, cobertura temporal, reporte de conciliación, firma de procesamiento, filtros y selección de detalle.
+
+### 31.1 Política de memoria y privacidad de la sesión
+
+El procesamiento inicial continúa siendo exclusivamente en memoria: los archivos cargados se transmiten al servidor privado de la aplicación para procesarse, pero la aplicación no los persiste en disco ni base de datos. Los datos normalizados y resultados permanecen únicamente en memoria de sesión. La documentación y la interfaz no deben prometer garantías de infraestructura de Streamlit que la aplicación no controle; solo deben describir el comportamiento propio de la app y el efecto del botón de limpieza sobre el estado de sesión que mantiene.
