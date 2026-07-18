@@ -35,9 +35,7 @@ def main() -> None:
         "y resultados permanecen únicamente en memoria de sesión. El botón de limpieza "
         "elimina el estado mantenido por la aplicación para esta sesión."
     )
-    if st.button("Limpiar archivos y resultados", type="secondary"):
-        limpiar_claves_conocidas(st.session_state)
-        st.rerun()
+    st.button("Limpiar archivos y resultados", type="secondary", on_click=_limpiar_sesion_streamlit)
 
     st.header("Etapa 1 — Carga de archivos")
     col_ml, col_mp = st.columns(2)
@@ -84,6 +82,10 @@ def main() -> None:
         _mostrar_resultados()
     elif "reporte" in st.session_state:
         invalidar_resultados_conocidos(st.session_state)
+
+
+def _limpiar_sesion_streamlit() -> None:
+    limpiar_claves_conocidas(st.session_state)
 
 
 def _inicializar_estado() -> None:
