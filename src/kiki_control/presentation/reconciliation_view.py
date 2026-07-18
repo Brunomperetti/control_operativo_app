@@ -1,9 +1,12 @@
 """Transformaciones puras de reportes de conciliación para interfaz."""
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
-from typing import Iterable
+from typing import Iterable, Sequence
 
+from kiki_control.domain.commercial_operation import OperacionComercial
+from kiki_control.domain.financial_movement import MovimientoFinanciero
 from kiki_control.domain.reconciliation import EstadoConciliacion, ReporteConciliacion, ResultadoConciliacion
 from kiki_control.presentation.formatters import formato_bool, formato_pesos_argentino
 
@@ -20,6 +23,23 @@ ETIQUETAS_ESTADO: dict[EstadoConciliacion, str] = {
     EstadoConciliacion.DUPLICADA: "Duplicada",
     EstadoConciliacion.MOVIMIENTO_DE_FONDOS: "Movimiento de fondos",
 }
+
+@dataclass(frozen=True)
+class RangoFechasPresentacion:
+    desde: date | None
+    hasta: date | None
+    texto: str
+
+
+@dataclass(frozen=True)
+class CoberturaArchivosPresentacion:
+    periodo_ventas_ml: RangoFechasPresentacion
+    periodo_origen_mp: RangoFechasPresentacion
+    periodo_liquidacion_mp: RangoFechasPresentacion
+    movimientos_sin_fecha_liquidacion: int
+    origenes_coinciden: bool
+    advertencia_origenes: str | None
+
 
 @dataclass(frozen=True)
 class FilaResultadoPresentacion:
@@ -45,6 +65,34 @@ COLUMNAS_SEGURAS = tuple(FilaResultadoPresentacion.__dataclass_fields__)
 
 def etiqueta_estado(estado: EstadoConciliacion) -> str:
     return ETIQUETAS_ESTADO[estado]
+
+
+def cobertura_archivos(operaciones: Sequence[OperacionComercial], movimientos: Sequence[MovimientoFinanciero]) -> CoberturaArchivosPresentacion:
+    """Calcula cobertura temporal usando fechas locales normalizadas, sin DataFrames ni Streamlit."""
+
+    ventas = _rango_fechas(o.fecha_hora_venta.date() for o in operaciones)
+    origen_mp = _rango_fechas(m.fecha_origen_local.date() for m in movimientos)
+    liquidacion_mp = _rango_fechas(m.fecha_liquidacion_local.date() for m in movimientos if m.fecha_liquidacion_local is not None)
+    sin_liquidacion = sum(1 for m in movimientos if m.fecha_liquidacion_local is None)
+    coinciden = ventas.desde == origen_mp.desde and ventas.hasta == origen_mp.hasta
+    advertencia = None
+    if not coinciden:
+        advertencia = "Los períodos de origen de Mercado Libre y Mercado Pago no coinciden. La conciliación continúa sin recortar movimientos; un movimiento financiero sin contraparte comercial puede pertenecer a otro período y requiere análisis."
+    return CoberturaArchivosPresentacion(ventas, origen_mp, liquidacion_mp, sin_liquidacion, coinciden, advertencia)
+
+
+def _rango_fechas(fechas: Iterable[date]) -> RangoFechasPresentacion:
+    valores = tuple(fechas)
+    if not valores:
+        return RangoFechasPresentacion(None, None, "Sin fechas informadas")
+    desde = min(valores)
+    hasta = max(valores)
+    texto = _formato_fecha(desde) if desde == hasta else f"{_formato_fecha(desde)} a {_formato_fecha(hasta)}"
+    return RangoFechasPresentacion(desde, hasta, texto)
+
+
+def _formato_fecha(valor: date) -> str:
+    return valor.strftime("%d/%m/%Y")
 
 
 def clave_resultado(resultado: ResultadoConciliacion) -> str:
@@ -97,26 +145,23 @@ def filtrar_filas(filas: Iterable[FilaResultadoPresentacion], estados: set[str] 
 
 def resumen_kpis(reporte: ReporteConciliacion) -> dict[str, int | str]:
     resultados = reporte.resultados
-    total_neto_comercial = _sumar(r.neto_comercial_informado for r in resultados)
-    total_pagos = _sumar(r.neto_pagos_aprobados for r in resultados)
-    total_diferencia = _sumar(r.diferencia_control for r in resultados)
-    total_utilidad = _sumar(r.utilidad_neta_informada for r in resultados)
-    sin_contraparte = sum(1 for r in resultados if r.estado in {EstadoConciliacion.OPERACION_SIN_MOVIMIENTO_FINANCIERO, EstadoConciliacion.MOVIMIENTO_SIN_OPERACION_COMERCIAL})
+    comparables = tuple(r for r in resultados if r.diferencia_control is not None)
+    financieros_sin_operacion = tuple(r for r in resultados if r.cantidad_operaciones_comerciales == 0 and r.estado != EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
+    comerciales_sin_movimiento = tuple(r for r in resultados if r.cantidad_operaciones_comerciales > 0 and r.cantidad_movimientos_financieros == 0)
+    movimientos_fondos = tuple(r for r in resultados if r.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
     return {
-        "Operaciones comerciales": reporte.cantidad_operaciones_comerciales,
-        "Movimientos financieros": reporte.cantidad_movimientos_financieros,
-        "Conciliadas": reporte.total_conciliadas,
-        "Con diferencias": reporte.total_con_diferencias,
-        "Sin contraparte": sin_contraparte,
-        "Pendientes de acreditación": sum(1 for r in resultados if r.estado == EstadoConciliacion.PENDIENTE_ACREDITACION or r.tiene_liquidacion_pendiente),
-        "Devueltas": reporte.total_devueltas,
-        "En reclamo": reporte.total_en_reclamo,
-        "En revisión": reporte.total_en_revision,
-        "Movimientos de fondos": reporte.total_movimientos_fondos,
-        "Utilidad informada por Mercado Libre": formato_pesos_argentino(total_utilidad),
-        "Neto comercial informado": formato_pesos_argentino(total_neto_comercial),
-        "Neto de pagos aprobados": formato_pesos_argentino(total_pagos),
-        "Diferencia total de control": formato_pesos_argentino(total_diferencia),
+        "Operaciones comparables": len(comparables),
+        "Conciliadas exactas": sum(1 for r in comparables if r.estado == EstadoConciliacion.CONCILIADA),
+        "Operaciones comparables con diferencia": sum(1 for r in comparables if r.diferencia_control != Decimal("0")),
+        "Grupos financieros sin operación en el archivo comercial": len(financieros_sin_operacion),
+        "Operaciones comerciales sin movimiento financiero": len(comerciales_sin_movimiento),
+        "Casos que requieren revisión": sum(1 for r in resultados if r.requiere_revision),
+        "Movimientos de fondos": len(movimientos_fondos),
+        "Utilidad informada por Mercado Libre": formato_pesos_argentino(_sumar(r.utilidad_neta_informada for r in resultados)),
+        "Neto comercial de operaciones comparables": formato_pesos_argentino(_sumar(r.neto_comercial_informado for r in comparables)),
+        "Neto aprobado de Mercado Pago de operaciones comparables": formato_pesos_argentino(_sumar(r.neto_pagos_aprobados for r in comparables)),
+        "Diferencia de control — operaciones comparables": formato_pesos_argentino(_sumar(r.diferencia_control for r in comparables)),
+        "Neto aprobado de Mercado Pago sin operación comercial asociada": formato_pesos_argentino(_sumar(r.neto_pagos_aprobados for r in financieros_sin_operacion)),
     }
 
 
@@ -141,8 +186,8 @@ def detalle_presentacion(resultado: ResultadoConciliacion) -> dict[str, str | in
         "Cantidad de pagos aprobados": resultado.cantidad_pagos_aprobados,
         "Pago dividido": formato_bool(resultado.es_pago_dividido),
         "Neto comercial informado": formato_pesos_argentino(resultado.neto_comercial_informado),
-        "Neto de pagos aprobados": formato_pesos_argentino(resultado.neto_pagos_aprobados),
-        "Diferencia": formato_pesos_argentino(resultado.diferencia_control),
+        "Neto aprobado de Mercado Pago del resultado": formato_pesos_argentino(resultado.neto_pagos_aprobados),
+        "Diferencia de control — operaciones comparables": formato_pesos_argentino(resultado.diferencia_control),
         "Impacto de pagos de envío": formato_pesos_argentino(resultado.impacto_pagos_envio),
         "Impacto de devoluciones": formato_pesos_argentino(resultado.impacto_devoluciones),
         "Impacto de reclamos/disputas": formato_pesos_argentino(resultado.impacto_reclamos_disputas),

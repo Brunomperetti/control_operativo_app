@@ -895,6 +895,33 @@ Un `PAYOUT` sin `id_orden` se clasifica como `MOVIMIENTO_DE_FONDOS` con motivo `
 
 Los demás movimientos sin `id_orden` se conservan individualmente como `MOVIMIENTO_SIN_OPERACION_COMERCIAL` con motivo `ORDEN_AUSENTE`, para evitar mezclar eventos diferentes solo porque no tienen orden.
 
-### 30.6 Límites contables actuales
+
+### 30.6 Cobertura temporal y alcance del resumen ejecutivo
+
+La interfaz debe mostrar antes del resumen ejecutivo la cobertura temporal de los archivos procesados, calculada con transformaciones puras sobre modelos normalizados y sin DataFrames ni lógica de Streamlit:
+
+- Fecha mínima y máxima de ventas de Mercado Libre, usando `fecha_hora_venta` local normalizada.
+- Fecha mínima y máxima de origen de movimientos de Mercado Pago, usando `fecha_origen_local` normalizada.
+- Fecha mínima y máxima de liquidación de Mercado Pago, usando `fecha_liquidacion_local` cuando exista.
+- Cantidad de movimientos de Mercado Pago sin fecha de liquidación.
+
+La cobertura comercial y la financiera pueden abarcar períodos diferentes. Si los períodos de origen de Mercado Libre y Mercado Pago no coinciden, la aplicación debe advertirlo de forma informativa, continuar la conciliación y no inventar reglas automáticas para recortar movimientos. Un movimiento financiero sin operación comercial asociada puede corresponder a un período diferente del archivo comercial y requiere análisis, no clasificación automática como pérdida o error.
+
+El resumen ejecutivo debe separar explícitamente los alcances:
+
+| Métrica | Alcance |
+|---|---|
+| Operaciones comparables | Resultados cuya `diferencia_control` no es `None`. |
+| Conciliadas exactas | Operaciones comparables con diferencia de control cero y estado `CONCILIADA`. |
+| Operaciones comparables con diferencia | Operaciones comparables con diferencia de control distinta de cero. |
+| Grupos financieros sin operación en el archivo comercial | Resultados con `cantidad_operaciones_comerciales == 0`, excluyendo `MOVIMIENTO_DE_FONDOS`. Incluye devoluciones y reclamos sin operación comercial aunque el estado final sea `DEVUELTA` o `EN_RECLAMO` por prioridad. |
+| Operaciones comerciales sin movimiento financiero | Resultados con operación comercial y cero movimientos financieros. |
+| Movimientos de fondos | Resultados `MOVIMIENTO_DE_FONDOS`, separados de pérdidas comerciales. |
+| Diferencia de control — operaciones comparables | Suma de `diferencia_control` solo del universo comparable. |
+| Neto aprobado de Mercado Pago sin operación comercial asociada | Suma de pagos aprobados únicamente de grupos financieros sin operación comercial. |
+
+La etiqueta genérica “sin contraparte” no debe usarse como total único porque mezcla fuentes faltantes distintas. La etiqueta “Neto de pagos aprobados” debe reemplazarse por textos que indiquen si corresponde a operaciones comparables o a Mercado Pago sin operación comercial asociada. La utilidad continúa siendo informada por Mercado Libre y no es resultado contable definitivo.
+
+### 30.7 Límites contables actuales
 
 El motor conserva `utilidad_neta_informada` como valor informado por Mercado Libre. No la recalcula, no calcula resultado operativo definitivo y no implementa todavía un resultado contable validado. Cualquier fórmula fiscal o contable definitiva queda pendiente de validación posterior.
