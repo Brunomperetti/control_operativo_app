@@ -1,0 +1,185 @@
+"""Interfaz Streamlit para conciliación Mercado Libre / Mercado Pago."""
+
+from decimal import Decimal, InvalidOperation
+from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import streamlit as st
+
+from kiki_control.adapters.mercado_libre import normalizar_mercado_libre
+from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
+from kiki_control.domain.enums import TipoFuente
+from kiki_control.ingestion.file_inspector import inspeccionar_archivo
+from kiki_control.presentation.reconciliation_view import clave_resultado, detalle_presentacion, filas_presentacion, filtrar_filas, resumen_kpis
+from kiki_control.reconciliation import reconciliar
+
+ZONA_DEFAULT = "America/Argentina/Cordoba"
+TOLERANCIA_DEFAULT = "0,01"
+
+
+def main() -> None:
+    st.set_page_config(page_title="Kiki Control Financiero", layout="wide")
+    _inicializar_estado()
+    st.title("Kiki Control Financiero")
+    st.subheader("Conciliación de ventas de Mercado Libre con movimientos de Mercado Pago")
+    st.info("Los archivos se procesan en memoria y no se guardan en la aplicación.")
+
+    st.header("Etapa 1 — Carga de archivos")
+    col_ml, col_mp = st.columns(2)
+    with col_ml:
+        ml = st.file_uploader("Ventas de Mercado Libre", type=["csv"], help="Archivo de ventas, costos y rentabilidad")
+        info_ml = _inspeccionar_upload("ml", ml, TipoFuente.MERCADO_LIBRE)
+    with col_mp:
+        mp = st.file_uploader("Movimientos de Mercado Pago", type=["xlsx"], help="Reporte financiero de liquidaciones y movimientos")
+        info_mp = _inspeccionar_upload("mp", mp, TipoFuente.MERCADO_PAGO)
+
+    st.header("Etapa 2 — Configuración")
+    c1, c2 = st.columns(2)
+    with c1:
+        zona = st.text_input("Zona horaria operativa", value=st.session_state["zona_horaria"])
+    with c2:
+        tolerancia_txt = st.text_input("Tolerancia monetaria", value=st.session_state["tolerancia_texto"], help="Diferencia máxima aceptada para clasificar una operación como diferencia menor.")
+    zona_valida, zona_error = _validar_zona(zona)
+    tolerancia, tolerancia_error = _parsear_tolerancia(tolerancia_txt)
+    st.session_state["zona_horaria"] = zona
+    st.session_state["tolerancia_texto"] = tolerancia_txt
+    if zona_error:
+        st.error(zona_error)
+    if tolerancia_error:
+        st.error(tolerancia_error)
+
+    st.header("Etapa 3 — Procesamiento")
+    listo = bool(info_ml and info_mp and info_ml["valido_fuente"] and info_mp["valido_fuente"] and zona_valida and tolerancia is not None)
+    if st.button("Procesar y conciliar", disabled=not listo):
+        try:
+            _procesar(info_ml, info_mp, zona, tolerancia)
+        except Exception:
+            st.error("No se pudo completar el procesamiento. Revisá que los archivos correspondan a los formatos esperados.")
+
+    if "reporte" in st.session_state:
+        _mostrar_resultados()
+
+
+def _inicializar_estado() -> None:
+    st.session_state.setdefault("zona_horaria", ZONA_DEFAULT)
+    st.session_state.setdefault("tolerancia_texto", TOLERANCIA_DEFAULT)
+
+
+def _inspeccionar_upload(clave: str, upload: Any, fuente_esperada: TipoFuente) -> dict[str, Any] | None:
+    if upload is None:
+        return None
+    contenido = upload.getvalue()
+    inspeccion = inspeccionar_archivo(upload.name, contenido)
+    hash_actual = inspeccion.metadatos.sha256
+    hash_key = f"hash_{clave}"
+    if st.session_state.get(hash_key) != hash_actual:
+        st.session_state[hash_key] = hash_actual
+        st.session_state.pop("reporte", None)
+        st.session_state.pop("normalizacion", None)
+    st.markdown(f"**Fuente detectada:** {inspeccion.fuente_detectada.value}")
+    st.write(f"Filas: {inspeccion.metadatos.cantidad_filas} · Columnas: {len(inspeccion.metadatos.columnas_encontradas)}")
+    st.write(f"Tamaño: {inspeccion.metadatos.tamaño_bytes} bytes · SHA-256: `{hash_actual[:12]}`")
+    if inspeccion.metadatos.nombre_hoja:
+        st.write(f"Hoja utilizada: {inspeccion.metadatos.nombre_hoja}")
+    st.write(f"Válido: {'Sí' if inspeccion.es_valido else 'No'}")
+    _mostrar_problemas("Errores estructurales", inspeccion.errores, st.error)
+    _mostrar_problemas("Advertencias estructurales", inspeccion.advertencias, st.warning)
+    valido_fuente = inspeccion.es_valido and inspeccion.fuente_detectada == fuente_esperada
+    if inspeccion.es_valido and inspeccion.fuente_detectada != fuente_esperada:
+        st.error("El archivo es válido, pero corresponde a otra fuente.")
+    return {"nombre": upload.name, "contenido": contenido, "inspeccion": inspeccion, "valido_fuente": valido_fuente}
+
+
+def _mostrar_problemas(titulo: str, problemas: tuple[Any, ...], render) -> None:
+    if not problemas:
+        return
+    resumen: dict[str, int] = {}
+    for p in problemas:
+        resumen[p.codigo] = resumen.get(p.codigo, 0) + 1
+    render(f"{titulo}: " + ", ".join(f"{k} ({v})" for k, v in resumen.items()))
+    with st.expander(f"Ver detalle de {titulo.lower()}"):
+        for p in problemas[:20]:
+            fila = f"Fila {p.fila}: " if p.fila else ""
+            st.write(f"{fila}{p.codigo} — {p.mensaje}")
+        if len(problemas) > 20:
+            st.write(f"… y {len(problemas) - 20} problemas más.")
+
+
+def _validar_zona(zona: str) -> tuple[bool, str | None]:
+    try:
+        ZoneInfo(zona)
+    except ZoneInfoNotFoundError:
+        return False, "La zona horaria configurada no existe."
+    return True, None
+
+
+def _parsear_tolerancia(texto: str) -> tuple[Decimal | None, str | None]:
+    try:
+        valor = Decimal(texto.strip().replace(".", "").replace(",", "."))
+    except (InvalidOperation, AttributeError):
+        return None, "La tolerancia debe ser un número decimal válido."
+    if valor < Decimal("0"):
+        return None, "La tolerancia no puede ser negativa."
+    return valor, None
+
+
+def _procesar(info_ml: dict[str, Any], info_mp: dict[str, Any], zona: str, tolerancia: Decimal) -> None:
+    with st.spinner("Normalizando y conciliando…"):
+        ml = normalizar_mercado_libre(info_ml["nombre"], info_ml["contenido"], zona)
+        mp = normalizar_mercado_pago(info_mp["nombre"], info_mp["contenido"], zona)
+        st.session_state["normalizacion"] = {"Mercado Libre": ml, "Mercado Pago": mp}
+        _mostrar_normalizacion("Mercado Libre", ml)
+        _mostrar_normalizacion("Mercado Pago", mp)
+        if not ml.operaciones:
+            st.error("No quedaron operaciones comerciales válidas para conciliar.")
+            return
+        if not mp.movimientos:
+            st.error("No quedaron movimientos financieros válidos para conciliar.")
+            return
+        st.session_state["reporte"] = reconciliar(ml.operaciones, mp.movimientos, tolerancia)
+        st.success("Conciliación finalizada.")
+
+
+def _mostrar_normalizacion(nombre: str, resultado: Any) -> None:
+    st.write(f"**{nombre}:** recibidas {resultado.cantidad_total_recibida}, normalizadas {resultado.cantidad_normalizada}, rechazadas {resultado.cantidad_rechazada}.")
+    _mostrar_problemas(f"Advertencias de normalización {nombre}", resultado.advertencias, st.warning)
+    if resultado.cantidad_rechazada:
+        st.warning(f"Procesamiento parcial en {nombre}: {resultado.cantidad_rechazada} filas excluidas de la conciliación.")
+        with st.expander(f"Filas rechazadas de {nombre}"):
+            for rechazada in resultado.filas_rechazadas[:20]:
+                mensajes = "; ".join(e.mensaje for e in rechazada.errores)
+                st.write(f"Fila {rechazada.numero_fila_origen}: {mensajes}")
+
+
+def _mostrar_resultados() -> None:
+    reporte = st.session_state["reporte"]
+    st.header("Resumen ejecutivo")
+    kpis = resumen_kpis(reporte)
+    for bloque in (list(kpis.items())[:5], list(kpis.items())[5:10], list(kpis.items())[10:]):
+        cols = st.columns(len(bloque))
+        for col, (nombre, valor) in zip(cols, bloque, strict=False):
+            col.metric(nombre, valor)
+
+    filas = filas_presentacion(reporte.resultados)
+    st.header("Resultados por operación")
+    estados = sorted({f.estado_codigo: f.estado for f in filas}.items(), key=lambda x: x[1])
+    c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
+    seleccion = c1.multiselect("Estados", options=[c for c, _ in estados], format_func=dict(estados).get)
+    busqueda = c2.text_input("Buscar ID de orden")
+    solo_revision = c3.checkbox("Solo requieren revisión")
+    solo_divididos = c4.checkbox("Solo pagos divididos")
+    visibles = filtrar_filas(filas, set(seleccion), busqueda, solo_revision, solo_divididos)
+    st.caption(f"Mostrando {len(visibles)} de {len(filas)} resultados.")
+    tabla = [{k: v for k, v in f.__dict__.items() if k not in {"clave", "estado_codigo", "diferencia_valor"}} for f in visibles]
+    st.dataframe(tabla, use_container_width=True, hide_index=True)
+
+    if visibles:
+        claves = [f.clave for f in visibles]
+        elegida = st.selectbox("Seleccionar operación para ver detalle", claves)
+        mapa = {(r.id_orden or clave_resultado(r)): r for r in reporte.resultados}
+        detalle = detalle_presentacion(mapa[elegida])
+        st.subheader("Detalle de operación")
+        st.table([{"Campo": k, "Valor": v} for k, v in detalle.items()])
+
+if __name__ == "__main__":
+    main()
