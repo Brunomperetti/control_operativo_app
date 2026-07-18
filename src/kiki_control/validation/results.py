@@ -14,3 +14,4 @@ class ProblemaValidacion:
     severidad: SeveridadValidacion
     columna: str | None = None
     detalle: str | None = None
+    fila: int | None = None
