@@ -1,94 +1,93 @@
 # Control Operativo App
 
-Kiki Control Financiero: aplicación profesional en Streamlit para conciliación financiera, análisis de rentabilidad y control operativo.
+Kiki Control Financiero: base técnica para una aplicación profesional de control financiero.
 
 > La documentación oficial y completa del proyecto se encuentra en [`DOCUMENTO_MAESTRO.md`](DOCUMENTO_MAESTRO.md).
 
 ---
 
-## Descripción
+## Alcance actual
 
-Este repositorio es la base de una plataforma escalable de control financiero. La versión 0.1 fue aprobada para implementación incremental y estará orientada a conciliar archivos exportados manualmente de Mercado Libre y Mercado Pago, pero el diseño del sistema contempla la incorporación futura de Tienda Nube, bancos, ventas del local, dashboards financieros, KPIs, reportes, base histórica y automatizaciones.
+La versión 0.1 ya comenzó su implementación con un primer módulo ejecutable de **recepción, identificación e inspección estructural** de archivos exportados de Mercado Libre y Mercado Pago.
 
-El proyecto no debe entenderse como una herramienta para cruzar dos archivos Excel, sino como una plataforma profesional para centralizar, validar, conciliar y analizar información financiera de múltiples fuentes.
+El código actual permite:
 
----
+- Recibir archivos como `bytes`, sin depender de Streamlit.
+- Leer CSV UTF-8, CSV UTF-8 con BOM y XLSX.
+- Seleccionar la primera hoja no vacía de un XLSX.
+- Calcular metadatos auditables: extensión, tamaño, SHA-256, hoja usada, cantidad de filas y columnas encontradas.
+- Detectar fuente por firma de columnas, no por nombre de archivo.
+- Validar columnas obligatorias iniciales para Mercado Libre y Mercado Pago.
+- Aceptar columnas adicionales como advertencias, sin bloquear la inspección.
 
-## Objetivo
-
-Construir una aplicación mantenible y extensible que permita:
-
-- Conciliar operaciones comerciales con movimientos financieros.
-- Identificar diferencias, pendientes, duplicados y movimientos no reconocidos.
-- Analizar rentabilidad por operación, canal, producto y período.
-- Generar reportes y dashboards para toma de decisiones.
-- Mantener trazabilidad entre datos originales, transformaciones y resultados.
+Todavía **no existe interfaz Streamlit**, conciliación financiera, normalización monetaria, normalización de fechas, persistencia ni dashboard.
 
 ---
 
-## Tecnologías previstas
+## Requisitos
 
-| Tecnología | Uso previsto |
-|---|---|
-| Python | Lenguaje principal de desarrollo. |
-| Streamlit | Interfaz web y dashboards internos. |
-| Pandas | Procesamiento tabular inicial. |
-| SQLite | Persistencia local posible en etapas tempranas. |
-| PostgreSQL | Persistencia robusta futura. |
-| Pytest | Pruebas automatizadas futuras. |
-
-Las dependencias todavía no deben instalarse en esta actualización documental. La siguiente etapa será implementar incrementalmente la versión 0.1.
+- Python >= 3.11
+- pandas
+- openpyxl
+- pytest para desarrollo y pruebas
 
 ---
 
-## Estructura prevista
+## Instalación en modo desarrollo
 
-La estructura técnica todavía no debe crearse. La organización conceptual futura será:
-
-```text
-control_operativo_app/
-├── app/                  # Aplicación Streamlit futura
-├── src/                  # Lógica de negocio y módulos principales
-├── tests/                # Pruebas automatizadas futuras
-├── docs/                 # Documentación complementaria futura
-├── DOCUMENTO_MAESTRO.md  # Especificación oficial
-├── README.md             # Guía resumida para desarrolladores
-└── AI_CONTEXT.md         # Contexto para asistentes de IA
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .[dev]
 ```
 
 ---
 
-## Cómo ejecutar la aplicación
+## Ejecutar tests
 
-La aplicación todavía no existe. En esta etapa no hay código Python, pantallas, dependencias ni comandos de ejecución.
-
-Cuando comience la implementación, esta sección deberá documentar:
-
-1. Requisitos del entorno.
-2. Instalación de dependencias.
-3. Variables de configuración.
-4. Comando para ejecutar Streamlit.
-5. Procedimiento de carga inicial de datos.
+```bash
+pytest
+```
 
 ---
 
-## Roadmap resumido
+## Uso básico del inspector
 
-| Versión | Objetivo |
-|---|---|
-| 0.0 | Documentación fundacional del proyecto. |
-| 0.1 | Implementación incremental aprobada para control cruzado Mercado Libre / Mercado Pago. |
-| 0.2 | Motor de conciliación robusto y trazable. |
-| 0.3 | Análisis de rentabilidad por operación. |
-| 0.4 | Persistencia histórica. |
-| 0.5 | Dashboard financiero y KPIs. |
-| 1.0 | Plataforma operativa estable. |
+```python
+from kiki_control.ingestion.file_inspector import inspeccionar_archivo
+
+resultado = inspeccionar_archivo("archivo.csv", contenido_en_bytes)
+```
+
+El inspector no guarda archivos en disco y no expone contenidos financieros en mensajes de error.
 
 ---
 
-## Documentación principal
+## Estructura técnica actual
 
-Antes de implementar cualquier funcionalidad, leer siempre:
+```text
+control_operativo_app/
+├── src/
+│   └── kiki_control/
+│       ├── adapters/
+│       │   └── contracts.py
+│       ├── domain/
+│       │   ├── enums.py
+│       │   └── models.py
+│       ├── ingestion/
+│       │   ├── file_inspector.py
+│       │   └── metadata.py
+│       └── validation/
+│           └── results.py
+├── tests/
+├── pyproject.toml
+├── DOCUMENTO_MAESTRO.md
+├── README.md
+└── AI_CONTEXT.md
+```
 
-- [`DOCUMENTO_MAESTRO.md`](DOCUMENTO_MAESTRO.md): especificación oficial del proyecto.
-- [`AI_CONTEXT.md`](AI_CONTEXT.md): contexto operativo para asistentes de IA y futuros colaboradores.
+---
+
+## Privacidad
+
+No deben incorporarse archivos reales de Mercado Libre, Mercado Pago, bancos u otras fuentes sensibles al repositorio. Los directorios `data/raw/`, `data/uploads/` y `private_data/` están excluidos para evitar cargas accidentales de datos privados.

@@ -590,30 +590,26 @@ Toda exportación debería incluir:
 
 ---
 
-## 19. Estructura de carpetas prevista
+## 19. Estructura de carpetas técnica
 
-La siguiente estructura es conceptual y no debe crearse hasta que comience la implementación.
+La implementación inicial de la versión 0.1 crea solamente los módulos necesarios para recepción, identificación e inspección estructural de archivos, sin interfaz Streamlit ni conciliación.
 
 ```text
 control_operativo_app/
-├── app/                         # Aplicación Streamlit futura
-│   ├── pages/                   # Páginas o secciones de interfaz
-│   └── components/              # Componentes reutilizables de UI
-├── src/                         # Código principal de negocio
-│   ├── ingestion/               # Ingesta de fuentes
-│   ├── adapters/                # Adaptadores por proveedor
-│   ├── normalization/           # Normalización de datos
-│   ├── validation/              # Validaciones de estructura y negocio
-│   ├── reconciliation/          # Motor de conciliación
-│   ├── analytics/               # Rentabilidad, KPIs y métricas
-│   ├── exports/                 # Generación de reportes
-│   └── persistence/             # Acceso a base de datos
-├── tests/                       # Pruebas automatizadas futuras
-├── docs/                        # Documentación complementaria futura
+├── src/
+│   └── kiki_control/
+│       ├── adapters/            # Contratos estructurales por fuente
+│       ├── domain/              # Enums y modelos de dominio sin DataFrames ni Streamlit
+│       ├── ingestion/           # Recepción, lectura y metadatos de archivos
+│       └── validation/          # Resultados y problemas de validación
+├── tests/                       # Pruebas automatizadas sintéticas
+├── pyproject.toml               # Configuración mínima del paquete Python
 ├── DOCUMENTO_MAESTRO.md         # Especificación oficial
 ├── README.md                    # Guía resumida para desarrolladores
 └── AI_CONTEXT.md                # Contexto operativo para asistentes de IA
 ```
+
+Las carpetas futuras de interfaz, normalización, conciliación, análisis, exportación y persistencia deberán crearse recién cuando exista una tarea aprobada para implementarlas.
 
 ---
 
