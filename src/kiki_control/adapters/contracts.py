@@ -59,6 +59,29 @@ COLUMNAS_OBLIGATORIAS_MERCADO_PAGO = frozenset(
 )
 
 CONTRATOS = (
-    ContratoColumnas(TipoFuente.MERCADO_LIBRE, COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE, frozenset()),
+    ContratoColumnas(
+        TipoFuente.MERCADO_LIBRE,
+        COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE,
+        frozenset(
+            {
+                "ID Carrito",
+                "Precio unitario ($)",
+                "Costo Unitario (Con IVA) ($)",
+                "Costo de envío (Bruto) ($)",
+                "Costo de envío prorrateado ($)",
+                "Bonificación envío ($)",
+                "Impuestos y comisiones ($)",
+                "Precio de equilibrio ($)",
+                "IVA",
+                "Rentabilidad s/ precio venta",
+                "Rentabilidad s/ costo producto",
+                "Rentabilidad s/ suma costos",
+                "% Comisión MeLi",
+                "% Costo de envío",
+                "Tipo de envío",
+                "Provincia",
+            }
+        ),
+    ),
     ContratoColumnas(TipoFuente.MERCADO_PAGO, COLUMNAS_OBLIGATORIAS_MERCADO_PAGO, frozenset()),
 )
