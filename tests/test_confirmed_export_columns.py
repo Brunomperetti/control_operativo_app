@@ -1,5 +1,5 @@
 from csv import writer
-from dataclasses import fields
+from dataclasses import asdict, fields
 from decimal import Decimal
 from io import BytesIO, StringIO
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -10,6 +10,9 @@ from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
 from kiki_control.domain.enums import TipoFuente
 from kiki_control.domain.financial_movement import MovimientoFinanciero
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
+from kiki_control.presentation.reconciliation_view import detalle_presentacion, filas_presentacion
+from kiki_control.reconciliation import reconciliar
+from tests.test_reconciliation_engine import op as op_conciliacion
 
 ML_CONFIRMADAS = [
     "Fecha de venta", "Hora", "Producto", "Sku", "ID Order", "ID Carrito", "Cantidad",
@@ -21,18 +24,63 @@ ML_CONFIRMADAS = [
 ]
 
 MP_CONFIRMADAS = [
-    "ID DE OPERACIÓN EN MERCADO PAGO", "TIPO DE OPERACIÓN", "ID DE LA ORDEN", "FECHA DE ORIGEN", "FECHA DE APROBACIÓN",
-    "VALOR DE LA COMPRA", "MONEDA", "COMISIONES + IVA", "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO",
-    "COMISIÓN DE MERCADO LIBRE + IVA", "COMISIÓN POR OFRECER CUOTAS SIN INTERÉS", "COSTO DE ENVÍO",
-    "IMPUESTOS COBRADOS POR RETENCIONES DE IIBB", "CUPÓN DE DESCUENTO", "CANAL DE VENTA", "FECHA DE LIQUIDACIÓN DEL DINERO",
-    "CÓDIGO DE PRODUCTO SKU", "NÚMERO DE IDENTIFICACIÓN", "ID DEL ENVÍO", "ID DEL PAQUETE", "ID DE INTENTO DE OPERACIÓN",
-    "PLATAFORMA DE COBRO", "TIPO DE MEDIO DE PAGO", "MEDIO DE PAGO", "MODO DE ENVÍO", "MONTO RECIBIDO POR COMPRAS POR SPLIT",
-    "MONTO NETO DE LA OPERACIÓN", "MONEDA DE LA LIQUIDACIÓN", "IMPUESTOS DESAGREGADOS", "DATOS EXTRA", "OPERATION_TAGS",
-    "NOMBRE DEL PAGADOR", "APELLIDO DEL PAGADOR", "EMAIL DEL PAGADOR", "TELÉFONO DEL PAGADOR", "TIPO DE DOCUMENTO DEL PAGADOR",
-    "NÚMERO DE DOCUMENTO DEL PAGADOR", "NÚMERO DE TARJETA", "PRIMEROS 6 DÍGITOS DE LA TARJETA", "ÚLTIMOS 4 DÍGITOS DE LA TARJETA",
-    "NOMBRE DEL TITULAR DE LA TARJETA", "TIPO DE DOCUMENTO DEL TITULAR DE LA TARJETA", "NÚMERO DE DOCUMENTO DEL TITULAR DE LA TARJETA",
-    "BANCO EMISOR", "CUOTAS", "ESTADO DE LA OPERACIÓN", "MOTIVO DE RECHAZO", "ID DEL PAGADOR", "ID DEL COBRADOR",
+    "NÚMERO DE IDENTIFICACIÓN",
+    "ID DE OPERACIÓN EN MERCADO PAGO",
+    "CÓDIGO DE LA CUENTA DEL VENDEDOR",
+    "TIPO DE MEDIO DE PAGO",
+    "MEDIO DE PAGO",
+    "PAÍS DE ORIGEN DE LA CUENTA DE MERCADO PAGO",
+    "TIPO DE OPERACIÓN",
+    "VALOR DE LA COMPRA",
+    "MONEDA",
+    "MONTO RECIBIDO POR COMPRAS POR SPLIT",
+    "FECHA DE ORIGEN",
+    "COMISIONES + IVA",
+    "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO",
+    "MONEDA DE LA LIQUIDACIÓN",
+    "FECHA DE APROBACIÓN",
+    "MONTO NETO DE LA OPERACIÓN",
+    "CUPÓN DE DESCUENTO",
+    "DATOS EXTRA",
+    "COMISIÓN DE MERCADO LIBRE + IVA",
+    "COMISIÓN POR OFRECER CUOTAS SIN INTERÉS",
+    "COSTO DE ENVÍO",
+    "IMPUESTOS COBRADOS POR RETENCIONES DE IIBB",
+    "CUOTAS",
+    "DETALLE DE IMPUESTOS",
+    "ID DE CAJA",
+    "ID DE LOCAL",
+    "NOMBRE DE LOCAL",
+    "ID DE CAJA DEFINIDO POR EL USUARIO",
+    "NOMBRE DE CAJA",
+    "ID DE LOCAL DEFINIDO POR EL USUARIO",
+    "ID DE LA ORDEN",
+    "ID DEL ENVÍO",
+    "MODO DE ENVÍO",
+    "ID DEL PAQUETE",
+    "IMPUESTOS DESAGREGADOS",
+    "NÚMERO DE SERIE DEL LECTOR (S/N)",
+    "BILLETERA VIRTUAL",
+    "BANCO DE ORIGEN",
+    "NÚMERO INICIAL DE TARJETA",
+    "OPERATION_TAGS",
+    "TIPO DE IDENTIFICACIÓN DEL PAGADOR",
+    "NÚMERO DE IDENTIFICACIÓN DEL PAGADOR",
+    "PAGADOR",
+    "CANAL DE VENTA",
+    "PLATAFORMA DE COBRO",
+    "FECHA DE LIQUIDACIÓN DEL DINERO",
+    "CÓDIGO DE PRODUCTO SKU",
+    "DETALLE DE LA VENTA",
+    "ID DE INTENTO DE OPERACIÓN",
 ]
+
+SENTINELAS_PII = {
+    "PAGADOR": "SENTINELA_PAGADOR_SINTETICO",
+    "TIPO DE IDENTIFICACIÓN DEL PAGADOR": "SENTINELA_TIPO_DOC_SINTETICO",
+    "NÚMERO DE IDENTIFICACIÓN DEL PAGADOR": "SENTINELA_NUM_DOC_SINTETICO",
+    "NÚMERO INICIAL DE TARJETA": "SENTINELA_TARJETA_SINTETICA",
+}
 
 
 def _csv_ml() -> bytes:
@@ -51,30 +99,48 @@ def _csv_ml() -> bytes:
     return out.getvalue().encode("utf-8")
 
 
-def _xlsx_mp() -> bytes:
+def _valores_mp(**overrides: str) -> dict[str, str]:
     valores = {c: "" for c in MP_CONFIRMADAS}
     valores.update({
-        "ID DE OPERACIÓN EN MERCADO PAGO": "MP-SINT-001", "TIPO DE OPERACIÓN": "Pago aprobado", "ID DE LA ORDEN": "ORDER-SINT-001",
-        "FECHA DE ORIGEN": "2026-07-18T10:15:00.000-04:00", "FECHA DE APROBACIÓN": "2026-07-18T10:16:00.000-04:00",
-        "VALOR DE LA COMPRA": "1000.00", "MONEDA": "ARS", "COMISIONES + IVA": "-110.00",
-        "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO": "820.00", "COMISIÓN DE MERCADO LIBRE + IVA": "-80.00",
-        "COMISIÓN POR OFRECER CUOTAS SIN INTERÉS": "-30.00", "COSTO DE ENVÍO": "-70.00", "IMPUESTOS COBRADOS POR RETENCIONES DE IIBB": "0",
-        "CUPÓN DE DESCUENTO": "0", "CANAL DE VENTA": "Mercado Libre", "FECHA DE LIQUIDACIÓN DEL DINERO": "2026-07-19T10:00:00.000-04:00",
-        "CÓDIGO DE PRODUCTO SKU": "SKU-SINT", "NÚMERO DE IDENTIFICACIÓN": "NI-SINT", "ID DEL ENVÍO": "SHIP-SINT-001", "ID DEL PAQUETE": "PACK-SINT-001",
-        "ID DE INTENTO DE OPERACIÓN": "TRY-SINT-001", "MONTO RECIBIDO POR COMPRAS POR SPLIT": "123.45", "MONTO NETO DE LA OPERACIÓN": "820.00",
-        "MONEDA DE LA LIQUIDACIÓN": "ARS", "IMPUESTOS DESAGREGADOS": "[]", "DATOS EXTRA": "{}", "OPERATION_TAGS": "[]",
-        "NOMBRE DEL PAGADOR": "Persona Sintética", "NÚMERO DE DOCUMENTO DEL PAGADOR": "DOC-SINT", "NÚMERO DE TARJETA": "CARD-SINT",
+        "NÚMERO DE IDENTIFICACIÓN": "NI-SINT", "ID DE OPERACIÓN EN MERCADO PAGO": "MP-SINT-001",
+        "CÓDIGO DE LA CUENTA DEL VENDEDOR": "SELLER-SINT", "TIPO DE MEDIO DE PAGO": "account_money",
+        "MEDIO DE PAGO": "Dinero sintético", "PAÍS DE ORIGEN DE LA CUENTA DE MERCADO PAGO": "AR",
+        "TIPO DE OPERACIÓN": "Pago aprobado", "VALOR DE LA COMPRA": "1000.00", "MONEDA": "ARS",
+        "MONTO RECIBIDO POR COMPRAS POR SPLIT": "123.45", "FECHA DE ORIGEN": "2026-07-18T10:15:00.000-04:00",
+        "COMISIONES + IVA": "-110.00", "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO": "820.00",
+        "MONEDA DE LA LIQUIDACIÓN": "ARS", "FECHA DE APROBACIÓN": "2026-07-18T10:16:00.000-04:00",
+        "MONTO NETO DE LA OPERACIÓN": "820.00", "CUPÓN DE DESCUENTO": "0", "DATOS EXTRA": "{}",
+        "COMISIÓN DE MERCADO LIBRE + IVA": "-80.00", "COMISIÓN POR OFRECER CUOTAS SIN INTERÉS": "-30.00",
+        "COSTO DE ENVÍO": "-70.00", "IMPUESTOS COBRADOS POR RETENCIONES DE IIBB": "0", "CUOTAS": "1",
+        "DETALLE DE IMPUESTOS": "Detalle sintético", "ID DE CAJA": "CAJA-SINT", "ID DE LOCAL": "LOCAL-SINT",
+        "NOMBRE DE LOCAL": "Local sintético", "ID DE CAJA DEFINIDO POR EL USUARIO": "CAJA-USR-SINT",
+        "NOMBRE DE CAJA": "Caja sintética", "ID DE LOCAL DEFINIDO POR EL USUARIO": "LOCAL-USR-SINT",
+        "ID DE LA ORDEN": "ORDER-SINT-001", "ID DEL ENVÍO": "SHIP-SINT-001", "MODO DE ENVÍO": "me2",
+        "ID DEL PAQUETE": "PACK-SINT-001", "IMPUESTOS DESAGREGADOS": "[]", "NÚMERO DE SERIE DEL LECTOR (S/N)": "LECTOR-SINT",
+        "BILLETERA VIRTUAL": "Billetera sintética", "BANCO DE ORIGEN": "Banco sintético", "OPERATION_TAGS": "[]",
+        "CANAL DE VENTA": "Mercado Libre", "PLATAFORMA DE COBRO": "checkout", "FECHA DE LIQUIDACIÓN DEL DINERO": "2026-07-19T10:00:00.000-04:00",
+        "CÓDIGO DE PRODUCTO SKU": "SKU-SINT", "DETALLE DE LA VENTA": "Venta sintética", "ID DE INTENTO DE OPERACIÓN": "TRY-SINT-001",
+        **SENTINELAS_PII,
     })
+    valores.update(overrides)
+    return valores
+
+
+def _xlsx(columnas: list[str], valores: dict[str, str]) -> bytes:
     salida = BytesIO()
     with ZipFile(salida, "w", ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", "")
         z.writestr("xl/workbook.xml", '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Movimientos" sheetId="1" r:id="rId1"/></sheets></workbook>')
         z.writestr("xl/_rels/workbook.xml.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>')
         rows = []
-        for r, fila in enumerate([MP_CONFIRMADAS, [valores[c] for c in MP_CONFIRMADAS]], 1):
+        for r, fila in enumerate([columnas, [valores.get(c, "") for c in columnas]], 1):
             rows.append(f'<row r="{r}">' + "".join(f'<c t="inlineStr"><is><t>{escape(str(v))}</t></is></c>' for v in fila) + "</row>")
         z.writestr("xl/worksheets/sheet1.xml", '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + "".join(rows) + "</sheetData></worksheet>")
     return salida.getvalue()
+
+
+def _xlsx_mp(**overrides: str) -> bytes:
+    return _xlsx(MP_CONFIRMADAS, _valores_mp(**overrides))
 
 
 def test_mercado_libre_29_columnas_confirmadas_sin_adicionales_y_alias_normalizados():
@@ -103,11 +169,71 @@ def test_mercado_pago_49_columnas_confirmadas_sin_adicionales_alias_y_sin_pii_pu
     resultado = normalizar_mercado_pago("movimientos.xlsx", data)
     mov = resultado.movimientos[0]
     nombres_publicos = {f.name for f in fields(MovimientoFinanciero)}
+    texto_publico = f"{asdict(mov)} {mov!r}"
+    reporte = reconciliar([op_conciliacion(id_orden="ORDER-SINT-001", neto="820")], [mov])
+    presentacion = f"{filas_presentacion(reporte.resultados)} {detalle_presentacion(reporte.resultados[0])}"
+
     assert inspeccion.fuente_detectada == TipoFuente.MERCADO_PAGO
+    assert inspeccion.metadatos.columnas_encontradas == tuple(MP_CONFIRMADAS)
     assert not [a for a in inspeccion.advertencias if a.codigo == "COLUMNAS_ADICIONALES"]
+    assert resultado.cantidad_normalizada == 1
     assert resultado.cantidad_rechazada == 0
     assert mov.monto_recibido_split == Decimal("123.45")
     assert mov.moneda_liquidacion == "ARS"
     assert mov.id_envio == "SHIP-SINT-001"
     assert mov.id_paquete == "PACK-SINT-001"
-    assert not {"nombre_pagador", "apellido_pagador", "email_pagador", "numero_documento_pagador", "numero_tarjeta", "ultimos_4_digitos_tarjeta"} & nombres_publicos
+    assert not {"pagador", "tipo_identificacion_pagador", "numero_identificacion_pagador", "numero_inicial_tarjeta"} & nombres_publicos
+    assert all(sentinel not in texto_publico for sentinel in SENTINELAS_PII.values())
+    assert all(sentinel not in presentacion for sentinel in SENTINELAS_PII.values())
+
+
+def test_mercado_pago_encabezados_canonicos_anteriores_siguen_funcionando():
+    columnas = [
+        "MONTO RECIBIDO POR SPLIT" if c == "MONTO RECIBIDO POR COMPRAS POR SPLIT" else
+        "MONEDA DE LIQUIDACIÓN" if c == "MONEDA DE LA LIQUIDACIÓN" else
+        "ID DE ENVÍO" if c == "ID DEL ENVÍO" else
+        "ID DE PAQUETE" if c == "ID DEL PAQUETE" else c
+        for c in MP_CONFIRMADAS
+    ]
+    valores = _valores_mp(
+        **{
+            "MONTO RECIBIDO POR SPLIT": "234.56",
+            "MONEDA DE LIQUIDACIÓN": "USD",
+            "ID DE ENVÍO": "SHIP-CANONICO",
+            "ID DE PAQUETE": "PACK-CANONICO",
+        }
+    )
+    data = _xlsx(columnas, valores)
+    inspeccion = inspeccionar_archivo("movimientos.xlsx", data)
+    resultado = normalizar_mercado_pago("movimientos.xlsx", data)
+    mov = resultado.movimientos[0]
+    assert not [a for a in inspeccion.advertencias if a.codigo == "COLUMNAS_ADICIONALES"]
+    assert resultado.cantidad_rechazada == 0
+    assert mov.monto_recibido_split == Decimal("234.56")
+    assert mov.moneda_liquidacion == "USD"
+    assert mov.id_envio == "SHIP-CANONICO"
+    assert mov.id_paquete == "PACK-CANONICO"
+
+
+def test_alias_y_nombre_canonico_simultaneos_priorizan_valor_canonico():
+    columnas = [*MP_CONFIRMADAS, "MONTO RECIBIDO POR SPLIT", "MONEDA DE LIQUIDACIÓN", "ID DE ENVÍO", "ID DE PAQUETE"]
+    valores = _valores_mp(
+        **{
+            "MONTO RECIBIDO POR COMPRAS POR SPLIT": "111.11",
+            "MONTO RECIBIDO POR SPLIT": "222.22",
+            "MONEDA DE LA LIQUIDACIÓN": "ARS",
+            "MONEDA DE LIQUIDACIÓN": "USD",
+            "ID DEL ENVÍO": "SHIP-ALIAS",
+            "ID DE ENVÍO": "SHIP-CANONICO",
+            "ID DEL PAQUETE": "PACK-ALIAS",
+            "ID DE PAQUETE": "PACK-CANONICO",
+        }
+    )
+    data = _xlsx(columnas, valores)
+    resultado = normalizar_mercado_pago("movimientos.xlsx", data)
+    mov = resultado.movimientos[0]
+    assert resultado.cantidad_rechazada == 0
+    assert mov.monto_recibido_split == Decimal("222.22")
+    assert mov.moneda_liquidacion == "USD"
+    assert mov.id_envio == "SHIP-CANONICO"
+    assert mov.id_paquete == "PACK-CANONICO"
