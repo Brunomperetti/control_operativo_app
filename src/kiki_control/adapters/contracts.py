@@ -83,5 +83,26 @@ CONTRATOS = (
             }
         ),
     ),
-    ContratoColumnas(TipoFuente.MERCADO_PAGO, COLUMNAS_OBLIGATORIAS_MERCADO_PAGO, frozenset()),
+    ContratoColumnas(
+        TipoFuente.MERCADO_PAGO,
+        COLUMNAS_OBLIGATORIAS_MERCADO_PAGO,
+        frozenset(
+            {
+                "NÚMERO DE IDENTIFICACIÓN",
+                "ID DE ENVÍO",
+                "ID DE PAQUETE",
+                "ID DE INTENTO DE OPERACIÓN",
+                "PLATAFORMA DE COBRO",
+                "TIPO DE MEDIO DE PAGO",
+                "MEDIO DE PAGO",
+                "MODO DE ENVÍO",
+                "MONTO RECIBIDO POR SPLIT",
+                "MONTO NETO DE LA OPERACIÓN",
+                "MONEDA DE LIQUIDACIÓN",
+                "IMPUESTOS DESAGREGADOS",
+                "DATOS EXTRA",
+                "OPERATION_TAGS",
+            }
+        ),
+    ),
 )
