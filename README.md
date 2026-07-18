@@ -33,6 +33,10 @@ source .venv/bin/activate
 python -m pip install -e .[dev]
 ```
 
+## Nota para Streamlit Community Cloud
+
+`requirements.txt` existe exclusivamente como entrypoint de instalación para Streamlit Community Cloud. `pyproject.toml` continúa siendo la fuente oficial de metadatos y dependencias del paquete.
+
 ## Ejecutar tests
 
 ```bash
