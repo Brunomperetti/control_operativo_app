@@ -5,6 +5,7 @@ from io import BytesIO, TextIOWrapper
 from zipfile import ZipFile
 from xml.etree import ElementTree as ET
 
+from kiki_control.adapters.column_aliases import canonizar_columnas
 from kiki_control.adapters.contracts import CONTRATOS, ContratoColumnas
 from kiki_control.domain.enums import SeveridadValidacion, TipoFuente
 from kiki_control.domain.models import MetadatosArchivo, ResultadoInspeccion
@@ -36,8 +37,9 @@ def inspeccionar_archivo(nombre_archivo: str, contenido: bytes) -> ResultadoInsp
         advertencias.append(_advertencia("VARIAS_HOJAS_CON_DATOS", "El archivo XLSX contiene más de una hoja con información; se inspeccionó la primera hoja no vacía."))
 
     fuente, contrato = _detectar_fuente(columnas)
-    errores.extend(_validar_obligatorias(columnas, contrato))
-    advertencias.extend(_advertir_adicionales(columnas, contrato))
+    columnas_validadas = canonizar_columnas(columnas, fuente)
+    errores.extend(_validar_obligatorias(columnas_validadas, contrato))
+    advertencias.extend(_advertir_adicionales(columnas_validadas, contrato))
 
     metadatos = MetadatosArchivo(nombre_archivo, extension, len(contenido), hash_archivo, fecha_actual_utc(), fuente, nombre_hoja, filas, columnas)
     return ResultadoInspeccion(metadatos, fuente, not errores and fuente != TipoFuente.DESCONOCIDA, tuple(errores), tuple(advertencias))
@@ -102,8 +104,7 @@ def _valor_celda(celda: ET.Element, compartidos: list[str]) -> str:
 
 
 def _detectar_fuente(columnas: tuple[str, ...]) -> tuple[TipoFuente, ContratoColumnas | None]:
-    columnas_set = set(columnas)
-    coincidencias, contrato = max(((len(columnas_set & contrato.obligatorias), contrato) for contrato in CONTRATOS), key=lambda item: item[0])
+    coincidencias, contrato = max(((len(set(canonizar_columnas(columnas, contrato.tipo_fuente)) & contrato.obligatorias), contrato) for contrato in CONTRATOS), key=lambda item: item[0])
     if coincidencias == 0:
         return TipoFuente.DESCONOCIDA, None
     return contrato.tipo_fuente, contrato

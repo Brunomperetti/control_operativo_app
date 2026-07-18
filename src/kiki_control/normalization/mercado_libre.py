@@ -10,6 +10,7 @@ from io import StringIO
 from re import search
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from kiki_control.adapters.column_aliases import canonizar_fila
 from kiki_control.domain.commercial_operation import OperacionComercial
 from kiki_control.domain.enums import SeveridadValidacion, TipoFuente
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
@@ -64,7 +65,8 @@ def normalizar_mercado_libre(nombre_archivo: str, contenido: bytes, zona_horaria
     errores_globales: list[ProblemaValidacion] = []
     advertencias = list(inspeccion.advertencias)
     for indice, fila in enumerate(filas, start=2):
-        operacion, errores, avisos = _normalizar_fila(fila, indice, inspeccion.metadatos.sha256, zona)
+        fila_canonica = canonizar_fila(fila, TipoFuente.MERCADO_LIBRE)
+        operacion, errores, avisos = _normalizar_fila(fila_canonica, indice, inspeccion.metadatos.sha256, zona)
         advertencias.extend(avisos)
         if errores:
             rechazadas.append(FilaRechazada(indice, dict(fila), tuple(errores)))
