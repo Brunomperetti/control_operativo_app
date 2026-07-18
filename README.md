@@ -12,7 +12,7 @@ La versión actual permite ejecutar el flujo inicial de conciliación en memoria
 - Detección de fuente por firma de columnas, no por nombre de archivo.
 - Normalización a modelos internos inmutables.
 - Conciliación por `ID Order` con el motor `ML_MP_ID_ORDER_NETO_V1`.
-- Interfaz Streamlit para carga, validación, configuración, procesamiento, resumen ejecutivo, filtros y detalle por operación.
+- Interfaz Streamlit para carga, validación, configuración, procesamiento, resumen ejecutivo, filtros, detalle por operación y ciclo seguro de sesión.
 - Pruebas unitarias e integrales sintéticas, sin datos reales.
 
 No existe persistencia, historial, login, exportación, API, cálculo contable definitivo ni dashboard avanzado.
@@ -59,6 +59,9 @@ streamlit run app.py
 3. La app inspecciona ambos archivos y muestra metadatos seguros: fuente detectada, filas, columnas, tamaño, hash truncado, hoja usada y problemas estructurales.
 4. Configurar la zona horaria operativa y la tolerancia monetaria.
 5. Presionar **Procesar y conciliar** cuando ambos archivos sean válidos.
+   - La aplicación firma el procesamiento con los hashes SHA-256 de ambos archivos, la zona horaria y la tolerancia monetaria normalizada como `Decimal`.
+   - Si se elimina o reemplaza cualquiera de los archivos, o cambia la zona horaria o la tolerancia, se invalidan de inmediato normalizaciones, cobertura, reporte, filtros, detalle y firma anterior.
+   - Nunca se muestra un reporte cuya firma no coincida con los archivos y la configuración actuales.
 6. La app normaliza ambas fuentes, informa filas recibidas, normalizadas y rechazadas, y permite conciliación parcial si quedan registros válidos.
 7. El motor de conciliación produce el reporte por operación.
 8. La pantalla muestra la cobertura temporal de ambos archivos, resumen ejecutivo, tabla filtrable y detalle de cada resultado.
@@ -84,6 +87,12 @@ Los archivos se reciben como bytes y se procesan únicamente en memoria durante 
 No deben incorporarse archivos reales de Mercado Libre, Mercado Pago, bancos u otras fuentes sensibles al repositorio. Los directorios `data/raw/`, `data/uploads/` y `private_data/` están excluidos para evitar cargas accidentales de datos privados.
 
 La tabla y el detalle de interfaz evitan datos personales, documentos, tarjetas, JSON original y contenido crudo de filas financieras.
+
+### Limpieza de sesión
+
+La interfaz incluye el botón **Limpiar archivos y resultados**. Ese botón elimina del estado de sesión mantenido por la aplicación los archivos cargados, hashes, normalizaciones, cobertura temporal, reporte de conciliación, firma de procesamiento, filtros y selección de detalle.
+
+Los archivos se transmiten al servidor privado de la aplicación para procesarse. La aplicación no los persiste en disco ni base de datos. Los datos normalizados y resultados permanecen únicamente en memoria de sesión, y la limpieza borra ese estado de aplicación para la sesión actual sin prometer controles de infraestructura ajenos a la app.
 
 ## Utilidad informada
 

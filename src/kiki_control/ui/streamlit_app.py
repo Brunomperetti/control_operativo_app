@@ -12,6 +12,13 @@ from kiki_control.domain.enums import TipoFuente
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
 from kiki_control.presentation.reconciliation_view import clave_resultado, cobertura_archivos, detalle_presentacion, filas_presentacion, filtrar_filas, resumen_kpis
 from kiki_control.reconciliation import reconciliar
+from kiki_control.ui.session_cycle import (
+    construir_firma_procesamiento,
+    detectar_cambio,
+    invalidar_resultados_conocidos,
+    limpiar_claves_conocidas,
+    tolerancia_canonica,
+)
 
 ZONA_DEFAULT = "America/Argentina/Cordoba"
 TOLERANCIA_DEFAULT = "0,01"
@@ -22,15 +29,21 @@ def main() -> None:
     _inicializar_estado()
     st.title("Kiki Control Financiero")
     st.subheader("Conciliación de ventas de Mercado Libre con movimientos de Mercado Pago")
-    st.info("Los archivos se procesan en memoria y no se guardan en la aplicación.")
+    st.info(
+        "Los archivos se transmiten al servidor privado de la aplicación para procesarse. "
+        "La aplicación no los persiste en disco ni base de datos. Los datos normalizados "
+        "y resultados permanecen únicamente en memoria de sesión. El botón de limpieza "
+        "elimina el estado mantenido por la aplicación para esta sesión."
+    )
+    st.button("Limpiar archivos y resultados", type="secondary", on_click=_limpiar_sesion_streamlit)
 
     st.header("Etapa 1 — Carga de archivos")
     col_ml, col_mp = st.columns(2)
     with col_ml:
-        ml = st.file_uploader("Ventas de Mercado Libre", type=["csv"], help="Archivo de ventas, costos y rentabilidad")
+        ml = st.file_uploader("Ventas de Mercado Libre", type=["csv"], help="Archivo de ventas, costos y rentabilidad", key="archivo_ml")
         info_ml = _inspeccionar_upload("ml", ml, TipoFuente.MERCADO_LIBRE)
     with col_mp:
-        mp = st.file_uploader("Movimientos de Mercado Pago", type=["xlsx"], help="Reporte financiero de liquidaciones y movimientos")
+        mp = st.file_uploader("Movimientos de Mercado Pago", type=["xlsx"], help="Reporte financiero de liquidaciones y movimientos", key="archivo_mp")
         info_mp = _inspeccionar_upload("mp", mp, TipoFuente.MERCADO_PAGO)
 
     st.header("Etapa 2 — Configuración")
@@ -41,8 +54,14 @@ def main() -> None:
         tolerancia_txt = st.text_input("Tolerancia monetaria", value=st.session_state["tolerancia_texto"], help="Diferencia máxima aceptada para clasificar una operación como diferencia menor.")
     zona_valida, zona_error = _validar_zona(zona)
     tolerancia, tolerancia_error = _parsear_tolerancia(tolerancia_txt)
+    zona_anterior = st.session_state.get("zona_horaria")
+    tolerancia_anterior = st.session_state.get("tolerancia_canonica")
+    tolerancia_actual = tolerancia_canonica(tolerancia) if tolerancia is not None else None
+    if detectar_cambio(zona_anterior, zona) or detectar_cambio(tolerancia_anterior, tolerancia_actual):
+        invalidar_resultados_conocidos(st.session_state)
     st.session_state["zona_horaria"] = zona
     st.session_state["tolerancia_texto"] = tolerancia_txt
+    st.session_state["tolerancia_canonica"] = tolerancia_actual
     if zona_error:
         st.error(zona_error)
     if tolerancia_error:
@@ -56,8 +75,17 @@ def main() -> None:
         except Exception:
             st.error("No se pudo completar el procesamiento. Revisá que los archivos correspondan a los formatos esperados.")
 
-    if "reporte" in st.session_state:
+    firma_actual = _firma_actual(tolerancia, zona)
+    if firma_actual is not None:
+        st.session_state["firma_actual"] = firma_actual
+    if "reporte" in st.session_state and st.session_state.get("firma_procesamiento") == firma_actual:
         _mostrar_resultados()
+    elif "reporte" in st.session_state:
+        invalidar_resultados_conocidos(st.session_state)
+
+
+def _limpiar_sesion_streamlit() -> None:
+    limpiar_claves_conocidas(st.session_state)
 
 
 def _inicializar_estado() -> None:
@@ -66,17 +94,18 @@ def _inicializar_estado() -> None:
 
 
 def _inspeccionar_upload(clave: str, upload: Any, fuente_esperada: TipoFuente) -> dict[str, Any] | None:
+    hash_key = f"hash_{clave}"
     if upload is None:
+        if st.session_state.get(hash_key) is not None:
+            st.session_state.pop(hash_key, None)
+            invalidar_resultados_conocidos(st.session_state)
         return None
     contenido = upload.getvalue()
     inspeccion = inspeccionar_archivo(upload.name, contenido)
     hash_actual = inspeccion.metadatos.sha256
-    hash_key = f"hash_{clave}"
-    if st.session_state.get(hash_key) != hash_actual:
+    if detectar_cambio(st.session_state.get(hash_key), hash_actual):
         st.session_state[hash_key] = hash_actual
-        st.session_state.pop("reporte", None)
-        st.session_state.pop("normalizacion", None)
-        st.session_state.pop("cobertura", None)
+        invalidar_resultados_conocidos(st.session_state)
     st.markdown(f"**Fuente detectada:** {inspeccion.fuente_detectada.value}")
     st.write(f"Filas: {inspeccion.metadatos.cantidad_filas} · Columnas: {len(inspeccion.metadatos.columnas_encontradas)}")
     st.write(f"Tamaño: {inspeccion.metadatos.tamaño_bytes} bytes · SHA-256: `{hash_actual[:12]}`")
@@ -124,6 +153,14 @@ def _parsear_tolerancia(texto: str) -> tuple[Decimal | None, str | None]:
     return valor, None
 
 
+def _firma_actual(tolerancia: Decimal | None, zona: str) -> str | None:
+    hash_ml = st.session_state.get("hash_ml")
+    hash_mp = st.session_state.get("hash_mp")
+    if not hash_ml or not hash_mp or tolerancia is None:
+        return None
+    return construir_firma_procesamiento(hash_ml, hash_mp, zona, tolerancia)
+
+
 def _procesar(info_ml: dict[str, Any], info_mp: dict[str, Any], zona: str, tolerancia: Decimal) -> None:
     with st.spinner("Normalizando y conciliando…"):
         ml = normalizar_mercado_libre(info_ml["nombre"], info_ml["contenido"], zona)
@@ -137,8 +174,10 @@ def _procesar(info_ml: dict[str, Any], info_mp: dict[str, Any], zona: str, toler
         if not mp.movimientos:
             st.error("No quedaron movimientos financieros válidos para conciliar.")
             return
+        firma = construir_firma_procesamiento(st.session_state["hash_ml"], st.session_state["hash_mp"], zona, tolerancia)
         st.session_state["cobertura"] = cobertura_archivos(ml.operaciones, mp.movimientos)
         st.session_state["reporte"] = reconciliar(ml.operaciones, mp.movimientos, tolerancia)
+        st.session_state["firma_procesamiento"] = firma
         st.success("Conciliación finalizada.")
 
 
@@ -181,10 +220,10 @@ def _mostrar_resultados() -> None:
     st.header("Resultados por operación")
     estados = sorted({f.estado_codigo: f.estado for f in filas}.items(), key=lambda x: x[1])
     c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
-    seleccion = c1.multiselect("Estados", options=[c for c, _ in estados], format_func=dict(estados).get)
-    busqueda = c2.text_input("Buscar ID de orden")
-    solo_revision = c3.checkbox("Solo requieren revisión")
-    solo_divididos = c4.checkbox("Solo pagos divididos")
+    seleccion = c1.multiselect("Estados", options=[c for c, _ in estados], format_func=dict(estados).get, key="filtro_estados")
+    busqueda = c2.text_input("Buscar ID de orden", key="filtro_busqueda_orden")
+    solo_revision = c3.checkbox("Solo requieren revisión", key="filtro_solo_revision")
+    solo_divididos = c4.checkbox("Solo pagos divididos", key="filtro_solo_divididos")
     visibles = filtrar_filas(filas, set(seleccion), busqueda, solo_revision, solo_divididos)
     st.caption(f"Mostrando {len(visibles)} de {len(filas)} resultados.")
     tabla = [{k: v for k, v in f.__dict__.items() if k not in {"clave", "estado_codigo", "diferencia_valor"}} for f in visibles]
@@ -192,7 +231,7 @@ def _mostrar_resultados() -> None:
 
     if visibles:
         claves = [f.clave for f in visibles]
-        elegida = st.selectbox("Seleccionar operación para ver detalle", claves)
+        elegida = st.selectbox("Seleccionar operación para ver detalle", claves, key="detalle_operacion")
         mapa = {(r.id_orden or clave_resultado(r)): r for r in reporte.resultados}
         detalle = detalle_presentacion(mapa[elegida])
         st.subheader("Detalle de operación")
