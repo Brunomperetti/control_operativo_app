@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.env
+
+# Datos privados o cargas reales de usuarios
+data/raw/
+data/uploads/
+private_data/
