@@ -161,3 +161,60 @@ El `ID DE OPERACIÓN EN MERCADO PAGO` es obligatorio. El `ID DE LA ORDEN`, el SK
 El modelo público de movimiento financiero no incluye nombre del pagador, número de identificación del pagador, número inicial de tarjeta ni otros datos personales innecesarios. Los campos complementarios como impuestos desagregados, datos extra y operation tags se conservan de manera acotada para trazabilidad, y solo se extrae `refund_id` cuando está disponible.
 
 > Todavía no existe conciliación entre Mercado Libre y Mercado Pago, persistencia, dashboard, Streamlit ni exportaciones de resultados.
+
+## Motor de conciliación Mercado Libre / Mercado Pago
+
+La versión inicial del motor de conciliación implementa la regla `ML_MP_ID_ORDER_NETO_V1`. Es un motor puro, auditable y testeable que recibe exclusivamente modelos normalizados (`OperacionComercial` y `MovimientoFinanciero`) y no lee CSV, XLSX ni archivos externos. Tampoco depende de Streamlit ni expone DataFrames como contrato público.
+
+### Alcance del motor
+
+- Relaciona operaciones comerciales de Mercado Libre con movimientos financieros de Mercado Pago usando `id_orden` como clave principal.
+- Conserva operaciones y movimientos sin contraparte.
+- Admite uno o varios movimientos financieros por orden.
+- Detecta pagos divididos, devoluciones, reclamos, disputas, movimientos de envío, liquidaciones pendientes, duplicados y tipos desconocidos.
+- Separa los PAYOUTS sin orden como movimientos de fondos, sin tratarlos como pérdida comercial de una venta.
+- Mantiene explicaciones legibles en español y motivos estables para auditoría.
+
+### Fórmula de control principal
+
+Para cada orden con operación comercial y pagos aprobados, el control principal calcula:
+
+```text
+diferencia_control = neto_pagos_aprobados - neto_comercial_informado
+```
+
+El signo se conserva sin redondeos silenciosos:
+
+- `diferencia_control > 0`: Mercado Pago informa más neto que la fuente comercial.
+- `diferencia_control < 0`: Mercado Pago informa menos neto que la fuente comercial.
+- `diferencia_control = 0`: coincidencia exacta.
+
+La tolerancia predeterminada es `Decimal("0.01")` y no puede ser negativa.
+
+### Estados implementados
+
+- `CONCILIADA`
+- `CONCILIADA_CON_DIFERENCIA_MENOR`
+- `CONCILIADA_CON_DIFERENCIA`
+- `PENDIENTE_ACREDITACION`
+- `OPERACION_SIN_MOVIMIENTO_FINANCIERO`
+- `MOVIMIENTO_SIN_OPERACION_COMERCIAL`
+- `DEVUELTA`
+- `EN_RECLAMO`
+- `EN_REVISION`
+- `DUPLICADA`
+- `MOVIMIENTO_DE_FONDOS`
+
+Un pago dividido no es un estado final excluyente: se representa con `es_pago_dividido = True` y el motivo `PAGO_DIVIDIDO`, mientras el estado final surge de la comparación y de la prioridad de condiciones.
+
+### Componentes financieros separados
+
+Además del control principal, el resultado conserva componentes auditables por separado:
+
+- `impacto_pagos_envio`: suma de `PAGO_ENVIO`.
+- `impacto_devoluciones`: suma de `DEVOLUCION_DINERO` y `DEVOLUCION_ENVIO`.
+- `impacto_reclamos_disputas`: suma de `RECLAMO` y `DISPUTA_ENVIO`.
+- `impacto_otros`: suma de movimientos con orden no incluidos en los grupos anteriores ni en `PAGO_APROBADO`.
+- `neto_financiero_total`: suma de todos los movimientos financieros asociados a la orden.
+
+Estos componentes no se usan todavía para recalcular automáticamente la utilidad ni para construir un resultado contable definitivo. `utilidad_neta_informada` se conserva exactamente como valor informado por Mercado Libre.
