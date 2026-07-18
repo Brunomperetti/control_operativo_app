@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pandas",
     "openpyxl",
+    "streamlit>=1.36",
 ]
 
 [project.optional-dependencies]
