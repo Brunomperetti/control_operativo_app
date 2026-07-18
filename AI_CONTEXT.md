@@ -8,7 +8,7 @@ Este documento está escrito específicamente para que una IA pueda comprender e
 
 El repositorio corresponde a una futura aplicación profesional en Streamlit para conciliación financiera, análisis de rentabilidad y control operativo.
 
-La primera funcionalidad prevista será conciliar información entre Mercado Libre y Mercado Pago. Sin embargo, el objetivo real es construir una plataforma escalable de control financiero capaz de incorporar múltiples fuentes como Tienda Nube, bancos, ventas del local, reportes, dashboards, KPIs, base histórica y automatizaciones.
+La versión 0.1 queda aprobada para implementación incremental después de la actualización documental inicial. La primera funcionalidad será conciliar información entre Mercado Libre y Mercado Pago. Sin embargo, el objetivo real es construir una plataforma escalable de control financiero capaz de incorporar múltiples fuentes como Tienda Nube, bancos, ventas del local, reportes, dashboards, KPIs, base histórica y automatizaciones.
 
 No es una aplicación simple para cruzar dos Excel. Debe tratarse como una plataforma financiera modular, auditable y mantenible.
 
@@ -39,7 +39,7 @@ Construir progresivamente una herramienta que permita:
 - Mercado Libre y Mercado Pago son las fuentes iniciales.
 - Tienda Nube, bancos y ventas del local deben contemplarse como extensiones futuras.
 - La trazabilidad y auditabilidad son requisitos centrales.
-- La documentación precede a la implementación.
+- La documentación precede a la implementación; desde esta actualización, la implementación de la versión 0.1 queda habilitada para tareas posteriores.
 
 ---
 
@@ -102,9 +102,9 @@ Los módulos futuros esperados son:
 
 ## Restricciones actuales
 
-En la etapa actual solo debe existir documentación. No se debe crear código de aplicación.
+La etapa puramente fundacional terminó con la aprobación documental de la versión 0.1. A partir de tareas posteriores, se podrá implementar incrementalmente el alcance Mercado Libre / Mercado Pago siempre que cada cambio respete `DOCUMENTO_MAESTRO.md`.
 
-Está prohibido en esta fase:
+Durante esta actualización documental específica estuvo prohibido, y no debe hacerse salvo tarea futura explícita:
 
 - Crear código Python.
 - Crear `app.py`.
@@ -116,6 +116,7 @@ Está prohibido en esta fase:
 - Crear tests.
 - Conectar APIs.
 - Generar automatizaciones.
+- Incorporar archivos reales financieros, comerciales o con datos personales al repositorio.
 
 ---
 
@@ -130,12 +131,14 @@ Está prohibido en esta fase:
 - Las diferencias financieras no deben ocultarse.
 - Los estados ambiguos deben quedar como pendientes o en revisión, no forzarse como conciliados.
 - Los cálculos fiscales deben ser configurables y validados por responsables contables.
+- No se deben inventar reglas fiscales ni fórmulas de resultado operativo definitivo.
+- Las conciliaciones no deben forzarse cuando falte contraparte o exista ambigüedad.
 
 ---
 
 ## Forma esperada de trabajar
 
-Antes de escribir código, cualquier IA debe:
+Antes de cada tarea, y especialmente antes de escribir código, cualquier IA debe:
 
 1. Leer `DOCUMENTO_MAESTRO.md` completo.
 2. Leer este archivo completo.
@@ -145,6 +148,7 @@ Antes de escribir código, cualquier IA debe:
 6. Mantener documentación sincronizada con cambios técnicos o funcionales.
 7. Evitar crear estructuras o dependencias no solicitadas.
 8. Proponer cambios incrementales y revisables.
+9. Confirmar que no se incorporen al repositorio archivos reales de Mercado Libre, Mercado Pago, bancos u otras fuentes sensibles.
 
 Durante el desarrollo futuro:
 

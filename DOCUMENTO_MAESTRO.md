@@ -1,15 +1,15 @@
 # Documento Maestro del Proyecto
 
-**Proyecto:** Plataforma de Control Financiero, Conciliación y Rentabilidad
+**Proyecto:** Kiki Control Financiero
 **Aplicación inicial:** Conciliación Mercado Libre / Mercado Pago
-**Estado:** Documentación fundacional
+**Estado:** Versión 0.1 aprobada para implementación
 **Tipo de sistema:** Aplicación profesional en Streamlit orientada a control financiero escalable
 
 ---
 
 ## 1. Propósito del documento
 
-Este documento constituye la especificación oficial del proyecto. Su objetivo es definir, desde el inicio, la visión funcional, técnica y arquitectónica de una plataforma de control financiero que evolucionará durante años.
+Este documento constituye la especificación oficial del proyecto y la fuente principal de verdad para Kiki Control Financiero. Su objetivo es definir, desde el inicio, la visión funcional, técnica y arquitectónica de una plataforma de control financiero que evolucionará durante años.
 
 La documentación está pensada para que cualquier integrante nuevo del equipo —desarrollador, analista funcional, responsable de producto, tester, consultor financiero o asistente de IA— pueda comprender el alcance del sistema, las decisiones ya tomadas, las restricciones existentes y la forma esperada de evolucionar el producto sin depender de conocimiento informal.
 
@@ -29,19 +29,40 @@ La visión de largo plazo es construir una plataforma integral de control financ
 
 ## 3. Alcance del proyecto
 
-### 3.1 Alcance inicial
+### 3.1 Alcance inicial aprobado para versión 0.1
 
-El alcance inicial comprende la base conceptual y futura implementación de:
+La versión 0.1 queda aprobada para implementación incremental después de esta actualización documental. El requerimiento real del cliente es construir una aplicación de control cruzado que relacione fuentes comerciales con fuentes financieras para conocer el resultado de cada operación a partir del cruce entre la venta comercial y sus movimientos financieros reales.
 
-- Carga o ingesta de información exportada desde Mercado Libre.
-- Carga o ingesta de información exportada desde Mercado Pago.
-- Normalización de datos provenientes de ambas fuentes.
-- Conciliación entre operaciones comerciales y movimientos financieros.
-- Identificación de diferencias, operaciones pendientes y movimientos no conciliados.
-- Cálculo conceptual de importes vinculados a venta, comisiones, retenciones, impuestos y costos.
-- Preparación de una base futura para reportes, dashboards, trazabilidad e historial.
+El alcance inicial comprende archivos exportados manualmente de Mercado Libre y Mercado Pago, sin APIs ni cargas automáticas:
 
-### 3.2 Alcance futuro
+- Carga del archivo comercial de Mercado Libre con ventas, productos, cantidades, costos y métricas de rentabilidad informadas por la fuente.
+- Carga del archivo financiero de Mercado Pago con pagos, acreditaciones, comisiones, financiación, envíos, impuestos, retenciones, devoluciones, reclamos y otros movimientos.
+- Conservación íntegra y auditable de ambos archivos originales, sin modificaciones destructivas.
+- Validación de estructura, columnas y formatos.
+- Normalización mediante adaptadores independientes para cada fuente.
+- Relación de operaciones principalmente mediante ID Order.
+- Agrupación de múltiples movimientos financieros pertenecientes a una misma orden.
+- Comparación entre el neto informado por la fuente comercial y el neto real registrado en Mercado Pago.
+- Identificación de coincidencias, diferencias, devoluciones, reclamos, pagos divididos y movimientos sin contraparte.
+- Visualización del resultado por operación y totales de control.
+- Preparación para exportaciones posteriores de resultados, sin definir todavía su estructura final.
+
+
+### 3.2 Resultado de la operación en versión 0.1
+
+La aplicación deberá diferenciar claramente estos conceptos, sin mezclarlos ni asumir que son equivalentes:
+
+| Concepto | Tratamiento inicial |
+|---|---|
+| Utilidad o rentabilidad informada por Mercado Libre | Debe conservarse como valor informado por la fuente comercial. |
+| Monto neto financiero real de Mercado Pago | Será el principal total de control inicial para conciliación. |
+| Diferencia de conciliación | Se calculará entre el neto comercial informado y el neto financiero agrupado. |
+| Estado de conciliación | Se asignará según reglas explícitas y auditables. |
+| Resultado operativo definitivo | Su fórmula queda pendiente de validación contable antes de considerarse oficial. |
+
+No deben inventarse fórmulas fiscales. Los costos, IVA, IIBB, retenciones y percepciones deberán documentarse y ser configurables. Hasta contar con validación contable, las métricas calculadas por Mercado Libre se consideran valores informados por la fuente, no verdad fiscal definitiva.
+
+### 3.3 Alcance futuro
 
 El sistema deberá poder incorporar progresivamente:
 
@@ -56,7 +77,7 @@ El sistema deberá poder incorporar progresivamente:
 | Base histórica | Persistencia de datos normalizados para comparación temporal. |
 | Automatizaciones | Procesos recurrentes de carga, validación, conciliación y alerta. |
 
-### 3.3 Fuera de alcance inicial
+### 3.4 Fuera de alcance inicial
 
 No forman parte de la etapa documental ni de las primeras decisiones de implementación:
 
@@ -165,17 +186,17 @@ Entregables:
 - README para desarrolladores.
 - Contexto para asistentes de IA.
 
-### 7.2 Versión 0.1 - Prototipo controlado Mercado Libre / Mercado Pago
+### 7.2 Versión 0.1 - Control cruzado Mercado Libre / Mercado Pago
 
-Objetivo: validar el flujo mínimo de carga, normalización y conciliación con datos exportados manualmente.
+Objetivo: implementar de manera incremental el flujo mínimo de carga, validación, normalización y conciliación con archivos exportados manualmente de Mercado Libre y Mercado Pago. Esta versión queda aprobada para implementación después de la actualización documental del inicio formal del desarrollo.
 
-Posibles entregables futuros:
+Entregables previstos:
 
 - Carga de archivos.
 - Validación de columnas obligatorias.
 - Normalización básica.
 - Conciliación inicial por identificadores.
-- Exportación simple de resultados.
+- Exportación simple de resultados en una etapa posterior, una vez definida la estructura exacta.
 
 ### 7.3 Versión 0.2 - Motor de conciliación robusto
 
@@ -596,7 +617,101 @@ control_operativo_app/
 
 ---
 
-## 20. Riesgos conocidos
+## 20. Hallazgos confirmados con archivos reales del 14/07/2026
+
+### 20.1 Archivo comercial de Mercado Libre
+
+- CSV con 706 operaciones y 29 columnas.
+- Las 706 órdenes tienen un ID Order único.
+- Existen 702 operaciones con SKU y 4 sin SKU.
+- Cada orden representa una operación comercial vinculada a un producto/SKU y una cantidad.
+- Un carrito puede contener varias órdenes.
+- El archivo contiene métricas procesadas como costos, utilidad, rentabilidad y precio de equilibrio.
+- Hay 49 operaciones con utilidad negativa.
+- El precio de equilibrio aparece precisamente en esas 49 operaciones.
+- Existen dos variantes de parámetros según si el costo incluye alícuota.
+- Todas las filas informan IVA del 21% e IIBB configurado en 0%, pero estas condiciones no deben codificarse rígidamente.
+
+### 20.2 Archivo financiero de Mercado Pago
+
+- XLSX con 1.057 eventos financieros y 49 columnas.
+- Contiene pagos aprobados, pagos de envío, devoluciones, reclamos, disputas, retiros y cashback.
+- No representa una fila por venta: representa una fila por evento financiero.
+- Un mismo ID de operación de Mercado Pago puede tener diferentes eventos.
+- La combinación “ID de operación de Mercado Pago + tipo de operación” resultó única en el archivo analizado.
+- Una orden puede relacionarse con más de un movimiento financiero.
+
+### 20.3 Resultado del cruce observado
+
+- Las 706 órdenes comerciales fueron encontradas en Mercado Pago.
+- La cobertura por ID Order fue del 100%.
+- El monto neto coincidió al centavo en las 706 órdenes.
+- Los 702 SKU disponibles coincidieron entre ambas fuentes.
+- Dos órdenes utilizaron pagos divididos y necesitaron agrupar dos movimientos.
+- La columna “Comisión MeLi” del CSV equivale a la suma absoluta de Comisión de Mercado Libre + IVA y Comisión por ofrecer cuotas sin interés.
+- Mercado Pago presentó 65 órdenes aprobadas adicionales que no estaban en el CSV: 50 quedaron neutralizadas por devolución o reclamo, 2 tuvieron combinaciones complejas que requieren revisión y 13 quedaron sin contraparte comercial y deben mantenerse pendientes.
+
+## 21. Reglas iniciales de conciliación y normalización
+
+### 21.1 Reglas de conciliación versión 0.1
+
+1. La clave primaria de conciliación será inicialmente ID Order.
+2. El SKU será una validación secundaria, no la clave principal.
+3. Los movimientos de Mercado Pago deberán agruparse por orden antes de comparar importes.
+4. La conciliación debe admitir relaciones uno a uno y uno a muchos.
+5. El monto neto será el principal total de control inicial.
+6. La tolerancia monetaria inicial propuesta será de $0,01, pero debe ser configurable.
+7. Las devoluciones y reclamos deben relacionarse con la operación original.
+8. Un movimiento sin contraparte nunca debe forzarse como conciliado.
+9. Los retiros PAYOUTS deben tratarse como movimientos de fondos, no como pérdidas de una venta.
+10. Los datos originales deben conservarse de forma íntegra y auditable.
+11. Los campos con datos personales deberán protegerse y no mostrarse innecesariamente.
+
+### 21.2 Reglas de normalización confirmadas
+
+- Los identificadores deben almacenarse como texto, aunque los archivos los presenten como números.
+- Los importes del CSV utilizan formato argentino: “47.239” representa 47.239 pesos y “7.478,66” representa 7.478 pesos con 66 centavos.
+- Los porcentajes pueden utilizar punto decimal, por ejemplo “22.7%”.
+- El adaptador debe interpretar cada columna según su tipo, no aplicar una conversión global indiscriminada.
+- Mercado Pago entrega timestamps con UTC-04:00.
+- La aplicación deberá conservar el timestamp original, generar su equivalente UTC y permitir una zona horaria configurable para visualización.
+- En la muestra, al convertir Mercado Pago a America/Argentina/Cordoba, las horas coincidieron con las ventas de Mercado Libre.
+
+### 21.3 Estados iniciales propuestos
+
+- Conciliada.
+- Conciliada con diferencia menor.
+- Conciliada con diferencia.
+- Pendiente de acreditación.
+- Operación comercial sin movimiento financiero.
+- Movimiento financiero sin operación comercial.
+- Pago dividido.
+- Devuelta.
+- En reclamo.
+- En revisión.
+- Duplicada.
+- Excluida.
+- Movimiento de fondos.
+
+## 22. Privacidad, seguridad de datos y zonas horarias
+
+- Los archivos reales exportados de Mercado Libre y Mercado Pago no deben incorporarse al repositorio.
+- Los datos personales presentes en las fuentes deben minimizarse en pantalla, reportes y logs.
+- Toda vista o exportación debe evitar exponer datos personales que no sean necesarios para el control operativo.
+- Los registros originales deben preservarse para auditoría, pero su almacenamiento futuro deberá contemplar controles de acceso y criterios de retención.
+- Los timestamps deben conservar su valor original, su equivalente UTC y una representación en zona horaria configurable para visualización.
+- La zona horaria operativa propuesta para validar es America/Argentina/Cordoba.
+
+## 23. Preguntas abiertas
+
+- Confirmar si el CSV de rentabilidad es una exportación directa de Mercado Libre o un reporte posteriormente procesado.
+- Confirmar las fórmulas oficiales de utilidad y rentabilidad.
+- Confirmar el tratamiento contable del IVA e IIBB.
+- Investigar las 13 órdenes de Mercado Pago sin contraparte comercial.
+- Definir si la zona horaria operativa será America/Argentina/Cordoba.
+- Definir posteriormente la estructura exacta de los reportes exportables.
+
+## 24. Riesgos conocidos
 
 | Riesgo | Impacto | Mitigación prevista |
 |---|---|---|
@@ -611,7 +726,7 @@ control_operativo_app/
 
 ---
 
-## 21. Supuestos
+## 25. Supuestos
 
 - El sistema será utilizado inicialmente como herramienta interna de gestión financiera.
 - Las primeras integraciones podrán basarse en archivos exportados manualmente.
@@ -624,7 +739,7 @@ control_operativo_app/
 
 ---
 
-## 22. Decisiones técnicas tomadas
+## 26. Decisiones técnicas tomadas
 
 | Decisión | Justificación |
 |---|---|
@@ -633,13 +748,14 @@ control_operativo_app/
 | Comenzar con Mercado Libre y Mercado Pago | Son las fuentes iniciales de mayor prioridad. |
 | Mantener independencia del modelo interno | Facilita incorporar Tienda Nube, bancos y ventas locales. |
 | Documentar antes de implementar | Reduce ambigüedad y orienta el crecimiento profesional del sistema. |
-| No crear código en la fase fundacional | Evita decisiones prematuras antes de definir arquitectura y alcance. |
+| Aprobar versión 0.1 para implementación | Habilita comenzar el prototipo controlado Mercado Libre / Mercado Pago con reglas documentadas. |
+| No crear código durante esta actualización documental | Preserva la transición ordenada desde la fase fundacional hacia la implementación. |
 
 ---
 
-## 23. Qué todavía NO debe implementarse
+## 27. Qué todavía NO debe implementarse
 
-Hasta que se defina una etapa específica de implementación, no debe crearse:
+Durante esta actualización documental no debe crearse:
 
 - Código Python de aplicación.
 - Archivo `app.py`.
@@ -653,11 +769,11 @@ Hasta que se defina una etapa específica de implementación, no debe crearse:
 - Automatizaciones.
 - Dashboards reales.
 
-La única base actual del proyecto debe ser documental.
+Después de esta actualización, la implementación incremental de la versión 0.1 queda habilitada en tareas posteriores, respetando el documento maestro como fuente oficial.
 
 ---
 
-## 24. Visión a largo plazo
+## 28. Visión a largo plazo
 
 La visión del proyecto es convertirse en una plataforma integral de control financiero para negocios que operan en múltiples canales de venta y cobranza.
 
@@ -676,7 +792,7 @@ El sistema debe crecer de forma ordenada, manteniendo como ejes la trazabilidad,
 
 ---
 
-## 25. Gobierno de la documentación
+## 29. Gobierno de la documentación
 
 Este documento debe actualizarse cuando ocurra cualquiera de los siguientes eventos:
 

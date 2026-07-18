@@ -1,6 +1,6 @@
 # Control Operativo App
 
-Aplicación profesional en Streamlit para conciliación financiera, análisis de rentabilidad y control operativo.
+Kiki Control Financiero: aplicación profesional en Streamlit para conciliación financiera, análisis de rentabilidad y control operativo.
 
 > La documentación oficial y completa del proyecto se encuentra en [`DOCUMENTO_MAESTRO.md`](DOCUMENTO_MAESTRO.md).
 
@@ -8,7 +8,7 @@ Aplicación profesional en Streamlit para conciliación financiera, análisis de
 
 ## Descripción
 
-Este repositorio será la base de una plataforma escalable de control financiero. La primera etapa funcional estará orientada a conciliar información entre Mercado Libre y Mercado Pago, pero el diseño del sistema contempla la incorporación futura de Tienda Nube, bancos, ventas del local, dashboards financieros, KPIs, reportes, base histórica y automatizaciones.
+Este repositorio es la base de una plataforma escalable de control financiero. La versión 0.1 fue aprobada para implementación incremental y estará orientada a conciliar archivos exportados manualmente de Mercado Libre y Mercado Pago, pero el diseño del sistema contempla la incorporación futura de Tienda Nube, bancos, ventas del local, dashboards financieros, KPIs, reportes, base histórica y automatizaciones.
 
 El proyecto no debe entenderse como una herramienta para cruzar dos archivos Excel, sino como una plataforma profesional para centralizar, validar, conciliar y analizar información financiera de múltiples fuentes.
 
@@ -37,7 +37,7 @@ Construir una aplicación mantenible y extensible que permita:
 | PostgreSQL | Persistencia robusta futura. |
 | Pytest | Pruebas automatizadas futuras. |
 
-Las dependencias todavía no deben instalarse. Este repositorio se encuentra en etapa documental.
+Las dependencias todavía no deben instalarse en esta actualización documental. La siguiente etapa será implementar incrementalmente la versión 0.1.
 
 ---
 
@@ -77,7 +77,7 @@ Cuando comience la implementación, esta sección deberá documentar:
 | Versión | Objetivo |
 |---|---|
 | 0.0 | Documentación fundacional del proyecto. |
-| 0.1 | Prototipo controlado Mercado Libre / Mercado Pago. |
+| 0.1 | Implementación incremental aprobada para control cruzado Mercado Libre / Mercado Pago. |
 | 0.2 | Motor de conciliación robusto y trazable. |
 | 0.3 | Análisis de rentabilidad por operación. |
 | 0.4 | Persistencia histórica. |
@@ -88,7 +88,7 @@ Cuando comience la implementación, esta sección deberá documentar:
 
 ## Documentación principal
 
-Antes de implementar cualquier funcionalidad, leer:
+Antes de implementar cualquier funcionalidad, leer siempre:
 
 - [`DOCUMENTO_MAESTRO.md`](DOCUMENTO_MAESTRO.md): especificación oficial del proyecto.
 - [`AI_CONTEXT.md`](AI_CONTEXT.md): contexto operativo para asistentes de IA y futuros colaboradores.
