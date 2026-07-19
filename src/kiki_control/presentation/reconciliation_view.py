@@ -186,7 +186,9 @@ def tabla_principal(filas: Iterable[FilaResultadoPresentacion]) -> list[dict[str
     return [{titulo: getattr(fila, campo) for campo, titulo in ENCABEZADOS_TABLA_CLIENTE.items()} for fila in filas]
 
 
-def resumen_kpis(reporte: ReporteConciliacion) -> dict[str, int | str]:
+def resumen_kpis_tipado(reporte: ReporteConciliacion) -> dict[str, int | Decimal | None]:
+    """Devuelve KPIs con tipos nativos para reutilizar en interfaz y exportaciones."""
+
     resultados = reporte.resultados
     comparables = tuple(r for r in resultados if r.diferencia_control is not None)
     financieros_sin_operacion = tuple(r for r in resultados if r.cantidad_operaciones_comerciales == 0 and r.estado != EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
@@ -200,12 +202,20 @@ def resumen_kpis(reporte: ReporteConciliacion) -> dict[str, int | str]:
         "Sin movimiento en MP": len(comerciales_sin_movimiento),
         "Requieren revisión": sum(1 for r in resultados if r.requiere_revision),
         "Movimientos de fondos": len(movimientos_fondos),
-        "Utilidad informada ML": formato_pesos_argentino(_sumar(r.utilidad_neta_informada for r in resultados)),
-        "Neto ML comparable": formato_pesos_argentino(_sumar(r.neto_comercial_informado for r in comparables)),
-        "Neto MP comparable": formato_pesos_argentino(_sumar(r.neto_pagos_aprobados for r in comparables)),
-        "Diferencia comparable": formato_pesos_argentino(_sumar(r.diferencia_control for r in comparables)),
-        "Neto MP fuera del archivo ML": formato_pesos_argentino(_sumar(r.neto_pagos_aprobados for r in financieros_sin_operacion)),
+        "Utilidad informada ML": _sumar(r.utilidad_neta_informada for r in resultados),
+        "Neto ML comparable": _sumar(r.neto_comercial_informado for r in comparables),
+        "Neto MP comparable": _sumar(r.neto_pagos_aprobados for r in comparables),
+        "Diferencia comparable": _sumar(r.diferencia_control for r in comparables),
+        "Neto MP fuera del archivo ML": _sumar(r.neto_pagos_aprobados for r in financieros_sin_operacion),
     }
+
+
+def resumen_kpis(reporte: ReporteConciliacion) -> dict[str, int | str]:
+    monetarios = {"Utilidad informada ML", "Neto ML comparable", "Neto MP comparable", "Diferencia comparable", "Neto MP fuera del archivo ML"}
+    salida: dict[str, int | str] = {}
+    for nombre, valor in resumen_kpis_tipado(reporte).items():
+        salida[nombre] = formato_pesos_argentino(valor) if nombre in monetarios else int(valor or 0)
+    return salida
 
 
 def conclusion_ejecutiva(reporte: ReporteConciliacion) -> tuple[str, str]:

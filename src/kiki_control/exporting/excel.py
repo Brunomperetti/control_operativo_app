@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
 from openpyxl.cell.cell import Cell
@@ -20,7 +21,7 @@ from kiki_control.presentation.reconciliation_view import (
     conclusion_ejecutiva,
     es_excepcion_o_caso_especial,
     etiqueta_estado,
-    resumen_kpis,
+    resumen_kpis_tipado,
 )
 
 TIPO_COMPLETO = "Reporte completo"
@@ -51,6 +52,8 @@ COLUMNAS_OPERACIONES = (
     "Tolerancia aplicada",
 )
 _COLUMNAS_MONETARIAS = {"Neto informado ML", "Neto aprobado MP", "Diferencia", "Neto financiero total", "Utilidad informada ML", "Tolerancia aplicada"}
+_KPIS_MONETARIOS = {"Utilidad informada ML", "Neto ML comparable", "Neto MP comparable", "Diferencia comparable", "Neto MP fuera del archivo ML"}
+_CAMPOS_ENTEROS_RESUMEN = {"Movimientos sin fecha de liquidación", "Cantidad de filas incluidas en Todas las operaciones", "Cantidad de filas incluidas en Excepciones"}
 _COLUMNAS_WRAP = {"Explicación", "Motivos técnicos"}
 _FORMATO_MONEDA_ARS = '[$$-es-AR] #,##0.00;[Red]-[$$-es-AR] #,##0.00;[$$-es-AR] 0.00'
 _FORMATO_FECHA = "dd/mm/yyyy hh:mm:ss"
@@ -92,7 +95,7 @@ def _escribir_resumen(ws: Worksheet, reporte: ReporteConciliacion, cobertura: Co
     filas: list[tuple[str, Any]] = [
         ("Nombre", "Kiki Control Financiero"),
         ("Tipo de reporte", tipo),
-        ("Fecha y hora del procesamiento", reporte.fecha_procesamiento_utc.replace(tzinfo=None)),
+        ("Fecha y hora del procesamiento (zona operativa)", _fecha_operativa_sin_tz(reporte.fecha_procesamiento_utc, zona_horaria)),
         ("Zona horaria operativa", zona_horaria),
         ("Versión de la regla de conciliación", reporte.version_regla),
         ("Tolerancia aplicada", _decimal_o_vacio(reporte.tolerancia)),
@@ -102,23 +105,28 @@ def _escribir_resumen(ws: Worksheet, reporte: ReporteConciliacion, cobertura: Co
         ("Movimientos sin fecha de liquidación", cobertura.movimientos_sin_fecha_liquidacion if cobertura else ""),
         ("Conclusión ejecutiva", conclusion),
     ]
-    filas.extend(resumen_kpis(reporte).items())
+    filas.extend((nombre, _decimal_o_vacio(valor) if nombre in _KPIS_MONETARIOS else valor) for nombre, valor in resumen_kpis_tipado(reporte).items())
     if tipo == TIPO_COMPLETO:
         filas.append(("Cantidad de filas incluidas en Todas las operaciones", filas_todas))
     filas.append(("Cantidad de filas incluidas en Excepciones", filas_excepciones))
     filas.extend([("Aclaración", ACLARACION_UTILIDAD), ("Aclaración", ACLARACION_FONDOS), ("Aclaración de privacidad", ACLARACION_PRIVACIDAD)])
     for fila in filas:
         ws.append(list(fila))
-    _formatear_tabla(ws, moneda_columnas={2}, wrap_columnas={2}, freeze=False)
+    _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2}, freeze=False)
     for celda in ws[1]:
         _estilo_header(celda)
     for row in ws.iter_rows(min_row=2):
         for cell in row:
             _asegurar_celda(cell)
-        if row[0].value == "Fecha y hora del procesamiento":
+        etiqueta = row[0].value
+        if etiqueta == "Fecha y hora del procesamiento (zona operativa)":
             row[1].number_format = _FORMATO_FECHA
-        if row[0].value in {"Tolerancia aplicada"}:
-            row[1].number_format = _FORMATO_MONEDA_ARS
+        elif etiqueta == "Tolerancia aplicada" or etiqueta in _KPIS_MONETARIOS:
+            if row[1].value != "":
+                row[1].number_format = _FORMATO_MONEDA_ARS
+        elif etiqueta in _CAMPOS_ENTEROS_RESUMEN or etiqueta in resumen_kpis_tipado(reporte):
+            if isinstance(row[1].value, int):
+                row[1].number_format = "0"
     ws.column_dimensions["A"].width = 38
     ws.column_dimensions["B"].width = 90
 
@@ -157,6 +165,10 @@ def _fila_operacion(r: ResultadoConciliacion) -> list[Any]:
 
 def _resultados_ordenados(resultados: Iterable[ResultadoConciliacion]) -> list[ResultadoConciliacion]:
     return sorted(resultados, key=lambda r: (r.id_orden is None, r.id_orden or "", r.numeros_fila_financiera, r.estado.value))
+
+
+def _fecha_operativa_sin_tz(fecha_utc: datetime, zona_horaria: str) -> datetime:
+    return fecha_utc.astimezone(ZoneInfo(zona_horaria)).replace(tzinfo=None)
 
 
 def _decimal_o_vacio(valor: Decimal | None) -> Decimal | Literal[""]:

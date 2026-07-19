@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 import ast
 
+import pytest
 from openpyxl import load_workbook
 from openpyxl.cell.cell import TYPE_FORMULA
 
@@ -45,6 +46,13 @@ def mapa_resumen(ws):
     return {row[0].value: row[1].value for row in ws.iter_rows(min_row=2, max_col=2)}
 
 
+def celda_resumen(ws, etiqueta):
+    for row in ws.iter_rows(min_row=2, max_col=2):
+        if row[0].value == etiqueta:
+            return row[1]
+    raise AssertionError(f"No existe la fila de resumen {etiqueta!r}")
+
+
 def filas_operaciones(ws):
     headers = [cell.value for cell in ws[1]]
     return [dict(zip(headers, row, strict=False)) for row in ws.iter_rows(min_row=2, values_only=True)]
@@ -73,6 +81,7 @@ def test_resumen_contiene_contexto_kpis_aclaraciones_y_no_filtra_pii():
     resumen = mapa_resumen(ws)
     assert resumen["Nombre"] == "Kiki Control Financiero"
     assert resumen["Tipo de reporte"] == "Reporte completo"
+    assert resumen["Fecha y hora del procesamiento (zona operativa)"].hour == 21
     assert resumen["Zona horaria operativa"] == "America/Argentina/Cordoba"
     assert resumen["Versión de la regla de conciliación"] == "ML_MP_ID_ORDER_NETO_V1"
     assert Decimal(str(resumen["Tolerancia aplicada"])) == Decimal("0.01")
@@ -110,6 +119,39 @@ def test_columnas_tipos_formatos_orden_excepciones_y_formulas_seguras():
     assert "movimiento_de_fondos-fila-23" in exc_ids
     assert "00000000000000012345" not in exc_ids
 
+
+def test_resumen_aplica_tipos_y_formatos_por_campo():
+    ws = cargar(generar_reporte_completo_excel(reporte_sintetico(), cobertura_sintetica(), "America/Argentina/Cordoba"))["Resumen"]
+    for etiqueta in ("Comparables", "Movimientos sin fecha de liquidación", "Cantidad de filas incluidas en Todas las operaciones", "Cantidad de filas incluidas en Excepciones"):
+        celda = celda_resumen(ws, etiqueta)
+        assert isinstance(celda.value, int)
+        assert celda.data_type == "n"
+        assert "$" not in celda.number_format
+
+    for etiqueta in ("Utilidad informada ML", "Neto ML comparable", "Neto MP comparable", "Diferencia comparable", "Neto MP fuera del archivo ML", "Tolerancia aplicada"):
+        celda = celda_resumen(ws, etiqueta)
+        assert celda.data_type == "n"
+        assert not isinstance(celda.value, str)
+        assert "$" not in str(celda.value)
+        assert "$" in celda.number_format
+
+    diferencia = celda_resumen(ws, "Diferencia comparable")
+    assert Decimal(str(diferencia.value)) < Decimal("0")
+    assert "$" not in celda_resumen(ws, "Conclusión ejecutiva").number_format
+    fecha = celda_resumen(ws, "Fecha y hora del procesamiento (zona operativa)")
+    assert fecha.is_date
+    assert fecha.number_format == "dd/mm/yyyy hh:mm:ss"
+
+
+
+@pytest.mark.parametrize("id_malicioso", ["=CMD()", "+SUMA", "-ORDEN", "@INDICE"])
+def test_ids_sinteticos_peligrosos_no_son_formula_y_conservan_valor_visible(id_malicioso):
+    reporte = replace(reconciliar([op(id_orden=id_malicioso)], [mov(id_orden=id_malicioso)], tolerancia=Decimal("0.01")), fecha_procesamiento_utc=FECHA)
+    ws = cargar(generar_reporte_completo_excel(reporte, cobertura_sintetica(), "UTC"))["Todas las operaciones"]
+    celda = ws["A2"]
+    assert celda.data_type != TYPE_FORMULA
+    assert celda.value == f"'{id_malicioso}"
+    assert ws["C2"].data_type == "n"
 
 def test_exportacion_no_usa_float_y_no_muta_dominio():
     import kiki_control.exporting.excel as excel
