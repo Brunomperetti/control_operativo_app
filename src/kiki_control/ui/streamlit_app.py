@@ -9,6 +9,7 @@ import streamlit as st
 from kiki_control.adapters.mercado_libre import normalizar_mercado_libre
 from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
 from kiki_control.domain.enums import TipoFuente
+from kiki_control.exporting import generar_reporte_completo_excel, generar_reporte_excepciones_excel
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
 from kiki_control.presentation.reconciliation_view import (
     clave_resultado,
@@ -222,6 +223,35 @@ def _mostrar_cobertura(cobertura: Any) -> None:
     if cobertura.advertencia_origenes:
         st.info(cobertura.advertencia_origenes)
 
+
+def _nombre_exportacion(prefijo: str) -> str:
+    reporte = st.session_state["reporte"]
+    fecha = reporte.fecha_procesamiento_utc.strftime("%Y%m%d_%H%M%S")
+    return f"{prefijo}_{fecha}.xlsx"
+
+
+def _mostrar_descargas() -> None:
+    reporte = st.session_state["reporte"]
+    cobertura = st.session_state.get("cobertura")
+    zona = st.session_state["zona_horaria"]
+    st.header("Descargas")
+    c1, c2 = st.columns(2)
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    c1.download_button(
+        "Descargar reporte completo",
+        data=generar_reporte_completo_excel(reporte, cobertura, zona),
+        file_name=_nombre_exportacion("kiki_control_reporte_completo"),
+        mime=mime,
+    )
+    c2.download_button(
+        "Descargar solo excepciones",
+        data=generar_reporte_excepciones_excel(reporte, cobertura, zona),
+        file_name=_nombre_exportacion("kiki_control_excepciones"),
+        mime=mime,
+    )
+    st.caption("Los archivos descargados se guardan en tu dispositivo. La aplicación no conserva una copia.")
+
+
 def _mostrar_resultados() -> None:
     reporte = st.session_state["reporte"]
     if "cobertura" in st.session_state:
@@ -239,6 +269,8 @@ def _mostrar_resultados() -> None:
         cols = st.columns(len(bloque))
         for col, (nombre, valor) in zip(cols, bloque, strict=False):
             col.metric(nombre, valor)
+
+    _mostrar_descargas()
 
     st.header("Resultados por operación")
     vista = st.radio(

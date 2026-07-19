@@ -12,10 +12,10 @@ La versión actual permite ejecutar el flujo inicial de conciliación en memoria
 - Detección de fuente por firma de columnas, no por nombre de archivo.
 - Normalización a modelos internos inmutables.
 - Conciliación por `ID Order` con el motor `ML_MP_ID_ORDER_NETO_V1`.
-- Interfaz Streamlit para carga, validación, configuración, procesamiento, resumen ejecutivo, filtros, detalle por operación y ciclo seguro de sesión.
+- Interfaz Streamlit para carga, validación, configuración, procesamiento, resumen ejecutivo, descargas Excel, filtros, detalle por operación y ciclo seguro de sesión.
 - Pruebas unitarias e integrales sintéticas, sin datos reales.
 
-No existe persistencia, historial, login, exportación, API, cálculo contable definitivo ni dashboard avanzado.
+No existe persistencia, historial, login, API, cálculo contable definitivo ni dashboard avanzado. La exportación disponible es XLSX en memoria del reporte vigente.
 
 ## Requisitos
 
@@ -64,7 +64,7 @@ streamlit run app.py
    - Nunca se muestra un reporte cuya firma no coincida con los archivos y la configuración actuales.
 6. La app normaliza ambas fuentes, informa filas recibidas, normalizadas y rechazadas, y permite conciliación parcial si quedan registros válidos.
 7. El motor de conciliación produce el reporte por operación.
-8. La pantalla muestra la cobertura temporal de ambos archivos, conclusión ejecutiva, resumen ejecutivo, tabla filtrable y detalle de cada resultado.
+8. La pantalla muestra la cobertura temporal de ambos archivos, conclusión ejecutiva, resumen ejecutivo, descargas Excel, tabla filtrable y detalle de cada resultado.
 
 
 ## Cobertura y alcance de métricas
@@ -95,6 +95,19 @@ El detalle de operación se divide en:
 
 Las advertencias de normalización mantienen conteos visibles y despliegan el detalle en expanders cerrados.
 
+## Exportaciones Excel
+
+Después del resumen ejecutivo, la sección **Descargas** ofrece dos archivos XLSX generados exclusivamente en memoria, sin guardar copias en el servidor:
+
+- **Descargar reporte completo:** incluye las hojas **Resumen**, **Todas las operaciones** y **Excepciones**.
+- **Descargar solo excepciones:** incluye las hojas **Resumen** y **Excepciones**; no contiene la hoja de todas las operaciones.
+
+Las hojas operativas usan encabezados visibles en español y un alcance controlado: ID de orden, estado, importes de control, utilidad informada ML, indicadores de revisión, explicación, motivos técnicos seguros, filas de origen, cantidad de pagos/movimientos, versión de regla y tolerancia aplicada. No exportan datos personales, pagador, documento, tarjeta, contenido crudo, metadatos sensibles, claves internas de Streamlit ni nombres de archivos originales.
+
+Los ID se escriben como texto para conservar ceros iniciales y evitar notación científica. Los importes y la tolerancia se preparan con `Decimal`, se escriben como valores numéricos y reciben formato monetario argentino; los valores ausentes quedan vacíos y los importes negativos conservan su signo. Los indicadores booleanos se muestran como **Sí** o **No**.
+
+Para prevenir inyección de fórmulas, cualquier texto exportado que comience con `=`, `+`, `-` o `@` se escribe de forma segura para que Excel no lo ejecute como fórmula. La utilidad mantiene siempre la etiqueta **informada** y no representa resultado contable definitivo. Los movimientos de fondos se informan separados y no se consideran pérdidas comerciales.
+
 ## Privacidad
 
 Los archivos se reciben como bytes y se procesan únicamente en memoria durante la sesión de Streamlit. La aplicación no guarda archivos cargados ni resultados en disco o base de datos.
@@ -119,7 +132,7 @@ El sistema no recalcula impuestos, utilidad ni resultado operativo definitivo. L
 
 - Solo se procesan archivos manuales CSV de Mercado Libre y XLSX de Mercado Pago.
 - No hay persistencia, historial ni usuarios.
-- No hay exportación Excel/CSV desde la interfaz.
+- No hay exportación CSV desde la interfaz.
 - No hay gráficos avanzados ni integraciones por API.
 - No hay cálculo contable definitivo.
 - Tienda Nube, bancos y local físico quedan fuera de esta etapa.

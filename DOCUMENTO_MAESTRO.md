@@ -960,3 +960,20 @@ La interfaz debe ofrecer un botón visible **Limpiar archivos y resultados**. El
 ### 31.1 Política de memoria y privacidad de la sesión
 
 El procesamiento inicial continúa siendo exclusivamente en memoria: los archivos cargados se transmiten al servidor privado de la aplicación para procesarse, pero la aplicación no los persiste en disco ni base de datos. Los datos normalizados y resultados permanecen únicamente en memoria de sesión. La documentación y la interfaz no deben prometer garantías de infraestructura de Streamlit que la aplicación no controle; solo deben describir el comportamiento propio de la app y el efecto del botón de limpieza sobre el estado de sesión que mantiene.
+
+### 31.2 Exportaciones Excel seguras
+
+La interfaz debe ofrecer, después del resumen ejecutivo y antes de los resultados por operación, una sección **Descargas** con dos opciones generadas únicamente desde el reporte vigente y su firma de procesamiento:
+
+- **Reporte completo:** hojas **Resumen**, **Todas las operaciones** y **Excepciones**, en ese orden.
+- **Solo excepciones:** hojas **Resumen** y **Excepciones**, sin incluir el universo completo de operaciones.
+
+La generación XLSX pertenece a una capa independiente de Streamlit y funciona como transformación pura sobre modelos existentes de conciliación y cobertura. No debe usar DataFrames como contrato público ni duplicar la clasificación visual de excepciones: debe reutilizar `es_excepcion_o_caso_especial`.
+
+La hoja **Resumen** debe identificar Kiki Control Financiero, tipo de reporte, fecha y hora del procesamiento, zona horaria operativa, versión de regla, tolerancia, cobertura temporal, movimientos sin fecha de liquidación, conclusión ejecutiva, KPIs actuales, cantidad de filas exportadas y aclaraciones financieras. No debe incluir nombres de archivos originales, contenido crudo, metadatos sensibles ni datos personales.
+
+Las hojas operativas deben usar encabezados visibles en español y limitarse a campos seguros: ID de orden, estado, netos de control, diferencia, neto financiero total, utilidad informada ML, indicadores, explicación, motivos técnicos seguros, filas de origen, cantidades, versión de regla y tolerancia. Los ID deben exportarse como texto, los importes y tolerancia como valores numéricos preparados con `Decimal`, las fechas con formato legible, los booleanos como **Sí** o **No**, los ausentes como celdas vacías y los importes negativos con su signo.
+
+La exportación debe prevenir inyección de fórmulas: cualquier texto externo que comience con `=`, `+`, `-` o `@` debe escribirse de forma segura para que Excel no lo ejecute. No debe agregar logos, imágenes, gráficos ni componentes decorativos innecesarios. Debe aplicar formato sobrio: encabezados destacados, autofiltros, fila superior congelada en hojas operativas, anchos razonables, ajuste de texto en explicación y motivos, y formato monetario argentino.
+
+Los botones de descarga solo deben aparecer cuando el reporte vigente coincide con los archivos y configuración actuales. No deben volver a ejecutar la conciliación, no deben persistir el XLSX en disco, no deben usar caché global ni compartida entre sesiones y deben generar el contenido en memoria. La exportación no representa resultado contable definitivo; la utilidad sigue siendo informada por Mercado Libre y los movimientos de fondos se informan separados, sin tratarlos como pérdidas comerciales.
