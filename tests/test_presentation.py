@@ -141,6 +141,7 @@ def test_conclusion_ejecutiva_sin_excepciones_verde_y_sin_ganancia():
     assert severidad == "ok"
     assert "2 coinciden exactamente" in texto
     assert "0 presentan diferencias" in texto
+    assert "0 resultados con excepciones o condiciones especiales" in texto
     assert "ganancia" not in texto.lower()
 
 
@@ -148,9 +149,11 @@ def test_conclusion_ejecutiva_con_diferencias_revision_y_solo_fuente():
     reporte = reconciliar([op(id_orden="A", neto="100"), op(id_orden="B", neto="20")], [mov(id_orden="A", monto="95"), mov(id_orden="SOLOMP", monto="10")])
     texto, severidad = conclusion_ejecutiva(reporte)
     assert severidad == "advertencia"
-    assert "1 presentan diferencias" in texto
-    assert "1 grupos presentes solo en Mercado Pago" in texto
-    assert "1 operaciones presentes solo en Mercado Libre" in texto
+    assert "1 presenta diferencias" in texto
+    assert "3 resultados con excepciones o condiciones especiales" in texto
+    assert "2 requieren revisión manual" in texto
+    assert "1 grupo presente solo en Mercado Pago" in texto
+    assert "1 operación presente solo en Mercado Libre" in texto
 
 
 def test_clasificacion_excepciones_incluye_devolucion_reclamo_pago_dividido_y_payout():
@@ -187,6 +190,7 @@ def test_detalle_cliente_separa_trazabilidad_tecnica():
     resultado = reconciliar([op(neto="100")], [mov(monto="100")]).resultados[0]
     cliente = detalle_cliente(resultado)
     tecnico = detalle_tecnico_seguro(resultado)
+    assert cliente["ID de orden"] == "1"
     assert "Motivos internos" not in cliente
     assert "Versión de regla" in tecnico
     assert tecnico["Motivos internos"]
@@ -200,3 +204,43 @@ def test_presentacion_no_modifica_estados_del_dominio():
     _ = tabla_principal(filas_presentacion(reporte.resultados))
     estados_despues = tuple(r.estado for r in reporte.resultados)
     assert estados_despues == estados_antes == (EstadoConciliacion.CONCILIADA_CON_DIFERENCIA,)
+
+
+def test_conclusion_ejecutiva_pluraliza_cero_uno_y_varios():
+    solo_una = reconciliar([op(id_orden="UNO", neto="10")], [mov(id_orden="UNO", monto="10")])
+    texto_uno, _ = conclusion_ejecutiva(solo_una)
+    assert "Se comparó 1 operación" in texto_uno
+    assert "1 coincide exactamente" in texto_uno
+    assert "0 presentan diferencias" in texto_uno
+    assert "0 grupos presentes solo en Mercado Pago" in texto_uno
+    assert "0 movimientos de fondos informados por separado" in texto_uno
+
+    varios = reconciliar([op(id_orden="A", neto="10"), op(id_orden="B", neto="20")], [mov(id_orden="A", monto="10"), mov(id_orden="B", monto="21")])
+    texto_varios, _ = conclusion_ejecutiva(varios)
+    assert "Se compararon 2 operaciones" in texto_varios
+    assert "1 coincide exactamente" in texto_varios
+    assert "1 presenta diferencias" in texto_varios
+
+
+def test_conclusion_ejecutiva_payout_separado_de_revision_manual():
+    reporte = reconciliar([], [mov(id_orden=None, monto="-10", tipo=TipoOperacionFinanciera.PAYOUT, id_mp="payout-sintetico", fila=30)])
+    texto, severidad = conclusion_ejecutiva(reporte)
+    assert severidad == "advertencia"
+    assert "1 resultado con excepciones o condiciones especiales" in texto
+    assert "0 requieren revisión manual" in texto
+    assert "1 movimiento de fondos informado por separado" in texto
+
+
+def test_detalle_cliente_usa_clave_segura_si_no_hay_id_orden():
+    resultado = reconciliar([], [mov(id_orden=None, monto="-10", tipo=TipoOperacionFinanciera.PAYOUT, id_mp="payout-detalle", fila=77)]).resultados[0]
+    detalle = detalle_cliente(resultado)
+    assert detalle["ID de orden"] == "movimiento_de_fondos-fila-77"
+
+
+def test_textos_visibles_no_exponen_diferencia_control_snake_case():
+    reporte = reconciliar([op(id_orden="A", neto="10")], [mov(id_orden="A", monto="10")])
+    texto, _ = conclusion_ejecutiva(reporte)
+    detalle = detalle_cliente(reporte.resultados[0])
+    tabla = tabla_principal(filas_presentacion(reporte.resultados))
+    visible = texto + str(detalle) + str(tabla)
+    assert "diferencia_control" not in visible

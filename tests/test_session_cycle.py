@@ -3,10 +3,12 @@ from decimal import Decimal
 from kiki_control.ui.session_cycle import (
     RESULT_KEYS_TO_CLEAR,
     SESSION_KEYS_TO_CLEAR,
+    VIEW_FILTER_KEYS_TO_CLEAR,
     construir_firma_procesamiento,
     detectar_cambio,
     invalidar_resultados_conocidos,
     limpiar_claves_conocidas,
+    limpiar_filtros_de_vista,
     tolerancia_canonica,
 )
 
@@ -75,3 +77,36 @@ def test_tolerancia_usa_decimal_y_no_float():
     assert isinstance(tolerancia, Decimal)
     assert not isinstance(tolerancia, float)
     assert tolerancia_canonica(tolerancia) == "0.01"
+
+
+def test_vista_resultados_se_limpia_con_sesion_e_invalidacion():
+    assert "vista_resultados" in SESSION_KEYS_TO_CLEAR
+    assert "vista_resultados" in RESULT_KEYS_TO_CLEAR
+
+    estado = {clave: f"valor-{clave}" for clave in SESSION_KEYS_TO_CLEAR}
+    limpiar_claves_conocidas(estado)
+    assert "vista_resultados" not in estado
+
+    estado = {clave: f"valor-{clave}" for clave in RESULT_KEYS_TO_CLEAR}
+    invalidar_resultados_conocidos(estado)
+    assert "vista_resultados" not in estado
+
+
+def test_limpieza_de_filtros_por_cambio_de_vista_no_borra_reporte():
+    estado = {clave: f"valor-{clave}" for clave in VIEW_FILTER_KEYS_TO_CLEAR}
+    estado.update({
+        "vista_resultados": "Todas las operaciones",
+        "reporte": "reporte-sintetico",
+        "cobertura": "cobertura-sintetica",
+        "normalizacion": "normalizacion-sintetica",
+        "firma_procesamiento": "firma-sintetica",
+    })
+
+    limpiar_filtros_de_vista(estado)
+
+    assert all(clave not in estado for clave in VIEW_FILTER_KEYS_TO_CLEAR)
+    assert estado["vista_resultados"] == "Todas las operaciones"
+    assert estado["reporte"] == "reporte-sintetico"
+    assert estado["cobertura"] == "cobertura-sintetica"
+    assert estado["normalizacion"] == "normalizacion-sintetica"
+    assert estado["firma_procesamiento"] == "firma-sintetica"

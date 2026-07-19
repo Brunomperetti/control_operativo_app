@@ -218,15 +218,31 @@ def conclusion_ejecutiva(reporte: ReporteConciliacion) -> tuple[str, str]:
     solo_mp = sum(1 for r in resultados if r.cantidad_operaciones_comerciales == 0 and r.estado != EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
     solo_ml = sum(1 for r in resultados if r.cantidad_operaciones_comerciales > 0 and r.cantidad_movimientos_financieros == 0)
     excepciones = sum(1 for r in resultados if es_excepcion_o_caso_especial(r))
+    requieren_revision = sum(1 for r in resultados if es_excepcion_o_caso_especial(r) and r.requiere_revision)
     fondos = sum(1 for r in resultados if r.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
     mensaje = (
-        f"Se compararon {len(comparables)} operaciones: {exactas} coinciden exactamente, "
-        f"{con_diferencia} presentan diferencias y {excepciones} casos requieren revisión o seguimiento. "
-        f"Además, hay {solo_mp} grupos presentes solo en Mercado Pago, {solo_ml} operaciones presentes solo en Mercado Libre "
-        f"y {fondos} movimientos de fondos informados por separado."
+        f"{_frase_contador(len(comparables), 'Se comparó', 'Se compararon', 'operación', 'operaciones')}: "
+        f"{_frase_contador(exactas, '', '', 'coincide exactamente', 'coinciden exactamente')} y "
+        f"{_frase_contador(con_diferencia, '', '', 'presenta diferencias', 'presentan diferencias')}. "
+        f"Se detectaron {_sustantivo_contado(excepciones, 'resultado con excepciones o condiciones especiales', 'resultados con excepciones o condiciones especiales')}, "
+        f"de los cuales {_frase_contador(requieren_revision, '', '', 'requiere revisión manual', 'requieren revisión manual')}. "
+        f"Además, existen {_sustantivo_contado(solo_mp, 'grupo presente solo en Mercado Pago', 'grupos presentes solo en Mercado Pago')}, "
+        f"{_sustantivo_contado(solo_ml, 'operación presente solo en Mercado Libre', 'operaciones presentes solo en Mercado Libre')} y "
+        f"{_sustantivo_contado(fondos, 'movimiento de fondos informado por separado', 'movimientos de fondos informados por separado')}."
     )
     severidad = "ok" if con_diferencia == 0 and excepciones == 0 and solo_mp == 0 and solo_ml == 0 else "advertencia"
     return mensaje, severidad
+
+
+def _frase_contador(cantidad: int, verbo_singular: str, verbo_plural: str, singular: str, plural: str) -> str:
+    verbo = verbo_singular if cantidad == 1 else verbo_plural
+    sujeto = singular if cantidad == 1 else plural
+    partes = [verbo, str(cantidad), sujeto]
+    return " ".join(p for p in partes if p)
+
+
+def _sustantivo_contado(cantidad: int, singular: str, plural: str) -> str:
+    return f"{cantidad} {singular if cantidad == 1 else plural}"
 
 
 def _sumar(valores: Iterable[Decimal | None]) -> Decimal | None:
@@ -264,6 +280,7 @@ def detalle_presentacion(resultado: ResultadoConciliacion) -> dict[str, str | in
 
 def detalle_cliente(resultado: ResultadoConciliacion) -> dict[str, str | int]:
     return {
+        "ID de orden": resultado.id_orden or clave_resultado(resultado),
         "Estado": etiqueta_estado(resultado.estado),
         "Neto informado ML": formato_pesos_argentino(resultado.neto_comercial_informado),
         "Neto aprobado MP": formato_pesos_argentino(resultado.neto_pagos_aprobados),

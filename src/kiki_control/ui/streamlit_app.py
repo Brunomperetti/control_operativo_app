@@ -28,6 +28,7 @@ from kiki_control.ui.session_cycle import (
     detectar_cambio,
     invalidar_resultados_conocidos,
     limpiar_claves_conocidas,
+    limpiar_filtros_de_vista,
     tolerancia_canonica,
 )
 
@@ -99,6 +100,10 @@ def main() -> None:
 
 def _limpiar_sesion_streamlit() -> None:
     limpiar_claves_conocidas(st.session_state)
+
+
+def _limpiar_filtros_por_cambio_de_vista() -> None:
+    limpiar_filtros_de_vista(st.session_state)
 
 
 def _inicializar_estado() -> None:
@@ -223,7 +228,7 @@ def _mostrar_resultados() -> None:
         _mostrar_cobertura(st.session_state["cobertura"])
 
     st.header("Resumen ejecutivo")
-    st.caption("Las métricas comparables usan solo resultados con diferencia_control calculada. Los grupos financieros sin operación comercial se informan separados; devoluciones y reclamos pueden integrar ese grupo por ausencia comercial aunque su estado prioritario sea Devuelta o En reclamo. Los movimientos de fondos se mantienen separados y no se tratan como pérdidas comerciales.")
+    st.caption("Las métricas comparables usan solo resultados con diferencia de control calculada. Los grupos financieros sin operación comercial se informan separados; devoluciones y reclamos pueden integrar ese grupo por ausencia comercial aunque su estado prioritario sea Devuelta o En reclamo. Los movimientos de fondos se mantienen separados y no se tratan como pérdidas comerciales.")
     conclusion, severidad = conclusion_ejecutiva(reporte)
     if severidad == "ok":
         st.success(conclusion)
@@ -236,7 +241,13 @@ def _mostrar_resultados() -> None:
             col.metric(nombre, valor)
 
     st.header("Resultados por operación")
-    vista = st.radio("Vista", options=["Excepciones y casos especiales", "Todas las operaciones"], horizontal=True, key="vista_resultados")
+    vista = st.radio(
+        "Vista",
+        options=["Excepciones y casos especiales", "Todas las operaciones"],
+        horizontal=True,
+        key="vista_resultados",
+        on_change=_limpiar_filtros_por_cambio_de_vista,
+    )
     resultados_visibles_por_vista = filtrar_resultados_por_vista(reporte.resultados, vista)
     filas = filas_presentacion(resultados_visibles_por_vista)
     estados = sorted({f.estado_codigo: f.estado for f in filas}.items(), key=lambda x: x[1])
