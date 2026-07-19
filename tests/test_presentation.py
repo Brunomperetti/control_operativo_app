@@ -5,7 +5,7 @@ from decimal import Decimal
 from kiki_control.domain.financial_movement import TipoOperacionFinanciera
 from kiki_control.domain.reconciliation import EstadoConciliacion
 from kiki_control.presentation.formatters import formato_pesos_argentino
-from kiki_control.presentation.reconciliation_view import ETIQUETAS_ESTADO, cobertura_archivos, detalle_presentacion, filas_presentacion, filtrar_filas, resultado_a_fila, resumen_kpis
+from kiki_control.presentation.reconciliation_view import ETIQUETAS_ESTADO, ENCABEZADOS_TABLA_CLIENTE, conclusion_ejecutiva, cobertura_archivos, detalle_cliente, detalle_presentacion, detalle_tecnico_seguro, es_excepcion_o_caso_especial, filas_presentacion, filtrar_filas, filtrar_resultados_por_vista, resultado_a_fila, resumen_kpis, tabla_principal
 from kiki_control.reconciliation import reconciliar
 from tests.test_reconciliation_engine import mov, op
 
@@ -58,15 +58,15 @@ def test_resumen_kpis_orden_determinista_sin_id_y_totales_decimal():
     assert [f.id_orden for f in filas] == ["A", "B", "movimiento_de_fondos-fila-7"]
     assert filas[-1].estado == "Movimiento de fondos"
     kpis = resumen_kpis(reporte)
-    assert kpis["Operaciones comparables"] == 2
+    assert kpis["Comparables"] == 2
     assert kpis["Movimientos de fondos"] == 1
-    assert kpis["Neto comercial de operaciones comparables"] == "$ 150,00"
-    assert kpis["Neto aprobado de Mercado Pago de operaciones comparables"] == "$ 151,00"
-    assert kpis["Diferencia de control — operaciones comparables"] == "$ 1,00"
+    assert kpis["Neto ML comparable"] == "$ 150,00"
+    assert kpis["Neto MP comparable"] == "$ 151,00"
+    assert kpis["Diferencia comparable"] == "$ 1,00"
     assert "Neto de pagos aprobados" not in kpis
     assert "Diferencia total de control" not in kpis
     assert "Sin contraparte" not in kpis
-    assert kpis["Utilidad informada por Mercado Libre"] == "$ 15,00"
+    assert kpis["Utilidad informada ML"] == "$ 15,00"
 
 
 def test_detalle_presentacion_completo():
@@ -92,16 +92,16 @@ def test_resumen_separa_alcances_y_no_mezcla_exclusivos_mp_con_comparables():
         ],
     )
     kpis = resumen_kpis(reporte)
-    assert kpis["Operaciones comparables"] == 2
-    assert kpis["Conciliadas exactas"] == 1
-    assert kpis["Operaciones comparables con diferencia"] == 1
-    assert kpis["Grupos financieros sin operación en el archivo comercial"] == 3
-    assert kpis["Operaciones comerciales sin movimiento financiero"] == 1
+    assert kpis["Comparables"] == 2
+    assert kpis["Coincidencias exactas"] == 1
+    assert kpis["Con diferencia"] == 1
+    assert kpis["Sin venta en ML"] == 3
+    assert kpis["Sin movimiento en MP"] == 1
     assert kpis["Movimientos de fondos"] == 1
-    assert kpis["Neto comercial de operaciones comparables"] == "$ 150,00"
-    assert kpis["Neto aprobado de Mercado Pago de operaciones comparables"] == "$ 160,00"
-    assert kpis["Diferencia de control — operaciones comparables"] == "$ 10,00"
-    assert kpis["Neto aprobado de Mercado Pago sin operación comercial asociada"] == "$ 70,00"
+    assert kpis["Neto ML comparable"] == "$ 150,00"
+    assert kpis["Neto MP comparable"] == "$ 160,00"
+    assert kpis["Diferencia comparable"] == "$ 10,00"
+    assert kpis["Neto MP fuera del archivo ML"] == "$ 70,00"
     sin_operacion = [r for r in reporte.resultados if r.cantidad_operaciones_comerciales == 0 and r.estado != EstadoConciliacion.MOVIMIENTO_DE_FONDOS]
     assert {r.estado for r in sin_operacion} == {EstadoConciliacion.MOVIMIENTO_SIN_OPERACION_COMERCIAL, EstadoConciliacion.DEVUELTA, EstadoConciliacion.EN_RECLAMO}
     assert all(isinstance(v, Decimal) for r in reporte.resultados for v in (r.neto_financiero_total, r.impacto_devoluciones, r.impacto_reclamos_disputas, r.impacto_otros))
@@ -133,3 +133,70 @@ def test_cobertura_archivos_periodos_iguales_diferentes_y_liquidaciones():
     assert diferentes.advertencia_origenes is not None
     assert "no coinciden" in diferentes.advertencia_origenes
     assert "recortar" in diferentes.advertencia_origenes
+
+
+def test_conclusion_ejecutiva_sin_excepciones_verde_y_sin_ganancia():
+    reporte = reconciliar([op(id_orden="A", neto="100"), op(id_orden="B", neto="50")], [mov(id_orden="A", monto="100"), mov(id_orden="B", monto="50")])
+    texto, severidad = conclusion_ejecutiva(reporte)
+    assert severidad == "ok"
+    assert "2 coinciden exactamente" in texto
+    assert "0 presentan diferencias" in texto
+    assert "ganancia" not in texto.lower()
+
+
+def test_conclusion_ejecutiva_con_diferencias_revision_y_solo_fuente():
+    reporte = reconciliar([op(id_orden="A", neto="100"), op(id_orden="B", neto="20")], [mov(id_orden="A", monto="95"), mov(id_orden="SOLOMP", monto="10")])
+    texto, severidad = conclusion_ejecutiva(reporte)
+    assert severidad == "advertencia"
+    assert "1 presentan diferencias" in texto
+    assert "1 grupos presentes solo en Mercado Pago" in texto
+    assert "1 operaciones presentes solo en Mercado Libre" in texto
+
+
+def test_clasificacion_excepciones_incluye_devolucion_reclamo_pago_dividido_y_payout():
+    reporte = reconciliar(
+        [op(id_orden="OK", neto="100"), op(id_orden="DIV", neto="30")],
+        [
+            mov(id_orden="OK", monto="100"),
+            mov(id_orden="DIV", monto="10", id_mp="d1"),
+            mov(id_orden="DIV", monto="20", id_mp="d2"),
+            mov(id_orden="DEV", monto="-5", tipo=TipoOperacionFinanciera.DEVOLUCION_DINERO, id_mp="dev"),
+            mov(id_orden="REC", monto="-7", tipo=TipoOperacionFinanciera.RECLAMO, id_mp="rec"),
+            mov(id_orden=None, monto="-50", tipo=TipoOperacionFinanciera.PAYOUT, id_mp="payout", fila=99),
+        ],
+    )
+    excepciones = filtrar_resultados_por_vista(reporte.resultados, "Excepciones y casos especiales")
+    ids = {r.id_orden or r.estado.value for r in excepciones}
+    assert "OK" not in ids
+    assert {"DIV", "DEV", "REC", "MOVIMIENTO_DE_FONDOS"}.issubset(ids)
+    assert all(es_excepcion_o_caso_especial(r) for r in excepciones)
+
+
+def test_tabla_principal_encabezados_espanol_sin_tecnicos_ni_pii():
+    reporte = reconciliar([op(id_orden="SYN-1", neto="100")], [mov(id_orden="SYN-1", monto="90")])
+    fila = filas_presentacion(reporte.resultados)[0]
+    tabla = tabla_principal([fila])
+    assert list(tabla[0]) == list(ENCABEZADOS_TABLA_CLIENTE.values())
+    texto = str(tabla)
+    prohibidos = ["motivo_principal", "estado_codigo", "clave", "diferencia_valor", "hash", "contenido", "nombre", "email", "DNI", "12345678"]
+    for prohibido in prohibidos:
+        assert prohibido not in texto
+
+
+def test_detalle_cliente_separa_trazabilidad_tecnica():
+    resultado = reconciliar([op(neto="100")], [mov(monto="100")]).resultados[0]
+    cliente = detalle_cliente(resultado)
+    tecnico = detalle_tecnico_seguro(resultado)
+    assert "Motivos internos" not in cliente
+    assert "Versión de regla" in tecnico
+    assert tecnico["Motivos internos"]
+
+
+def test_presentacion_no_modifica_estados_del_dominio():
+    reporte = reconciliar([op(id_orden="A", neto="100")], [mov(id_orden="A", monto="95")])
+    estados_antes = tuple(r.estado for r in reporte.resultados)
+    _ = conclusion_ejecutiva(reporte)
+    _ = filtrar_resultados_por_vista(reporte.resultados, "Excepciones y casos especiales")
+    _ = tabla_principal(filas_presentacion(reporte.resultados))
+    estados_despues = tuple(r.estado for r in reporte.resultados)
+    assert estados_despues == estados_antes == (EstadoConciliacion.CONCILIADA_CON_DIFERENCIA,)

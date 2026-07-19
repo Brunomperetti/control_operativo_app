@@ -10,7 +10,18 @@ from kiki_control.adapters.mercado_libre import normalizar_mercado_libre
 from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
 from kiki_control.domain.enums import TipoFuente
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
-from kiki_control.presentation.reconciliation_view import clave_resultado, cobertura_archivos, detalle_presentacion, filas_presentacion, filtrar_filas, resumen_kpis
+from kiki_control.presentation.reconciliation_view import (
+    clave_resultado,
+    cobertura_archivos,
+    conclusion_ejecutiva,
+    detalle_cliente,
+    detalle_tecnico_seguro,
+    filas_presentacion,
+    filtrar_filas,
+    filtrar_resultados_por_vista,
+    resumen_kpis,
+    tabla_principal,
+)
 from kiki_control.reconciliation import reconciliar
 from kiki_control.ui.session_cycle import (
     construir_firma_procesamiento,
@@ -28,13 +39,15 @@ def main() -> None:
     st.set_page_config(page_title="Kiki Control Financiero", layout="wide")
     _inicializar_estado()
     st.title("Kiki Control Financiero")
-    st.subheader("Conciliación de ventas de Mercado Libre con movimientos de Mercado Pago")
-    st.info(
-        "Los archivos se transmiten al servidor privado de la aplicación para procesarse. "
-        "La aplicación no los persiste en disco ni base de datos. Los datos normalizados "
-        "y resultados permanecen únicamente en memoria de sesión. El botón de limpieza "
-        "elimina el estado mantenido por la aplicación para esta sesión."
-    )
+    st.subheader("Control cruzado Mercado Libre / Mercado Pago")
+    st.info("Tus archivos se procesan únicamente durante esta sesión y no son almacenados por la aplicación.")
+    with st.expander("Cómo se tratan tus datos"):
+        st.write(
+            "Los archivos se transmiten al servidor privado de la aplicación para procesarse. "
+            "La aplicación no los persiste en disco ni base de datos. Los datos normalizados "
+            "y resultados permanecen únicamente en memoria de sesión. El botón de limpieza "
+            "elimina el estado mantenido por la aplicación para esta sesión."
+        )
     st.button("Limpiar archivos y resultados", type="secondary", on_click=_limpiar_sesion_streamlit)
 
     st.header("Etapa 1 — Carga de archivos")
@@ -196,10 +209,11 @@ def _mostrar_normalizacion(nombre: str, resultado: Any) -> None:
 def _mostrar_cobertura(cobertura: Any) -> None:
     st.header("Cobertura de los archivos")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Período de ventas informado por Mercado Libre", cobertura.periodo_ventas_ml.texto)
-    c2.metric("Período de origen de movimientos informado por Mercado Pago", cobertura.periodo_origen_mp.texto)
-    c3.metric("Período de liquidación informado por Mercado Pago", cobertura.periodo_liquidacion_mp.texto)
-    c4.metric("Movimientos sin fecha de liquidación", cobertura.movimientos_sin_fecha_liquidacion)
+    c1.metric("Ventas ML", cobertura.periodo_ventas_ml.texto)
+    c2.metric("Origen movimientos MP", cobertura.periodo_origen_mp.texto)
+    c3.metric("Liquidaciones MP", cobertura.periodo_liquidacion_mp.texto)
+    c4.metric("Sin fecha de liquidación", cobertura.movimientos_sin_fecha_liquidacion)
+    st.caption("La cobertura se calcula con fechas locales normalizadas. Ventas ML usa fecha de venta; MP usa fecha de origen y fecha de liquidación cuando existe.")
     if cobertura.advertencia_origenes:
         st.info(cobertura.advertencia_origenes)
 
@@ -210,14 +224,21 @@ def _mostrar_resultados() -> None:
 
     st.header("Resumen ejecutivo")
     st.caption("Las métricas comparables usan solo resultados con diferencia_control calculada. Los grupos financieros sin operación comercial se informan separados; devoluciones y reclamos pueden integrar ese grupo por ausencia comercial aunque su estado prioritario sea Devuelta o En reclamo. Los movimientos de fondos se mantienen separados y no se tratan como pérdidas comerciales.")
+    conclusion, severidad = conclusion_ejecutiva(reporte)
+    if severidad == "ok":
+        st.success(conclusion)
+    else:
+        st.warning(conclusion)
     kpis = resumen_kpis(reporte)
     for bloque in (list(kpis.items())[:5], list(kpis.items())[5:10], list(kpis.items())[10:]):
         cols = st.columns(len(bloque))
         for col, (nombre, valor) in zip(cols, bloque, strict=False):
             col.metric(nombre, valor)
 
-    filas = filas_presentacion(reporte.resultados)
     st.header("Resultados por operación")
+    vista = st.radio("Vista", options=["Excepciones y casos especiales", "Todas las operaciones"], horizontal=True, key="vista_resultados")
+    resultados_visibles_por_vista = filtrar_resultados_por_vista(reporte.resultados, vista)
+    filas = filas_presentacion(resultados_visibles_por_vista)
     estados = sorted({f.estado_codigo: f.estado for f in filas}.items(), key=lambda x: x[1])
     c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
     seleccion = c1.multiselect("Estados", options=[c for c, _ in estados], format_func=dict(estados).get, key="filtro_estados")
@@ -225,17 +246,18 @@ def _mostrar_resultados() -> None:
     solo_revision = c3.checkbox("Solo requieren revisión", key="filtro_solo_revision")
     solo_divididos = c4.checkbox("Solo pagos divididos", key="filtro_solo_divididos")
     visibles = filtrar_filas(filas, set(seleccion), busqueda, solo_revision, solo_divididos)
-    st.caption(f"Mostrando {len(visibles)} de {len(filas)} resultados.")
-    tabla = [{k: v for k, v in f.__dict__.items() if k not in {"clave", "estado_codigo", "diferencia_valor"}} for f in visibles]
-    st.dataframe(tabla, use_container_width=True, hide_index=True)
+    st.caption(f"Mostrando {len(visibles)} de {len(filas)} resultados de la vista seleccionada.")
+    st.dataframe(tabla_principal(visibles), use_container_width=True, hide_index=True)
 
     if visibles:
         claves = [f.clave for f in visibles]
         elegida = st.selectbox("Seleccionar operación para ver detalle", claves, key="detalle_operacion")
         mapa = {(r.id_orden or clave_resultado(r)): r for r in reporte.resultados}
-        detalle = detalle_presentacion(mapa[elegida])
         st.subheader("Detalle de operación")
-        st.table([{"Campo": k, "Valor": v} for k, v in detalle.items()])
+        st.markdown("#### Información de la operación")
+        st.table([{"Campo": k, "Valor": v} for k, v in detalle_cliente(mapa[elegida]).items()])
+        with st.expander("Trazabilidad técnica"):
+            st.table([{"Campo": k, "Valor": v} for k, v in detalle_tecnico_seguro(mapa[elegida]).items()])
 
 if __name__ == "__main__":
     main()
