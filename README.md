@@ -64,7 +64,7 @@ streamlit run app.py
    - Nunca se muestra un reporte cuya firma no coincida con los archivos y la configuración actuales.
 6. La app normaliza ambas fuentes, informa filas recibidas, normalizadas y rechazadas, y permite conciliación parcial si quedan registros válidos.
 7. El motor de conciliación produce el reporte por operación.
-8. La pantalla muestra la cobertura temporal de ambos archivos, resumen ejecutivo, tabla filtrable y detalle de cada resultado.
+8. La pantalla muestra la cobertura temporal de ambos archivos, conclusión ejecutiva, resumen ejecutivo, tabla filtrable y detalle de cada resultado.
 
 
 ## Cobertura y alcance de métricas
@@ -73,12 +73,27 @@ La cobertura comercial y la cobertura financiera pueden ser distintas porque el 
 
 Cuando los períodos de origen no coinciden, la aplicación emite una advertencia informativa y continúa la conciliación sin inventar reglas de recorte. Un movimiento financiero sin contraparte comercial puede corresponder a otro período de archivo y requiere análisis manual; no se clasifica automáticamente como pérdida comercial ni como error.
 
-El resumen ejecutivo separa los alcances:
+La presentación para cliente usa etiquetas cortas y separa los alcances:
 
-- **Operaciones comparables:** resultados con `diferencia_control` calculada. Sus métricas incluyen neto comercial, neto aprobado de Mercado Pago y diferencia de control solo para ese universo.
-- **Grupos financieros sin operación en el archivo comercial:** resultados sin operación comercial asociada, excluyendo `MOVIMIENTO_DE_FONDOS`. Pueden incluir devoluciones o reclamos aunque su estado final sea `DEVUELTA` o `EN_RECLAMO` por prioridad.
-- **Operaciones comerciales sin movimiento financiero:** ventas presentes en Mercado Libre sin movimientos financieros asociados.
+- **Comparables:** resultados con `diferencia_control` calculada. Sus métricas incluyen **Neto ML comparable**, **Neto MP comparable** y **Diferencia comparable** solo para ese universo.
+- **Sin venta en ML:** grupos financieros sin operación comercial asociada, excluyendo `MOVIMIENTO_DE_FONDOS`. Pueden incluir devoluciones o reclamos aunque su estado final sea `DEVUELTA` o `EN_RECLAMO` por prioridad.
+- **Sin movimiento en MP:** ventas presentes en Mercado Libre sin movimientos financieros asociados.
 - **Movimientos de fondos:** se mantienen separados y no se tratan como pérdidas comerciales.
+
+La conclusión ejecutiva se genera como transformación pura de presentación: no recalcula importes, no cambia estados del dominio, no llama ganancia a la utilidad informada y solo se muestra en verde cuando no existen diferencias ni casos especiales.
+
+## Vista de resultados para cliente
+
+La tabla principal inicia en **Excepciones y casos especiales** y permite cambiar a **Todas las operaciones**. La vista de excepciones incluye, solo como clasificación visual, resultados que requieren revisión, estados distintos de conciliada, diferencias de control, devoluciones, reclamos o disputas, liquidaciones pendientes, pagos divididos y movimientos de fondos.
+
+Los encabezados visibles de la tabla principal están en español: ID de orden, Estado, Neto informado ML, Neto aprobado MP, Diferencia, Neto financiero total, Utilidad informada ML, Pago dividido, Devolución, Reclamo o disputa, Pendiente de acreditación y Requiere revisión. La tabla no muestra motivos internos, códigos de estado, claves internas, hashes, contenido crudo ni PII.
+
+El detalle de operación se divide en:
+
+- **Información de la operación:** estado, importes, diferencia, indicadores principales y explicación en español.
+- **Trazabilidad técnica:** expander con motivos internos, filas comerciales y financieras de origen, versión de regla y datos técnicos seguros.
+
+Las advertencias de normalización mantienen conteos visibles y despliegan el detalle en expanders cerrados.
 
 ## Privacidad
 

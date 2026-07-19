@@ -21,6 +21,7 @@ SESSION_KEYS_TO_CLEAR = (
     "filtro_solo_revision",
     "filtro_solo_divididos",
     "detalle_operacion",
+    "vista_resultados",
 )
 
 RESULT_KEYS_TO_CLEAR = (
@@ -29,6 +30,15 @@ RESULT_KEYS_TO_CLEAR = (
     "reporte",
     "firma_procesamiento",
     "firma_actual",
+    "filtro_estados",
+    "filtro_busqueda_orden",
+    "filtro_solo_revision",
+    "filtro_solo_divididos",
+    "detalle_operacion",
+    "vista_resultados",
+)
+
+VIEW_FILTER_KEYS_TO_CLEAR = (
     "filtro_estados",
     "filtro_busqueda_orden",
     "filtro_solo_revision",
@@ -68,3 +78,8 @@ def limpiar_claves_conocidas(estado: MutableMapping[str, Any], claves: tuple[str
 def invalidar_resultados_conocidos(estado: MutableMapping[str, Any]) -> None:
     """Elimina resultados derivados que dejan de ser confiables ante cambios de entrada."""
     limpiar_claves_conocidas(estado, RESULT_KEYS_TO_CLEAR)
+
+
+def limpiar_filtros_de_vista(estado: MutableMapping[str, Any]) -> None:
+    """Elimina solo filtros dependientes de la vista, sin invalidar resultados procesados."""
+    limpiar_claves_conocidas(estado, VIEW_FILTER_KEYS_TO_CLEAR)

@@ -7,7 +7,7 @@ from typing import Iterable, Sequence
 
 from kiki_control.domain.commercial_operation import OperacionComercial
 from kiki_control.domain.financial_movement import MovimientoFinanciero
-from kiki_control.domain.reconciliation import EstadoConciliacion, ReporteConciliacion, ResultadoConciliacion
+from kiki_control.domain.reconciliation import EstadoConciliacion, ReporteConciliacion, ResultadoConciliacion, VERSION_REGLA_CONCILIACION
 from kiki_control.presentation.formatters import formato_bool, formato_pesos_argentino
 
 ETIQUETAS_ESTADO: dict[EstadoConciliacion, str] = {
@@ -62,6 +62,20 @@ class FilaResultadoPresentacion:
 
 COLUMNAS_SEGURAS = tuple(FilaResultadoPresentacion.__dataclass_fields__)
 
+ENCABEZADOS_TABLA_CLIENTE = {
+    "id_orden": "ID de orden",
+    "estado": "Estado",
+    "neto_informado_ml": "Neto informado ML",
+    "neto_pagos_aprobados_mp": "Neto aprobado MP",
+    "diferencia": "Diferencia",
+    "neto_financiero_total": "Neto financiero total",
+    "utilidad_informada": "Utilidad informada ML",
+    "pago_dividido": "Pago dividido",
+    "devolucion": "Devolución",
+    "reclamo_o_disputa": "Reclamo o disputa",
+    "pendiente_acreditacion": "Pendiente de acreditación",
+    "requiere_revision": "Requiere revisión",
+}
 
 def etiqueta_estado(estado: EstadoConciliacion) -> str:
     return ETIQUETAS_ESTADO[estado]
@@ -143,6 +157,35 @@ def filtrar_filas(filas: Iterable[FilaResultadoPresentacion], estados: set[str] 
     return salida
 
 
+def es_excepcion_o_caso_especial(resultado: ResultadoConciliacion) -> bool:
+    """Clasificación de presentación para destacar resultados que merecen revisión visual."""
+
+    return (
+        resultado.requiere_revision
+        or resultado.estado != EstadoConciliacion.CONCILIADA
+        or (resultado.diferencia_control is not None and resultado.diferencia_control != Decimal("0"))
+        or resultado.tiene_devolucion
+        or resultado.tiene_reclamo
+        or resultado.tiene_disputa
+        or resultado.tiene_liquidacion_pendiente
+        or resultado.es_pago_dividido
+        or resultado.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS
+    )
+
+
+def filtrar_resultados_por_vista(resultados: Iterable[ResultadoConciliacion], vista: str) -> list[ResultadoConciliacion]:
+    ordenados = sorted(resultados, key=lambda r: (r.id_orden is None, r.id_orden or "", r.numeros_fila_financiera, r.estado.value))
+    if vista == "Excepciones y casos especiales":
+        return [r for r in ordenados if es_excepcion_o_caso_especial(r)]
+    return ordenados
+
+
+def tabla_principal(filas: Iterable[FilaResultadoPresentacion]) -> list[dict[str, str]]:
+    """Devuelve solo columnas seguras y encabezados visibles para cliente."""
+
+    return [{titulo: getattr(fila, campo) for campo, titulo in ENCABEZADOS_TABLA_CLIENTE.items()} for fila in filas]
+
+
 def resumen_kpis(reporte: ReporteConciliacion) -> dict[str, int | str]:
     resultados = reporte.resultados
     comparables = tuple(r for r in resultados if r.diferencia_control is not None)
@@ -150,19 +193,56 @@ def resumen_kpis(reporte: ReporteConciliacion) -> dict[str, int | str]:
     comerciales_sin_movimiento = tuple(r for r in resultados if r.cantidad_operaciones_comerciales > 0 and r.cantidad_movimientos_financieros == 0)
     movimientos_fondos = tuple(r for r in resultados if r.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
     return {
-        "Operaciones comparables": len(comparables),
-        "Conciliadas exactas": sum(1 for r in comparables if r.estado == EstadoConciliacion.CONCILIADA),
-        "Operaciones comparables con diferencia": sum(1 for r in comparables if r.diferencia_control != Decimal("0")),
-        "Grupos financieros sin operación en el archivo comercial": len(financieros_sin_operacion),
-        "Operaciones comerciales sin movimiento financiero": len(comerciales_sin_movimiento),
-        "Casos que requieren revisión": sum(1 for r in resultados if r.requiere_revision),
+        "Comparables": len(comparables),
+        "Coincidencias exactas": sum(1 for r in comparables if r.estado == EstadoConciliacion.CONCILIADA),
+        "Con diferencia": sum(1 for r in comparables if r.diferencia_control != Decimal("0")),
+        "Sin venta en ML": len(financieros_sin_operacion),
+        "Sin movimiento en MP": len(comerciales_sin_movimiento),
+        "Requieren revisión": sum(1 for r in resultados if r.requiere_revision),
         "Movimientos de fondos": len(movimientos_fondos),
-        "Utilidad informada por Mercado Libre": formato_pesos_argentino(_sumar(r.utilidad_neta_informada for r in resultados)),
-        "Neto comercial de operaciones comparables": formato_pesos_argentino(_sumar(r.neto_comercial_informado for r in comparables)),
-        "Neto aprobado de Mercado Pago de operaciones comparables": formato_pesos_argentino(_sumar(r.neto_pagos_aprobados for r in comparables)),
-        "Diferencia de control — operaciones comparables": formato_pesos_argentino(_sumar(r.diferencia_control for r in comparables)),
-        "Neto aprobado de Mercado Pago sin operación comercial asociada": formato_pesos_argentino(_sumar(r.neto_pagos_aprobados for r in financieros_sin_operacion)),
+        "Utilidad informada ML": formato_pesos_argentino(_sumar(r.utilidad_neta_informada for r in resultados)),
+        "Neto ML comparable": formato_pesos_argentino(_sumar(r.neto_comercial_informado for r in comparables)),
+        "Neto MP comparable": formato_pesos_argentino(_sumar(r.neto_pagos_aprobados for r in comparables)),
+        "Diferencia comparable": formato_pesos_argentino(_sumar(r.diferencia_control for r in comparables)),
+        "Neto MP fuera del archivo ML": formato_pesos_argentino(_sumar(r.neto_pagos_aprobados for r in financieros_sin_operacion)),
     }
+
+
+def conclusion_ejecutiva(reporte: ReporteConciliacion) -> tuple[str, str]:
+    """Genera una conclusión ejecutiva sin recalcular importes ni modificar estados."""
+
+    resultados = reporte.resultados
+    comparables = tuple(r for r in resultados if r.diferencia_control is not None)
+    exactas = sum(1 for r in comparables if r.estado == EstadoConciliacion.CONCILIADA and r.diferencia_control == Decimal("0"))
+    con_diferencia = sum(1 for r in comparables if r.diferencia_control != Decimal("0"))
+    solo_mp = sum(1 for r in resultados if r.cantidad_operaciones_comerciales == 0 and r.estado != EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
+    solo_ml = sum(1 for r in resultados if r.cantidad_operaciones_comerciales > 0 and r.cantidad_movimientos_financieros == 0)
+    excepciones = sum(1 for r in resultados if es_excepcion_o_caso_especial(r))
+    requieren_revision = sum(1 for r in resultados if es_excepcion_o_caso_especial(r) and r.requiere_revision)
+    fondos = sum(1 for r in resultados if r.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
+    mensaje = (
+        f"{_frase_contador(len(comparables), 'Se comparó', 'Se compararon', 'operación', 'operaciones')}: "
+        f"{_frase_contador(exactas, '', '', 'coincide exactamente', 'coinciden exactamente')} y "
+        f"{_frase_contador(con_diferencia, '', '', 'presenta diferencias', 'presentan diferencias')}. "
+        f"Se detectaron {_sustantivo_contado(excepciones, 'resultado con excepciones o condiciones especiales', 'resultados con excepciones o condiciones especiales')}, "
+        f"de los cuales {_frase_contador(requieren_revision, '', '', 'requiere revisión manual', 'requieren revisión manual')}. "
+        f"Además, existen {_sustantivo_contado(solo_mp, 'grupo presente solo en Mercado Pago', 'grupos presentes solo en Mercado Pago')}, "
+        f"{_sustantivo_contado(solo_ml, 'operación presente solo en Mercado Libre', 'operaciones presentes solo en Mercado Libre')} y "
+        f"{_sustantivo_contado(fondos, 'movimiento de fondos informado por separado', 'movimientos de fondos informados por separado')}."
+    )
+    severidad = "ok" if con_diferencia == 0 and excepciones == 0 and solo_mp == 0 and solo_ml == 0 else "advertencia"
+    return mensaje, severidad
+
+
+def _frase_contador(cantidad: int, verbo_singular: str, verbo_plural: str, singular: str, plural: str) -> str:
+    verbo = verbo_singular if cantidad == 1 else verbo_plural
+    sujeto = singular if cantidad == 1 else plural
+    partes = [verbo, str(cantidad), sujeto]
+    return " ".join(p for p in partes if p)
+
+
+def _sustantivo_contado(cantidad: int, singular: str, plural: str) -> str:
+    return f"{cantidad} {singular if cantidad == 1 else plural}"
 
 
 def _sumar(valores: Iterable[Decimal | None]) -> Decimal | None:
@@ -195,4 +275,34 @@ def detalle_presentacion(resultado: ResultadoConciliacion) -> dict[str, str | in
         "Neto financiero total": formato_pesos_argentino(resultado.neto_financiero_total),
         "Utilidad neta informada": formato_pesos_argentino(resultado.utilidad_neta_informada),
         "Indicadores de revisión": "Sí" if resultado.requiere_revision or resultado.tiene_duplicados or resultado.tiene_movimiento_desconocido else "No",
+    }
+
+
+def detalle_cliente(resultado: ResultadoConciliacion) -> dict[str, str | int]:
+    return {
+        "ID de orden": resultado.id_orden or clave_resultado(resultado),
+        "Estado": etiqueta_estado(resultado.estado),
+        "Neto informado ML": formato_pesos_argentino(resultado.neto_comercial_informado),
+        "Neto aprobado MP": formato_pesos_argentino(resultado.neto_pagos_aprobados),
+        "Neto financiero total": formato_pesos_argentino(resultado.neto_financiero_total),
+        "Utilidad informada ML": formato_pesos_argentino(resultado.utilidad_neta_informada),
+        "Diferencia": formato_pesos_argentino(resultado.diferencia_control),
+        "Pago dividido": formato_bool(resultado.es_pago_dividido),
+        "Devolución": formato_bool(resultado.tiene_devolucion),
+        "Reclamo o disputa": formato_bool(resultado.tiene_reclamo or resultado.tiene_disputa),
+        "Pendiente de acreditación": formato_bool(resultado.tiene_liquidacion_pendiente),
+        "Requiere revisión": formato_bool(resultado.requiere_revision),
+        "Explicación": " | ".join(resultado.explicaciones) or "Sin observaciones adicionales.",
+    }
+
+
+def detalle_tecnico_seguro(resultado: ResultadoConciliacion) -> dict[str, str | int]:
+    return {
+        "Motivos internos": ", ".join(m.value for m in resultado.motivos) or "—",
+        "Filas comerciales de origen": ", ".join(map(str, resultado.numeros_fila_comercial)) or "—",
+        "Filas financieras de origen": ", ".join(map(str, resultado.numeros_fila_financiera)) or "—",
+        "Versión de regla": resultado.version_regla or VERSION_REGLA_CONCILIACION,
+        "Cantidad de pagos aprobados": resultado.cantidad_pagos_aprobados,
+        "Cantidad de movimientos financieros": resultado.cantidad_movimientos_financieros,
+        "Tolerancia aplicada": formato_pesos_argentino(resultado.tolerancia_aplicada),
     }

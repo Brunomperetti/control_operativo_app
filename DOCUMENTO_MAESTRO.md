@@ -922,7 +922,25 @@ El resumen ejecutivo debe separar explícitamente los alcances:
 
 La etiqueta genérica “sin contraparte” no debe usarse como total único porque mezcla fuentes faltantes distintas. La etiqueta “Neto de pagos aprobados” debe reemplazarse por textos que indiquen si corresponde a operaciones comparables o a Mercado Pago sin operación comercial asociada. La utilidad continúa siendo informada por Mercado Libre y no es resultado contable definitivo.
 
-### 30.7 Límites contables actuales
+### 30.7 Presentación cliente del MVP
+
+La interfaz de Streamlit debe presentar el MVP con lenguaje claro para cliente, manteniendo la trazabilidad técnica disponible pero fuera del contenido principal. El encabezado visible conserva **Kiki Control Financiero**, usa el subtítulo **Control cruzado Mercado Libre / Mercado Pago** y muestra un aviso breve de privacidad: “Tus archivos se procesan únicamente durante esta sesión y no son almacenados por la aplicación.” La explicación completa del tratamiento de datos queda dentro del expander **Cómo se tratan tus datos**, y el botón **Limpiar archivos y resultados** debe permanecer visible.
+
+El resultado general debe incluir una conclusión ejecutiva generada por transformación pura de presentación, sin recalcular importes, sin modificar estados y sin llamar ganancia a la utilidad informada. La conclusión distingue operaciones comparables, grupos presentes solo en Mercado Pago, operaciones presentes solo en Mercado Libre y movimientos de fondos. Solo puede mostrarse como mensaje verde cuando no existan diferencias ni casos especiales; ante devoluciones, reclamos, diferencias, liquidaciones pendientes, pagos divididos, revisiones o movimientos de fondos debe mostrarse como aviso informativo o advertencia.
+
+Las etiquetas visibles del resumen ejecutivo deben ser breves para evitar truncamientos: Comparables, Coincidencias exactas, Con diferencia, Sin venta en ML, Sin movimiento en MP, Requieren revisión, Movimientos de fondos, Utilidad informada ML, Neto ML comparable, Neto MP comparable, Diferencia comparable y Neto MP fuera del archivo ML. Las aclaraciones de alcance deben mantenerse mediante captions o ayudas visibles.
+
+La cobertura temporal debe usar etiquetas cortas: Ventas ML, Origen movimientos MP, Liquidaciones MP y Sin fecha de liquidación. Debe conservarse la advertencia cuando los períodos de origen sean diferentes.
+
+La vista de resultados debe ofrecer un selector entre **Excepciones y casos especiales** y **Todas las operaciones**, iniciando en excepciones. La clasificación de excepciones es exclusivamente de presentación e incluye resultados con `requiere_revision`, estado distinto de `CONCILIADA`, `diferencia_control` distinta de cero, devolución, reclamo o disputa, liquidación pendiente, pago dividido o movimiento de fondos. Esta clasificación no crea estados, no modifica prioridades y no altera el motor.
+
+La tabla principal debe usar encabezados visibles en español y no mostrar campos técnicos como motivos internos, `estado_codigo`, claves internas, `diferencia_valor`, hashes, contenido crudo ni datos personales. Los importes deben mantenerse con formato monetario argentino.
+
+El detalle de operación debe dividirse en **Información de la operación** para estado, importes, diferencia, indicadores principales y explicación en español; y el expander **Trazabilidad técnica** para motivos internos, filas de origen, versión de regla y otros datos técnicos seguros.
+
+Las advertencias de normalización deben conservar sus conteos visibles y presentar el detalle dentro de expanders cerrados, sin eliminar advertencias ni modificar reglas de normalización.
+
+### 30.8 Límites contables actuales
 
 El motor conserva `utilidad_neta_informada` como valor informado por Mercado Libre. No la recalcula, no calcula resultado operativo definitivo y no implementa todavía un resultado contable validado. Cualquier fórmula fiscal o contable definitiva queda pendiente de validación posterior.
 
