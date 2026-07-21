@@ -230,7 +230,9 @@ Existe un motor puro de dominio para vincular `VentaOficialMercadoLibre` con `Op
 
 Regla canónica: en Eccomapp, el grupo comercial es `id_carrito` cuando existe y `id_orden` cuando el carrito está vacío. `id_orden` identifica cada operación individual; `id_carrito` agrupa operaciones. El `# de venta` oficial puede ser cabecera de carrito, orden individual, detalle dentro de carrito o venta sin contraparte.
 
-La vinculación solo usa identificadores: ID Carrito e ID Order. SKU es validación secundaria agregada por grupo y nunca clave primaria. No se deben usar fechas, producto ni importes para forzar coincidencias. Los casos ambiguos, IDs duplicados o IDs asociados a más de un carrito deben quedar en revisión sin elección automática.
+La vinculación solo usa identificadores: ID Carrito e ID Order. SKU es validación secundaria agregada por grupo y nunca clave primaria. `COINCIDE` exige igualdad exacta entre conjuntos no vacíos; cualquier diferencia entre conjuntos no vacíos es `DIFIERE`. No se deben usar fechas, producto ni importes para forzar coincidencias. Los casos ambiguos, IDs duplicados o IDs asociados a más de un carrito deben quedar en revisión sin elección automática.
+
+El reporte debe conservar una partición exacta de registros: cada venta oficial `(hash_importacion, fila_origen)` y cada operación Eccomapp `(hash_importacion, numero_fila_origen)` aparece exactamente una vez, sin omisiones ni repeticiones, aunque existan conflictos. Las ventas `SOLO_MERCADO_LIBRE` activas, entregadas o con importe no cero requieren revisión; las claramente canceladas/devueltas/reembolsadas con total cero pueden quedar sin revisión manual.
 
 Estados creados: `VINCULADA`, `VINCULADA_CON_OBSERVACIONES`, `SOLO_MERCADO_LIBRE`, `SOLO_ECCOMAPP`, `AMBIGUA` y `DUPLICADA`. Métodos: `ID_CARRITO`, `ID_ORDER`, `ID_ORDER_DENTRO_DE_CARRITO` y `SIN_VINCULO`. SKU: `COINCIDE`, `NO_DISPONIBLE_EN_AMBAS`, `FALTA_EN_MERCADO_LIBRE`, `FALTA_EN_ECCOMAPP` y `DIFIERE`.
 

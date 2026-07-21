@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
+from decimal import Decimal
 
 from kiki_control.domain.commercial_link import (
     EstadoValidacionSku,
@@ -14,6 +15,16 @@ from kiki_control.domain.commercial_link import (
 )
 from kiki_control.domain.commercial_operation import OperacionComercial
 from kiki_control.domain.official_sale import VentaOficialMercadoLibre
+
+_IDENTIDAD_VENTA = tuple[str, int]
+_IDENTIDAD_ECCOMAPP = tuple[str, int]
+
+_ESTADOS_ML_SIN_REVISION = (
+    "cancel",
+    "devol",
+    "reembols",
+    "anulad",
+)
 
 
 def _texto(valor: object) -> str | None:
@@ -27,12 +38,20 @@ def _grupo(op: OperacionComercial) -> str:
     return _texto(op.id_carrito) or str(op.id_orden).strip()
 
 
+def _identidad_venta(venta: VentaOficialMercadoLibre) -> _IDENTIDAD_VENTA:
+    return (venta.hash_importacion, venta.fila_origen)
+
+
+def _identidad_eccomapp(op: OperacionComercial) -> _IDENTIDAD_ECCOMAPP:
+    return (op.hash_importacion, op.numero_fila_origen)
+
+
 def _ordenar_ops(ops: Iterable[OperacionComercial]) -> tuple[OperacionComercial, ...]:
     return tuple(sorted(ops, key=lambda op: (_grupo(op), str(op.id_orden), op.numero_fila_origen, op.hash_importacion)))
 
 
 def _ordenar_ventas(ventas: Iterable[VentaOficialMercadoLibre]) -> tuple[VentaOficialMercadoLibre, ...]:
-    return tuple(sorted(ventas, key=lambda v: (str(v.id_venta), v.fila_origen, v.hash_importacion)))
+    return tuple(sorted(ventas, key=lambda v: (str(v.id_venta), v.hash_importacion, v.fila_origen)))
 
 
 def _sku(s: str | None) -> str | None:
@@ -49,15 +68,35 @@ def _validar_sku(ventas: Iterable[VentaOficialMercadoLibre], ops: Iterable[Opera
         return EstadoValidacionSku.FALTA_EN_MERCADO_LIBRE
     if not sku_ec:
         return EstadoValidacionSku.FALTA_EN_ECCOMAPP
-    if sku_ml == sku_ec or (sku_ml & sku_ec and (sku_ml <= sku_ec or sku_ec <= sku_ml)):
+    if sku_ml == sku_ec:
         return EstadoValidacionSku.COINCIDE
     return EstadoValidacionSku.DIFIERE
 
 
+def _importe_cero(valor: Decimal | None) -> bool:
+    return valor is not None and valor == Decimal("0")
+
+
+def _solo_ml_requiere_revision(venta: VentaOficialMercadoLibre) -> bool:
+    estado = " ".join(
+        texto for texto in (_texto(venta.estado), _texto(venta.descripcion_estado)) if texto
+    ).lower()
+    parece_cancelada_o_devuelta = any(patron in estado for patron in _ESTADOS_ML_SIN_REVISION)
+    return not (parece_cancelada_o_devuelta and _importe_cero(venta.total_informado_ml))
+
+
 def _resultado(
-    *, clave: str, grupo: str | None, ventas: Iterable[VentaOficialMercadoLibre], ops: Iterable[OperacionComercial],
-    principal: VentaOficialMercadoLibre | None, estado: EstadoVinculacionComercial,
-    metodos: Iterable[MetodoVinculacionComercial], motivos: Iterable[str], explicaciones: Iterable[str], revision: bool,
+    *,
+    clave: str,
+    grupo: str | None,
+    ventas: Iterable[VentaOficialMercadoLibre],
+    ops: Iterable[OperacionComercial],
+    principal: VentaOficialMercadoLibre | None,
+    estado: EstadoVinculacionComercial,
+    metodos: Iterable[MetodoVinculacionComercial],
+    motivos: Iterable[str],
+    explicaciones: Iterable[str],
+    revision: bool,
 ) -> ResultadoVinculacionComercial:
     ventas_t = _ordenar_ventas(ventas)
     ops_t = _ordenar_ops(ops)
@@ -67,7 +106,10 @@ def _resultado(
     explicaciones_l = list(dict.fromkeys(explicaciones))
     if sku == EstadoValidacionSku.DIFIERE:
         motivos_l.append("SKU_DIFIERE")
-        explicaciones_l.append("Los SKU agregados del grupo difieren entre Mercado Libre oficial y Eccomapp; la vinculación por ID se conserva para revisión.")
+        explicaciones_l.append(
+            "Los conjuntos de SKU no vacíos difieren entre Mercado Libre oficial y Eccomapp; "
+            "la vinculación por ID se conserva para revisión."
+        )
         revision = True
         if estado == EstadoVinculacionComercial.VINCULADA:
             estado = EstadoVinculacionComercial.VINCULADA_CON_OBSERVACIONES
@@ -94,8 +136,26 @@ def _resultado(
     )
 
 
+def _validar_particion(
+    ventas: tuple[VentaOficialMercadoLibre, ...],
+    ops: tuple[OperacionComercial, ...],
+    resultados: tuple[ResultadoVinculacionComercial, ...],
+) -> None:
+    ventas_entrada = Counter(_identidad_venta(v) for v in ventas)
+    ops_entrada = Counter(_identidad_eccomapp(op) for op in ops)
+    ventas_salida = Counter(
+        _identidad_venta(v)
+        for r in resultados
+        for v in ((r.venta_principal_ml,) if r.venta_principal_ml else ()) + r.ventas_detalle_ml
+    )
+    ops_salida = Counter(_identidad_eccomapp(op) for r in resultados for op in r.operaciones_eccomapp)
+    if ventas_salida != ventas_entrada or ops_salida != ops_entrada:
+        raise AssertionError("El reporte de vinculación comercial no conserva una partición exacta de los registros de entrada.")
+
+
 def vincular_ventas_oficiales_con_eccomapp(
-    ventas_oficiales: Iterable[VentaOficialMercadoLibre], operaciones_eccomapp: Iterable[OperacionComercial]
+    ventas_oficiales: Iterable[VentaOficialMercadoLibre],
+    operaciones_eccomapp: Iterable[OperacionComercial],
 ) -> ReporteVinculacionComercial:
     """Vincula ventas oficiales con operaciones Eccomapp por carrito u orden, sin efectos colaterales."""
     ventas = _ordenar_ventas(tuple(ventas_oficiales))
@@ -105,40 +165,189 @@ def vincular_ventas_oficiales_con_eccomapp(
     ordenes: dict[str, set[str]] = defaultdict(set)
     ops_por_orden: dict[str, list[OperacionComercial]] = defaultdict(list)
     for op in ops:
-        g = _grupo(op); grupos[g].append(op); ordenes[str(op.id_orden).strip()].add(g); ops_por_orden[str(op.id_orden).strip()].append(op)
-        if _texto(op.id_carrito): carritos[_texto(op.id_carrito) or ""].add(g)
-    conflictos = {oid for oid, gl in ordenes.items() if len(gl) > 1 or len({_texto(o.id_carrito) for o in ops_por_orden[oid]}) > 1 or len(ops_por_orden[oid]) > 1}
-    asignadas: dict[str, list[VentaOficialMercadoLibre]] = defaultdict(list); metodos = defaultdict(set); principales: dict[str, list[VentaOficialMercadoLibre]] = defaultdict(list)
+        g = _grupo(op)
+        grupos[g].append(op)
+        ordenes[str(op.id_orden).strip()].add(g)
+        ops_por_orden[str(op.id_orden).strip()].append(op)
+        carrito = _texto(op.id_carrito)
+        if carrito:
+            carritos[carrito].add(g)
+
+    ordenes_conflictivas = {
+        oid
+        for oid, grupos_de_orden in ordenes.items()
+        if len(grupos_de_orden) > 1
+        or len({_texto(o.id_carrito) for o in ops_por_orden[oid]}) > 1
+        or len(ops_por_orden[oid]) > 1
+    }
+    grupos_con_conflictos = {g for oid in ordenes_conflictivas for g in ordenes.get(oid, set())}
+    ids_venta_duplicados = {id_venta for id_venta, cantidad in Counter(str(v.id_venta).strip() for v in ventas).items() if cantidad > 1}
+
+    asignadas: dict[str, list[VentaOficialMercadoLibre]] = defaultdict(list)
+    metodos: dict[str, set[MetodoVinculacionComercial]] = defaultdict(set)
+    principales: dict[str, list[VentaOficialMercadoLibre]] = defaultdict(list)
     resultados: list[ResultadoVinculacionComercial] = []
-    ventas_usadas: set[tuple[str, int, str]] = set(); grupos_conflictivos: set[str] = set()
+
+    for id_duplicado in sorted(ids_venta_duplicados):
+        ventas_duplicadas = tuple(v for v in ventas if str(v.id_venta).strip() == id_duplicado)
+        resultados.append(
+            _resultado(
+                clave=f"duplicada-ml:{id_duplicado}",
+                grupo=None,
+                ventas=ventas_duplicadas,
+                ops=(),
+                principal=None,
+                estado=EstadoVinculacionComercial.DUPLICADA,
+                metodos=(MetodoVinculacionComercial.SIN_VINCULO,),
+                motivos=("ID_VENTA_MERCADO_LIBRE_DUPLICADO",),
+                explicaciones=(
+                    "Dos o más filas oficiales tienen el mismo # de venta; quedan en revisión sin vincularse silenciosamente.",
+                ),
+                revision=True,
+            )
+        )
+
     for v in ventas:
-        vid = str(v.id_venta).strip(); via_carrito = set(carritos.get(vid, set())); via_orden = set(ordenes.get(vid, set()))
-        destinos = via_carrito | via_orden; keyv = (v.id_venta, v.fila_origen, v.hash_importacion)
-        if vid in conflictos:
-            destinos |= via_orden
-            for g in destinos: grupos_conflictivos.add(g)
-            resultados.append(_resultado(clave=f"duplicada:ml:{vid}:{v.fila_origen}", grupo=None, ventas=(v,), ops=[op for g in destinos for op in grupos[g]], principal=None, estado=EstadoVinculacionComercial.DUPLICADA, metodos=(MetodoVinculacionComercial.SIN_VINCULO,), motivos=("ID_ORDER_ECCOMAPP_DUPLICADO",), explicaciones=("El ID Order de Eccomapp está repetido o asociado a más de un carrito; no se fuerza la vinculación.",), revision=True)); ventas_usadas.add(keyv); continue
+        vid = str(v.id_venta).strip()
+        if vid in ids_venta_duplicados:
+            continue
+        via_carrito = set(carritos.get(vid, set()))
+        via_orden = set(ordenes.get(vid, set()))
+        destinos = via_carrito | via_orden
         if len(destinos) > 1:
-            for g in destinos: grupos_conflictivos.add(g)
-            resultados.append(_resultado(clave=f"ambigua:ml:{vid}:{v.fila_origen}", grupo=None, ventas=(v,), ops=[op for g in destinos for op in grupos[g]], principal=None, estado=EstadoVinculacionComercial.AMBIGUA, metodos=(MetodoVinculacionComercial.SIN_VINCULO,), motivos=("ID_CONDUCE_A_MULTIPLES_GRUPOS",), explicaciones=("El identificador coincide con más de un grupo canónico; queda en revisión sin elegir automáticamente.",), revision=True)); ventas_usadas.add(keyv); continue
+            resultados.append(
+                _resultado(
+                    clave=f"ambigua-ml:{vid}:{v.hash_importacion}:{v.fila_origen}",
+                    grupo=None,
+                    ventas=(v,),
+                    ops=(),
+                    principal=None,
+                    estado=EstadoVinculacionComercial.AMBIGUA,
+                    metodos=(MetodoVinculacionComercial.SIN_VINCULO,),
+                    motivos=("ID_CONDUCE_A_MULTIPLES_GRUPOS",),
+                    explicaciones=(
+                        "El identificador coincide con más de un grupo canónico; queda en revisión sin elegir automáticamente.",
+                    ),
+                    revision=True,
+                )
+            )
+            continue
+        if vid in ordenes_conflictivas:
+            resultados.append(
+                _resultado(
+                    clave=f"duplicada-order-ml:{vid}:{v.hash_importacion}:{v.fila_origen}",
+                    grupo=None,
+                    ventas=(v,),
+                    ops=(),
+                    principal=None,
+                    estado=EstadoVinculacionComercial.DUPLICADA,
+                    metodos=(MetodoVinculacionComercial.SIN_VINCULO,),
+                    motivos=("ID_ORDER_ECCOMAPP_DUPLICADO",),
+                    explicaciones=(
+                        "El ID Order de Eccomapp está repetido o asociado a más de un carrito; la venta queda en revisión sin forzar vínculo.",
+                    ),
+                    revision=True,
+                )
+            )
+            continue
         if len(destinos) == 1:
-            g = next(iter(destinos)); asignadas[g].append(v); ventas_usadas.add(keyv)
+            g = next(iter(destinos))
+            asignadas[g].append(v)
             if vid in via_carrito:
-                metodos[g].add(MetodoVinculacionComercial.ID_CARRITO); principales[g].append(v)
-            elif any(_texto(op.id_carrito) for op in grupos[g]): metodos[g].add(MetodoVinculacionComercial.ID_ORDER_DENTRO_DE_CARRITO)
-            else: metodos[g].add(MetodoVinculacionComercial.ID_ORDER); principales[g].append(v)
-        else:
-            resultados.append(_resultado(clave=f"solo-ml:{vid}:{v.fila_origen}", grupo=None, ventas=(v,), ops=(), principal=None, estado=EstadoVinculacionComercial.SOLO_MERCADO_LIBRE, metodos=(MetodoVinculacionComercial.SIN_VINCULO,), motivos=("SIN_CONTRAPARTE_ECCOMAPP",), explicaciones=("No se encontró contraparte por ID Carrito ni ID Order en Eccomapp; puede ser cancelación, devolución, diferencia de cobertura u operación no incluida.",), revision=False)); ventas_usadas.add(keyv)
+                metodos[g].add(MetodoVinculacionComercial.ID_CARRITO)
+                principales[g].append(v)
+            elif any(_texto(op.id_carrito) for op in grupos[g]):
+                metodos[g].add(MetodoVinculacionComercial.ID_ORDER_DENTRO_DE_CARRITO)
+            else:
+                metodos[g].add(MetodoVinculacionComercial.ID_ORDER)
+                principales[g].append(v)
+            continue
+        revision = _solo_ml_requiere_revision(v)
+        explicacion = (
+            "No se encontró contraparte por ID Carrito ni ID Order en Eccomapp; requiere revisión porque "
+            "puede faltar el costo de producto de una venta activa o con importe comercial."
+            if revision
+            else "No se encontró contraparte por ID Carrito ni ID Order en Eccomapp; por estado cancelado/devuelto/reembolsado "
+            "y total comercial cero puede corresponder a cancelación, devolución, diferencia de cobertura u operación no incluida."
+        )
+        resultados.append(
+            _resultado(
+                clave=f"solo-ml:{vid}:{v.hash_importacion}:{v.fila_origen}",
+                grupo=None,
+                ventas=(v,),
+                ops=(),
+                principal=None,
+                estado=EstadoVinculacionComercial.SOLO_MERCADO_LIBRE,
+                metodos=(MetodoVinculacionComercial.SIN_VINCULO,),
+                motivos=("SIN_CONTRAPARTE_ECCOMAPP",),
+                explicaciones=(explicacion,),
+                revision=revision,
+            )
+        )
+
     for g in sorted(grupos):
-        if g in grupos_conflictivos: continue
-        if g in asignadas:
-            ps = principales[g]; estado = EstadoVinculacionComercial.VINCULADA; revision = False; motivos=[]; expl=[]
-            if len(ps) != 1:
-                estado = EstadoVinculacionComercial.VINCULADA_CON_OBSERVACIONES; revision=True; motivos.append("VENTA_PRINCIPAL_ML_FALTANTE_O_MULTIPLE"); expl.append("El grupo conserva sus relaciones, pero falta la venta principal de carrito o aparece más de una principal.")
-            resultados.append(_resultado(clave=f"grupo:{g}", grupo=g, ventas=asignadas[g], ops=grupos[g], principal=ps[0] if len(ps)==1 else None, estado=estado, metodos=metodos[g], motivos=motivos, explicaciones=expl, revision=revision))
-        else:
-            resultados.append(_resultado(clave=f"solo-eccomapp:{g}", grupo=g, ventas=(), ops=grupos[g], principal=None, estado=EstadoVinculacionComercial.SOLO_ECCOMAPP, metodos=(MetodoVinculacionComercial.SIN_VINCULO,), motivos=("SIN_CONTRAPARTE_MERCADO_LIBRE",), explicaciones=("No se encontró contraparte en el archivo oficial de Mercado Libre cargado.",), revision=True))
+        ps = principales[g]
+        motivos: list[str] = []
+        explicaciones: list[str] = []
+        revision = False
+        estado = EstadoVinculacionComercial.VINCULADA if g in asignadas else EstadoVinculacionComercial.SOLO_ECCOMAPP
+        metodos_grupo = metodos[g] if g in asignadas else {MetodoVinculacionComercial.SIN_VINCULO}
+        if g in grupos_con_conflictos:
+            estado = EstadoVinculacionComercial.DUPLICADA if g not in asignadas else EstadoVinculacionComercial.VINCULADA_CON_OBSERVACIONES
+            revision = True
+            motivos.append("GRUPO_ECCOMAPP_CON_CONFLICTO_DE_IDENTIDAD")
+            explicaciones.append(
+                "El grupo Eccomapp contiene al menos un ID Order duplicado o asociado a más de un carrito; "
+                "las operaciones se conservan una sola vez en su grupo canónico."
+            )
+        if g in asignadas and len(ps) != 1:
+            if estado == EstadoVinculacionComercial.VINCULADA:
+                estado = EstadoVinculacionComercial.VINCULADA_CON_OBSERVACIONES
+            revision = True
+            motivos.append("VENTA_PRINCIPAL_ML_FALTANTE_O_MULTIPLE")
+            explicaciones.append(
+                "El grupo conserva sus relaciones, pero falta la venta principal de carrito o aparece más de una principal."
+            )
+        if g not in asignadas:
+            revision = True
+            motivos.append("SIN_CONTRAPARTE_MERCADO_LIBRE")
+            explicaciones.append("No se encontró contraparte en el archivo oficial de Mercado Libre cargado.")
+        resultados.append(
+            _resultado(
+                clave=f"grupo:{g}",
+                grupo=g,
+                ventas=asignadas[g],
+                ops=grupos[g],
+                principal=ps[0] if len(ps) == 1 else None,
+                estado=estado,
+                metodos=metodos_grupo,
+                motivos=motivos,
+                explicaciones=explicaciones,
+                revision=revision,
+            )
+        )
+
     resultados_t = tuple(sorted(resultados, key=lambda r: r.clave_resultado))
+    _validar_particion(ventas, ops, resultados_t)
     cuenta = lambda e: sum(1 for r in resultados_t if r.estado == e)
-    vinculados = [r for r in resultados_t if r.estado in (EstadoVinculacionComercial.VINCULADA, EstadoVinculacionComercial.VINCULADA_CON_OBSERVACIONES)]
-    return ReporteVinculacionComercial(resultados_t, len(ventas), len(ops), len(grupos), len(vinculados), cuenta(EstadoVinculacionComercial.VINCULADA), cuenta(EstadoVinculacionComercial.VINCULADA_CON_OBSERVACIONES), cuenta(EstadoVinculacionComercial.SOLO_MERCADO_LIBRE), cuenta(EstadoVinculacionComercial.SOLO_ECCOMAPP), cuenta(EstadoVinculacionComercial.AMBIGUA), cuenta(EstadoVinculacionComercial.DUPLICADA), sum(1 for r in resultados_t if r.requiere_revision), tuple(sorted({v.hash_importacion for v in ventas})), tuple(sorted({op.hash_importacion for op in ops})))
+    vinculados = [
+        r
+        for r in resultados_t
+        if r.estado in (EstadoVinculacionComercial.VINCULADA, EstadoVinculacionComercial.VINCULADA_CON_OBSERVACIONES)
+    ]
+    return ReporteVinculacionComercial(
+        resultados=resultados_t,
+        total_ventas_oficiales_recibidas=len(ventas),
+        total_operaciones_eccomapp_recibidas=len(ops),
+        total_grupos_eccomapp=len(grupos),
+        total_grupos_vinculados=len(vinculados),
+        total_vinculados_sin_observaciones=cuenta(EstadoVinculacionComercial.VINCULADA),
+        total_vinculados_con_observaciones=cuenta(EstadoVinculacionComercial.VINCULADA_CON_OBSERVACIONES),
+        total_solo_mercado_libre=cuenta(EstadoVinculacionComercial.SOLO_MERCADO_LIBRE),
+        total_solo_eccomapp=cuenta(EstadoVinculacionComercial.SOLO_ECCOMAPP),
+        total_ambiguos=cuenta(EstadoVinculacionComercial.AMBIGUA),
+        total_duplicados=cuenta(EstadoVinculacionComercial.DUPLICADA),
+        total_requieren_revision=sum(1 for r in resultados_t if r.requiere_revision),
+        hashes_importacion_ml=tuple(sorted({v.hash_importacion for v in ventas})),
+        hashes_importacion_eccomapp=tuple(sorted({op.hash_importacion for op in ops})),
+    )

@@ -285,8 +285,9 @@ Reglas principales:
 - En Eccomapp, `id_grupo_canonico` es `id_carrito` cuando existe y `id_orden` cuando no existe carrito.
 - `# de venta` del XLSX oficial puede ser cabecera de carrito, venta individual, detalle interno de carrito o venta sin contraparte.
 - La vinculación se realiza por ID Carrito o ID Order; no se usan fechas, producto ni importes para forzar coincidencias.
-- SKU se valida de manera secundaria por conjunto agregado de cabecera y detalles, pero nunca define la clave primaria.
-- Los estados sin contraparte son prudentes: una venta solo Mercado Libre puede ser cancelación, devolución, diferencia de cobertura u operación no incluida; un grupo solo Eccomapp requiere revisión.
+- SKU se valida de manera secundaria por conjunto agregado de cabecera y detalles, pero nunca define la clave primaria; `COINCIDE` requiere igualdad exacta de conjuntos no vacíos.
+- Cada venta oficial y cada operación Eccomapp aparece exactamente una vez en el reporte usando sus identidades de trazabilidad, incluso ante duplicados o ambigüedades.
+- Los estados sin contraparte son prudentes: una venta solo Mercado Libre activa o con importe no cero requiere revisión porque puede faltar el costo de producto; una cancelada/devuelta/reembolsada con total cero puede quedar sin revisión manual; un grupo solo Eccomapp requiere revisión.
 
 Limitaciones actuales:
 
