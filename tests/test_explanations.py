@@ -174,6 +174,88 @@ def test_estado_final_explica_ganador_en_lenguaje_cliente_y_columnas_intervinien
     assert estado.valor_calculado == "Pendiente de acreditación"
     assert "El estado ganador" in estado.regla_o_formula
     assert "prioridad oficial" in estado.regla_o_formula
-    assert "ID Order" in estado.columnas_utilizadas
-    assert "ID DE LA ORDEN" in estado.columnas_utilizadas
-    assert "FECHA DE LIQUIDACIÓN DEL DINERO" in estado.columnas_utilizadas
+    assert estado.columnas_utilizadas == ("ID DE LA ORDEN", "TIPO DE OPERACIÓN", "FECHA DE LIQUIDACIÓN DEL DINERO")
+
+
+def _columnas_estado_final(resultado, operaciones, movimientos):
+    return _paso(resultado, "Estado final", operaciones, movimientos).columnas_utilizadas
+
+
+def test_columnas_estado_exactas_para_estados_comparables_y_pendiente():
+    columnas_comparables = ("ID Order", "Monto neto (en MP) ($)", "ID DE LA ORDEN", "TIPO DE OPERACIÓN", "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO")
+    operacion = op(id_orden="OK", neto="100")
+    movimiento = mov(id_orden="OK", monto="100")
+    conciliada = reconciliar([operacion], [movimiento]).resultados[0]
+    assert conciliada.estado == EstadoConciliacion.CONCILIADA
+    assert _columnas_estado_final(conciliada, [operacion], [movimiento]) == columnas_comparables
+
+    operacion_dif = op(id_orden="DIF", neto="100")
+    movimiento_dif = mov(id_orden="DIF", monto="101")
+    diferencia = reconciliar([operacion_dif], [movimiento_dif]).resultados[0]
+    assert diferencia.estado == EstadoConciliacion.CONCILIADA_CON_DIFERENCIA
+    assert _columnas_estado_final(diferencia, [operacion_dif], [movimiento_dif]) == columnas_comparables
+
+    operacion_pend = op(id_orden="PEND", neto="100")
+    movimiento_pend = mov(id_orden="PEND", monto="100", liquidado=False)
+    pendiente = reconciliar([operacion_pend], [movimiento_pend]).resultados[0]
+    assert pendiente.estado == EstadoConciliacion.PENDIENTE_ACREDITACION
+    assert _columnas_estado_final(pendiente, [operacion_pend], [movimiento_pend]) == ("ID DE LA ORDEN", "TIPO DE OPERACIÓN", "FECHA DE LIQUIDACIÓN DEL DINERO")
+
+
+def test_columnas_estado_exactas_para_sin_contraparte_devolucion_reclamo_revision_y_fondos():
+    operacion = op(id_orden="SINMP", neto="100")
+    sin_mp = reconciliar([operacion], []).resultados[0]
+    assert sin_mp.estado == EstadoConciliacion.OPERACION_SIN_MOVIMIENTO_FINANCIERO
+    assert _columnas_estado_final(sin_mp, [operacion], []) == ("ID Order",)
+
+    movimiento_sin_ml = mov(id_orden="SINML", monto="100")
+    sin_ml = reconciliar([], [movimiento_sin_ml]).resultados[0]
+    assert sin_ml.estado == EstadoConciliacion.MOVIMIENTO_SIN_OPERACION_COMERCIAL
+    assert _columnas_estado_final(sin_ml, [], [movimiento_sin_ml]) == ("ID DE LA ORDEN", "TIPO DE OPERACIÓN")
+
+    devolucion_mov = mov(id_orden="DEV", monto="-10", tipo=TipoOperacionFinanciera.DEVOLUCION_DINERO, id_mp="dev")
+    devuelta = reconciliar([], [devolucion_mov]).resultados[0]
+    assert devuelta.estado == EstadoConciliacion.DEVUELTA
+    columnas_dev = _columnas_estado_final(devuelta, [], [devolucion_mov])
+    assert columnas_dev == ("ID DE LA ORDEN", "TIPO DE OPERACIÓN")
+    assert "Monto neto (en MP) ($)" not in columnas_dev
+    assert "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO" not in columnas_dev
+
+    reclamo_mov = mov(id_orden="REC", monto="-5", tipo=TipoOperacionFinanciera.RECLAMO, id_mp="rec")
+    reclamo = reconciliar([], [reclamo_mov]).resultados[0]
+    assert reclamo.estado == EstadoConciliacion.EN_RECLAMO
+    columnas_rec = _columnas_estado_final(reclamo, [], [reclamo_mov])
+    assert columnas_rec == ("ID DE LA ORDEN", "TIPO DE OPERACIÓN")
+    assert "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO" not in columnas_rec
+
+    desconocido_mov = mov(id_orden="UNK", monto="1", tipo=TipoOperacionFinanciera.DESCONOCIDA, id_mp="unk")
+    revision = reconciliar([], [desconocido_mov]).resultados[0]
+    assert revision.estado == EstadoConciliacion.EN_REVISION
+    assert _columnas_estado_final(revision, [], [desconocido_mov]) == ("ID DE LA ORDEN", "TIPO DE OPERACIÓN")
+
+    payout = mov(id_orden=None, monto="-20", tipo=TipoOperacionFinanciera.PAYOUT, id_mp="payout", fila=55)
+    fondos = reconciliar([], [payout]).resultados[0]
+    assert fondos.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS
+    estado_fondos = _paso(fondos, "Estado final", [], [payout])
+    assert estado_fondos.columnas_utilizadas == ("TIPO DE OPERACIÓN", "ID DE LA ORDEN")
+    assert "PAYOUT" in estado_fondos.regla_o_formula
+
+
+def test_columnas_estado_exactas_para_duplicadas_comercial_y_financiera_sin_cambiar_motor():
+    op_1 = op(id_orden="DUPC", fila=1, hash_="hc1")
+    op_2 = op(id_orden="DUPC", fila=2, hash_="hc2")
+    mov_c = mov(id_orden="DUPC", id_mp="mp-dupc")
+    duplicada_comercial = reconciliar([op_1, op_2], [mov_c]).resultados[0]
+    assert duplicada_comercial.estado == EstadoConciliacion.DUPLICADA
+    assert _columnas_estado_final(duplicada_comercial, [op_1, op_2], [mov_c]) == ("ID Order",)
+
+    op_f = op(id_orden="DUPF")
+    mov_f1 = mov(id_orden="DUPF", id_mp="mp-repetido", fila=20)
+    mov_f2 = mov(id_orden="DUPF", id_mp="mp-repetido", fila=21)
+    duplicada_financiera = reconciliar([op_f], [mov_f1, mov_f2]).resultados[0]
+    assert duplicada_financiera.estado == EstadoConciliacion.DUPLICADA
+    columnas_fin = _columnas_estado_final(duplicada_financiera, [op_f], [mov_f1, mov_f2])
+    assert columnas_fin == ("ID DE OPERACIÓN EN MERCADO PAGO", "TIPO DE OPERACIÓN")
+    assert "ID DE OPERACIÓN EN MERCADO PAGO" in columnas_fin
+    assert duplicada_financiera.neto_financiero_total == mov_f1.monto_neto_impactado + mov_f2.monto_neto_impactado
+    assert not any("REAL" in str(valor) for valor in columnas_fin)

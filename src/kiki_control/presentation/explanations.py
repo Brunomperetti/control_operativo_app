@@ -6,12 +6,13 @@ from typing import Iterable, Sequence
 
 from kiki_control.domain.commercial_operation import OperacionComercial
 from kiki_control.domain.financial_movement import MovimientoFinanciero, TipoOperacionFinanciera
-from kiki_control.domain.reconciliation import EstadoConciliacion, ResultadoConciliacion
+from kiki_control.domain.reconciliation import EstadoConciliacion, MotivoConciliacion, ResultadoConciliacion
 from kiki_control.presentation.formatters import formato_pesos_argentino
 from kiki_control.presentation.reconciliation_view import etiqueta_estado
 
 ML_ID_ORDER = "ID Order"
 MP_ID_ORDER = "ID DE LA ORDEN"
+MP_ID_OPERACION = "ID DE OPERACIÓN EN MERCADO PAGO"
 ML_SKU = "Sku"
 MP_SKU = "CÓDIGO DE PRODUCTO SKU"
 ML_NETO = "Monto neto (en MP) ($)"
@@ -148,7 +149,7 @@ def explicar_operacion(resultado: ResultadoConciliacion, operaciones: Sequence[O
     pasos.append(PasoCalculoOperacion(
         "Pago dividido",
         _si_no(resultado.es_pago_dividido),
-        f"Es Sí cuando existen más de un movimiento normalizado PAGO_APROBADO para la orden. Cantidad encontrada: {cantidad_pagos}. "
+        f"Es Sí cuando existen dos o más movimientos normalizados como pago aprobado (`PAGO_APROBADO`) para la orden. Cantidad encontrada: {cantidad_pagos}. "
         + ("Se suman sus netos para el control principal." if resultado.es_pago_dividido else "Se encontró cero o un único pago aprobado."),
         "Mercado Pago",
         (MP_ID_ORDER, MP_TIPO, MP_NETO),
@@ -213,15 +214,35 @@ def _explicacion_estado(resultado: ResultadoConciliacion, secundarios: str) -> s
     return f"El estado ganador es {etiqueta_estado(resultado.estado)} porque {explicaciones}. Si había varias condiciones candidatas, se aplicó la prioridad oficial de estados. Indicadores secundarios: {secundarios}."
 
 def _columnas_estado(resultado: ResultadoConciliacion) -> tuple[str, ...]:
+    """Columnas que determinaron el estado, no todas las columnas disponibles."""
+
+    motivos = set(resultado.motivos)
     columnas: list[str] = []
-    if resultado.cantidad_operaciones_comerciales:
-        columnas.extend([ML_ID_ORDER, ML_NETO])
-    if resultado.cantidad_movimientos_financieros:
-        columnas.extend([MP_ID_ORDER, MP_TIPO, MP_NETO])
-    if resultado.tiene_liquidacion_pendiente or resultado.estado == EstadoConciliacion.PENDIENTE_ACREDITACION:
-        columnas.append(MP_FECHA_LIQUIDACION)
-    if resultado.utilidad_neta_informada is not None:
-        columnas.append(ML_UTILIDAD)
+    if resultado.estado in {
+        EstadoConciliacion.CONCILIADA,
+        EstadoConciliacion.CONCILIADA_CON_DIFERENCIA_MENOR,
+        EstadoConciliacion.CONCILIADA_CON_DIFERENCIA,
+    }:
+        columnas.extend([ML_ID_ORDER, ML_NETO, MP_ID_ORDER, MP_TIPO, MP_NETO])
+    elif resultado.estado == EstadoConciliacion.PENDIENTE_ACREDITACION:
+        columnas.extend([MP_ID_ORDER, MP_TIPO, MP_FECHA_LIQUIDACION])
+    elif resultado.estado == EstadoConciliacion.OPERACION_SIN_MOVIMIENTO_FINANCIERO:
+        columnas.append(ML_ID_ORDER)
+    elif resultado.estado == EstadoConciliacion.MOVIMIENTO_SIN_OPERACION_COMERCIAL:
+        columnas.extend([MP_ID_ORDER, MP_TIPO])
+    elif resultado.estado == EstadoConciliacion.DEVUELTA:
+        columnas.extend([MP_ID_ORDER, MP_TIPO])
+    elif resultado.estado == EstadoConciliacion.EN_RECLAMO:
+        columnas.extend([MP_ID_ORDER, MP_TIPO])
+    elif resultado.estado == EstadoConciliacion.EN_REVISION:
+        columnas.extend([MP_ID_ORDER, MP_TIPO])
+    elif resultado.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS:
+        columnas.extend([MP_TIPO, MP_ID_ORDER])
+    elif resultado.estado == EstadoConciliacion.DUPLICADA:
+        if MotivoConciliacion.OPERACION_COMERCIAL_DUPLICADA in motivos:
+            columnas.append(ML_ID_ORDER)
+        if MotivoConciliacion.MOVIMIENTO_FINANCIERO_DUPLICADO in motivos:
+            columnas.extend([MP_ID_OPERACION, MP_TIPO])
     return tuple(dict.fromkeys(columnas))
 
 def _filas(comerciales: tuple[int, ...], financieras: tuple[int, ...]) -> str:
