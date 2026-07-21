@@ -24,6 +24,8 @@ from kiki_control.presentation.review_cases import (
     conteo_por_tipo,
     filas_revisiones,
     filtrar_casos,
+    clave_caso_revision,
+    referencia_visible_caso,
 )
 from kiki_control.presentation.reconciliation_view import (
     clave_resultado,
@@ -336,10 +338,11 @@ def _mostrar_revisiones_pendientes(reporte: Any) -> None:
             "Filas MP": st.column_config.TextColumn("Filas MP", help="Filas financieras de origen usadas para trazabilidad."),
         })
         if visibles:
-            opciones = [c.resultado.id_orden or clave_resultado(c.resultado) for c in visibles]
+            opciones = [clave_caso_revision(c) for c in visibles]
+            casos_por_clave = {clave_caso_revision(c): c for c in visibles}
             limpiar_detalle_revision_si_obsoleto(st.session_state, set(opciones))
-            elegida = st.selectbox("Seleccionar caso", opciones, key="revision_detalle")
-            caso = {c.resultado.id_orden or clave_resultado(c.resultado): c for c in visibles}[elegida]
+            elegida = st.selectbox("Seleccionar caso", opciones, key="revision_detalle", format_func=lambda clave: referencia_visible_caso(casos_por_clave[clave]))
+            caso = casos_por_clave[elegida]
             st.subheader("Detalle de la revisión")
             st.write(f"**Qué se detectó:** {caso.nombre_visible}.")
             st.write(f"**Por qué no pudo resolverse automáticamente:** {caso.descripcion} La aplicación no puede resolverlo automáticamente con los datos disponibles.")

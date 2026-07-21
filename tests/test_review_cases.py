@@ -7,7 +7,7 @@ from openpyxl import load_workbook
 from kiki_control.domain.financial_movement import TipoOperacionFinanciera
 from kiki_control.domain.reconciliation import EstadoConciliacion, MotivoConciliacion
 from kiki_control.exporting import generar_revisiones_pendientes_excel
-from kiki_control.presentation.review_cases import TipoRevision, caso_a_fila, clasificar_revision, clasificar_revisiones, conteo_por_tipo, filas_revisiones, filtrar_casos
+from kiki_control.presentation.review_cases import TipoRevision, caso_a_fila, clave_caso_revision, clasificar_revision, clasificar_revisiones, conteo_por_tipo, filas_revisiones, filtrar_casos, referencia_visible_caso
 from kiki_control.reconciliation import reconciliar
 from tests.test_reconciliation_engine import FECHA, mov, op
 
@@ -98,3 +98,20 @@ def test_excel_revisiones_referencia_amigable_para_movimiento_sin_id_orden():
     valores = [cell.value for row in ws.iter_rows() for cell in row]
     assert not any("hash" in str(v).lower() for v in valores if v is not None)
     assert not any(pii in str(v).lower() for v in valores if v is not None for pii in ("pagador", "documento", "tarjeta", "datos extra"))
+
+
+def test_selector_y_busqueda_usan_referencia_amigable_sin_exponer_clave_tecnica():
+    reporte = reconciliar([], [mov(id_orden=None, tipo=TipoOperacionFinanciera.CASHBACK, fila=77, id_mp="mp-sintetico")])
+    caso = clasificar_revisiones(reporte.resultados)[0]
+    clave_interna = clave_caso_revision(caso)
+    referencia = referencia_visible_caso(caso)
+    opciones_selector = [clave_interna]
+    textos_visibles = [referencia_visible_caso({clave_interna: caso}[opcion]) for opcion in opciones_selector]
+
+    assert clave_interna == "movimiento_sin_operacion_comercial-fila-77"
+    assert textos_visibles == ["Movimiento MP sin ID de orden — referencia interna fila 77"]
+    assert filtrar_casos((caso,), busqueda="Movimiento MP sin ID de orden") == [caso]
+    assert filtrar_casos((caso,), busqueda="fila 77") == [caso]
+    assert filtrar_casos((caso,), busqueda=clave_interna) == [caso]
+    assert clave_interna not in textos_visibles[0]
+    assert not any(sensible in textos_visibles[0].lower() for sensible in ("hash", "pagador", "documento", "tarjeta", "datos extra"))

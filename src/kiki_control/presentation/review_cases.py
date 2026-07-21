@@ -128,11 +128,24 @@ def conteo_por_tipo(casos: Iterable[CasoRevision]) -> dict[TipoRevision, int]:
     return {tipo: cantidad for tipo, cantidad in conteos.items() if cantidad}
 
 
+def clave_caso_revision(caso: CasoRevision) -> str:
+    """Clave estable interna para vincular UI con resultado, sin usarla como texto visible."""
+
+    return clave_resultado(caso.resultado)
+
+
+def referencia_visible_caso(caso: CasoRevision) -> str:
+    """Referencia segura visible para la clienta: ID real o referencia interna de fila."""
+
+    r = caso.resultado
+    return r.id_orden or f"Movimiento MP sin ID de orden — referencia interna fila {r.numeros_fila_financiera[0] if r.numeros_fila_financiera else 'sin fila'}"
+
+
 def caso_a_fila(caso: CasoRevision) -> FilaRevisionPendiente:
     r = caso.resultado
     return FilaRevisionPendiente(
-        clave=clave_resultado(r),
-        id_orden_o_referencia=r.id_orden or f"Movimiento MP sin ID de orden — referencia interna fila {r.numeros_fila_financiera[0] if r.numeros_fila_financiera else 'sin fila'}",
+        clave=clave_caso_revision(caso),
+        id_orden_o_referencia=referencia_visible_caso(caso),
         tipo_revision=caso.nombre_visible,
         tipo_revision_codigo=caso.tipo.value,
         estado=etiqueta_estado(r.estado),
@@ -155,11 +168,11 @@ def filtrar_casos(casos: Iterable[CasoRevision], tipo: TipoRevision | None = Non
     texto = busqueda.strip().lower()
     salida = []
     for caso in casos:
-        r = caso.resultado
-        ref = r.id_orden or clave_resultado(r)
+        ref_visible = referencia_visible_caso(caso)
+        ref_interna = clave_caso_revision(caso)
         if tipo is not None and caso.tipo != tipo:
             continue
-        if texto and texto not in ref.lower():
+        if texto and texto not in ref_visible.lower() and texto not in ref_interna.lower():
             continue
         salida.append(caso)
     return salida
