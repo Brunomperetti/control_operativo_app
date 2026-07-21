@@ -11,6 +11,13 @@ from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
 from kiki_control.domain.enums import TipoFuente
 from kiki_control.exporting import generar_reporte_completo_excel, generar_reporte_excepciones_excel
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
+from kiki_control.presentation.explanations import (
+    COLUMNAS_TABLA,
+    METRICAS_COBERTURA,
+    METRICAS_RESUMEN,
+    explicar_operacion,
+    guia_general,
+)
 from kiki_control.presentation.reconciliation_view import (
     clave_resultado,
     cobertura_archivos,
@@ -194,6 +201,8 @@ def _procesar(info_ml: dict[str, Any], info_mp: dict[str, Any], zona: str, toler
             st.error("No quedaron movimientos financieros válidos para conciliar.")
             return
         firma = construir_firma_procesamiento(st.session_state["hash_ml"], st.session_state["hash_mp"], zona, tolerancia)
+        st.session_state["operaciones_normalizadas"] = ml.operaciones
+        st.session_state["movimientos_normalizados"] = mp.movimientos
         st.session_state["cobertura"] = cobertura_archivos(ml.operaciones, mp.movimientos)
         st.session_state["reporte"] = reconciliar(ml.operaciones, mp.movimientos, tolerancia)
         st.session_state["firma_procesamiento"] = firma
@@ -212,16 +221,38 @@ def _mostrar_normalizacion(nombre: str, resultado: Any) -> None:
 
 
 
+
+def _mostrar_guia_general() -> None:
+    with st.expander("Cómo se calculan los resultados"):
+        for titulo, contenido in guia_general().items():
+            st.markdown(f"#### {titulo}")
+            if titulo == "Significado de los estados":
+                st.table([
+                    {
+                        "Estado": e.nombre,
+                        "Qué significa": e.significado,
+                        "Cómo se detecta": e.deteccion,
+                        "Qué debería hacer la usuaria": e.accion_usuaria,
+                    }
+                    for e in contenido
+                ])
+            else:
+                st.write(contenido)
+
+
+def _column_config_tabla() -> dict[str, Any]:
+    return {nombre: st.column_config.TextColumn(nombre, help=definicion.ayuda) for nombre, definicion in COLUMNAS_TABLA.items()}
+
 def _mostrar_cobertura(cobertura: Any) -> None:
     st.header("Cobertura de los archivos")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Ventas ML", cobertura.periodo_ventas_ml.texto)
-    c2.metric("Origen movimientos MP", cobertura.periodo_origen_mp.texto)
-    c3.metric("Liquidaciones MP", cobertura.periodo_liquidacion_mp.texto)
-    c4.metric("Sin fecha de liquidación", cobertura.movimientos_sin_fecha_liquidacion)
+    c1.metric("Ventas ML", cobertura.periodo_ventas_ml.texto, help=METRICAS_COBERTURA["Ventas ML"].ayuda)
+    c2.metric("Origen movimientos MP", cobertura.periodo_origen_mp.texto, help=METRICAS_COBERTURA["Origen movimientos MP"].ayuda)
+    c3.metric("Liquidaciones MP", cobertura.periodo_liquidacion_mp.texto, help=METRICAS_COBERTURA["Liquidaciones MP"].ayuda)
+    c4.metric("Sin fecha de liquidación", cobertura.movimientos_sin_fecha_liquidacion, help=METRICAS_COBERTURA["Sin fecha de liquidación"].ayuda)
     st.caption("La cobertura se calcula con fechas locales normalizadas. Ventas ML usa fecha de venta; MP usa fecha de origen y fecha de liquidación cuando existe.")
     if cobertura.advertencia_origenes:
-        st.info(cobertura.advertencia_origenes)
+        st.info(cobertura.advertencia_origenes + " La aplicación no recorta automáticamente el XLSX.")
 
 
 def _nombre_exportacion(prefijo: str) -> str:
@@ -254,6 +285,7 @@ def _mostrar_descargas() -> None:
 
 def _mostrar_resultados() -> None:
     reporte = st.session_state["reporte"]
+    _mostrar_guia_general()
     if "cobertura" in st.session_state:
         _mostrar_cobertura(st.session_state["cobertura"])
 
@@ -268,7 +300,7 @@ def _mostrar_resultados() -> None:
     for bloque in (list(kpis.items())[:5], list(kpis.items())[5:10], list(kpis.items())[10:]):
         cols = st.columns(len(bloque))
         for col, (nombre, valor) in zip(cols, bloque, strict=False):
-            col.metric(nombre, valor)
+            col.metric(nombre, valor, help=METRICAS_RESUMEN[nombre].ayuda)
 
     _mostrar_descargas()
 
@@ -290,7 +322,7 @@ def _mostrar_resultados() -> None:
     solo_divididos = c4.checkbox("Solo pagos divididos", key="filtro_solo_divididos")
     visibles = filtrar_filas(filas, set(seleccion), busqueda, solo_revision, solo_divididos)
     st.caption(f"Mostrando {len(visibles)} de {len(filas)} resultados de la vista seleccionada.")
-    st.dataframe(tabla_principal(visibles), use_container_width=True, hide_index=True)
+    st.dataframe(tabla_principal(visibles), use_container_width=True, hide_index=True, column_config=_column_config_tabla())
 
     if visibles:
         claves = [f.clave for f in visibles]
@@ -299,6 +331,16 @@ def _mostrar_resultados() -> None:
         st.subheader("Detalle de operación")
         st.markdown("#### Información de la operación")
         st.table([{"Campo": k, "Valor": v} for k, v in detalle_cliente(mapa[elegida]).items()])
+        with st.expander("Cómo se calculó esta operación"):
+            pasos = explicar_operacion(mapa[elegida], st.session_state.get("operaciones_normalizadas", ()), st.session_state.get("movimientos_normalizados", ()), reporte.tolerancia)
+            st.table([{
+                "Resultado": p.resultado,
+                "Valor calculado": p.valor_calculado,
+                "Regla o fórmula aplicada": p.regla_o_formula,
+                "Archivo de origen": p.archivo_origen,
+                "Columnas utilizadas": ", ".join(p.columnas_utilizadas) or "—",
+                "Filas de origen": p.filas_origen,
+            } for p in pasos])
         with st.expander("Trazabilidad técnica"):
             st.table([{"Campo": k, "Valor": v} for k, v in detalle_tecnico_seguro(mapa[elegida]).items()])
 

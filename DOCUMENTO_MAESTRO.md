@@ -977,3 +977,43 @@ Las hojas operativas deben usar encabezados visibles en español y limitarse a c
 La exportación debe prevenir inyección de fórmulas: cualquier texto externo que comience con `=`, `+`, `-` o `@` debe escribirse de forma segura para que Excel no lo ejecute. No debe agregar logos, imágenes, gráficos ni componentes decorativos innecesarios. Debe aplicar formato sobrio: encabezados destacados, autofiltros, fila superior congelada en hojas operativas, anchos razonables, ajuste de texto en explicación y motivos, y formato monetario argentino.
 
 Los botones de descarga solo deben aparecer cuando el reporte vigente coincide con los archivos y configuración actuales. No deben volver a ejecutar la conciliación, no deben persistir el XLSX en disco, no deben usar caché global ni compartida entre sesiones y deben generar el contenido en memoria. La exportación no representa resultado contable definitivo; la utilidad sigue siendo informada por Mercado Libre y los movimientos de fondos se informan separados, sin tratarlos como pérdidas comerciales.
+
+## 32. Capa explicativa para resultados de conciliación
+
+La aplicación incorpora una capa explicativa de presentación, separada del motor financiero, para que una usuaria no técnica pueda entender el alcance y origen de cada número sin asistencia del desarrollador.
+
+### 32.1 Niveles de explicación
+
+La experiencia se organiza en tres niveles complementarios:
+
+1. **Ayuda rápida:** métricas de cobertura, métricas del resumen ejecutivo y columnas visibles de la tabla incluyen ayuda contextual con fuente, columnas usadas, cálculo y límites.
+2. **Guía general desplegable:** el expander **Cómo se calculan los resultados** explica la vinculación Mercado Libre / Mercado Pago, la cobertura temporal, los indicadores, la diferencia entre neto aprobado MP y neto financiero total, los estados, la diferencia entre excepción y revisión manual, y los límites contables actuales.
+3. **Detalle dinámico por operación:** el expander **Cómo se calculó esta operación** muestra pasos calculados con los valores normalizados del resultado seleccionado: vinculación, neto informado ML, neto aprobado MP, diferencia, neto financiero total, utilidad informada y estado final.
+
+### 32.2 Columnas externas citadas por la explicación
+
+La explicación usa nombres exactos de columnas externas solo cuando son necesarios para trazabilidad funcional:
+
+| Fuente | Concepto | Columna externa |
+|---|---|---|
+| Mercado Libre | Clave primaria comercial | `ID Order` |
+| Mercado Pago | Clave primaria financiera | `ID DE LA ORDEN` |
+| Mercado Libre | SKU secundario | `Sku` |
+| Mercado Pago | SKU secundario | `CÓDIGO DE PRODUCTO SKU` |
+| Mercado Libre | Neto informado comparable | `Monto neto (en MP) ($)` |
+| Mercado Libre | Utilidad informada | `Utilidades netas ($)` |
+| Mercado Libre | Fecha comercial | `Fecha de venta` y `Hora` |
+| Mercado Pago | Tipo de movimiento | `TIPO DE OPERACIÓN` |
+| Mercado Pago | Neto impactado | `MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO` |
+| Mercado Pago | Fecha de origen | `FECHA DE ORIGEN` |
+| Mercado Pago | Fecha de liquidación | `FECHA DE LIQUIDACIÓN DEL DINERO` |
+
+La clave primaria de vinculación es el ID de orden. El SKU se mantiene como dato de validación secundaria y no reemplaza al ID de orden. Los movimientos de Mercado Pago se agrupan por orden, por lo que un grupo financiero no equivale necesariamente a una fila del XLSX.
+
+### 32.3 Límites y privacidad de la explicación
+
+La capa explicativa no modifica fórmulas, estados, prioridades ni normalización. Trabaja sobre modelos normalizados inmutables y no sobre filas crudas ni DataFrames. No recalcula la utilidad de Mercado Libre: la presenta como valor informado por la fuente, no como ganancia contable, fiscal o definitiva.
+
+Si las coberturas temporales de Mercado Libre y Mercado Pago no coinciden, la aplicación advierte y continúa sin recortar automáticamente el XLSX. Un movimiento financiero sin operación comercial asociada puede corresponder a otro período y no demuestra por sí solo una pérdida o error. Los `PAYOUT` sin orden se explican como movimientos de fondos separados, no como pérdidas comerciales.
+
+Por privacidad, las ayudas, tablas, detalles y exportaciones nuevas no deben mostrar datos personales, contenido crudo de datos extra ni columnas sensibles de pagador o tarjeta. Las referencias internas creadas para movimientos sin ID de orden deben mostrarse como referencias internas de fila y no como órdenes reales.

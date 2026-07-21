@@ -55,7 +55,7 @@ def test_resumen_kpis_orden_determinista_sin_id_y_totales_decimal():
         [mov(id_orden="A", monto="101"), mov(id_orden="B", monto="50", id_mp="b"), mov(id_orden=None, tipo=TipoOperacionFinanciera.PAYOUT, monto="-20", id_mp="p", fila=7)],
     )
     filas = filas_presentacion(reporte.resultados)
-    assert [f.id_orden for f in filas] == ["A", "B", "movimiento_de_fondos-fila-7"]
+    assert [f.id_orden for f in filas] == ["A", "B", "Movimiento MP sin ID de orden — referencia interna fila 7"]
     assert filas[-1].estado == "Movimiento de fondos"
     kpis = resumen_kpis(reporte)
     assert kpis["Comparables"] == 2
@@ -234,7 +234,7 @@ def test_conclusion_ejecutiva_payout_separado_de_revision_manual():
 def test_detalle_cliente_usa_clave_segura_si_no_hay_id_orden():
     resultado = reconciliar([], [mov(id_orden=None, monto="-10", tipo=TipoOperacionFinanciera.PAYOUT, id_mp="payout-detalle", fila=77)]).resultados[0]
     detalle = detalle_cliente(resultado)
-    assert detalle["ID de orden"] == "movimiento_de_fondos-fila-77"
+    assert detalle["ID de orden"] == "Movimiento MP sin ID de orden — referencia interna fila 77"
 
 
 def test_textos_visibles_no_exponen_diferencia_control_snake_case():
