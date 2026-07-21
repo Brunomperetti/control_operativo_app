@@ -62,17 +62,50 @@ def test_formula_diferencia_orden_mp_menos_ml_y_signo_correcto():
     assert "MP informa más neto que ML" in texto
 
 
-def test_neto_aprobado_y_financiero_total_pago_dividido_y_sin_pago_aprobado():
+def test_neto_aprobado_con_id_muestra_filas_suma_final_y_agrupacion():
     movimientos = [mov(monto="40", id_mp="a"), mov(monto="60", id_mp="b", fila=11), mov(monto="-10", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="env", fila=12)]
     resultado = reconciliar([op(neto="100")], movimientos).resultados[0]
     assert resultado.neto_pagos_aprobados == Decimal("100")
     assert resultado.neto_financiero_total == Decimal("90")
-    pasos = explicar_operacion(resultado, [op(neto="100")], movimientos, Decimal("0.01"))
-    assert "fila 10: $ 40,00" in next(p for p in pasos if p.resultado == "Neto aprobado MP").regla_o_formula
-    assert "fila 11: $ 60,00" in next(p for p in pasos if p.resultado == "Neto aprobado MP").regla_o_formula
+    paso = next(p for p in explicar_operacion(resultado, [op(neto="100")], movimientos, Decimal("0.01")) if p.resultado == "Neto aprobado MP")
+    assert paso.valor_calculado == "$ 100,00"
+    assert "Movimientos PAGO_APROBADO utilizados" in paso.regla_o_formula
+    assert "fila 10: $ 40,00" in paso.regla_o_formula
+    assert "fila 11: $ 60,00" in paso.regla_o_formula
+    assert "Suma final: $ 100,00" in paso.regla_o_formula
+    assert "agrupados por ID DE LA ORDEN" in paso.regla_o_formula
+
+
+def test_pago_aprobado_sin_id_orden_no_se_presenta_como_usado_y_conserva_estado_motor():
+    movimiento = mov(id_orden=None, monto="123.45", fila=55)
+    resultado = reconciliar([], [movimiento]).resultados[0]
+    estado_original = resultado.estado
+    assert resultado.id_orden is None
+    assert resultado.neto_pagos_aprobados is None
+    assert resultado.neto_financiero_total == Decimal("123.45")
+
+    pasos = explicar_operacion(resultado, [], [movimiento], Decimal("0.01"))
+    paso_neto = next(p for p in pasos if p.resultado == "Neto aprobado MP")
+    paso_total = next(p for p in pasos if p.resultado == "Neto financiero total")
+
+    assert paso_neto.valor_calculado == "—"
+    assert "fila 55" in paso_neto.regla_o_formula
+    assert "$ 123,45" in paso_neto.regla_o_formula
+    assert "utilizado" not in paso_neto.regla_o_formula
+    assert "Suma final" not in paso_neto.regla_o_formula
+    assert "ID DE LA ORDEN" in paso_neto.regla_o_formula
+    assert "no se utiliza para calcular el neto aprobado comparable" in paso_neto.regla_o_formula
+    assert "no puede agruparse ni compararse por orden" in paso_neto.regla_o_formula.lower()
+    assert "Neto financiero total" in paso_neto.regla_o_formula
+    assert paso_total.valor_calculado == "$ 123,45"
+    assert resultado.estado == estado_original == EstadoConciliacion.MOVIMIENTO_SIN_OPERACION_COMERCIAL
+
+
+def test_neto_aprobado_sin_pagos_aprobados_conserva_explicacion():
     solo_envio = reconciliar([op(neto="100")], [mov(monto="-10", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="env")]).resultados[0]
     assert solo_envio.neto_pagos_aprobados is None and solo_envio.neto_financiero_total == Decimal("-10")
-    assert "No hay movimientos PAGO_APROBADO" in next(p for p in explicar_operacion(solo_envio, [op(neto="100")], [mov(monto="-10", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="env")], Decimal("0.01")) if p.resultado == "Neto aprobado MP").regla_o_formula
+    paso = next(p for p in explicar_operacion(solo_envio, [op(neto="100")], [mov(monto="-10", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="env")], Decimal("0.01")) if p.resultado == "Neto aprobado MP")
+    assert paso.regla_o_formula == "No hay movimientos normalizados como pago aprobado; por eso el Neto aprobado MP queda vacío."
 
 
 def test_cobertura_desigual_no_bloqueante_excepciones_revision_y_payout_separado():

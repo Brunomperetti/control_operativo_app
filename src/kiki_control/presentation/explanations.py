@@ -132,12 +132,24 @@ def explicar_operacion(resultado: ResultadoConciliacion, operaciones: Sequence[O
     pasos = [PasoCalculoOperacion("Vinculación", etiqueta_id_resultado(resultado), f"Se vinculó {ML_ID_ORDER} contra {MP_ID_ORDER}; filas comerciales agrupadas: {len(ops)}, filas financieras agrupadas: {len(movs)}. El SKU es secundario.", "Mercado Libre / Mercado Pago", (ML_ID_ORDER, MP_ID_ORDER, ML_SKU, MP_SKU), _filas(resultado.numeros_fila_comercial, resultado.numeros_fila_financiera))]
     if resultado.neto_comercial_informado is not None:
         pasos.append(PasoCalculoOperacion("Neto informado ML", formato_pesos_argentino(resultado.neto_comercial_informado), f"Valor informado por la fuente en {ML_NETO}; la aplicación no lo recalcula.", "Mercado Libre", (ML_NETO,), _solo_filas(resultado.numeros_fila_comercial)))
-    regla_pagos = "; ".join(f"fila {m.numero_fila_origen}: {formato_pesos_argentino(m.monto_neto_impactado)}" for m in pagos)
-    if pagos:
-        regla_pagos = f"Movimientos PAGO_APROBADO utilizados: {regla_pagos}. Suma final: {formato_pesos_argentino(resultado.neto_pagos_aprobados)}."
+    detalle_pagos = "; ".join(f"fila {m.numero_fila_origen}: {formato_pesos_argentino(m.monto_neto_impactado)}" for m in pagos)
+    if resultado.neto_pagos_aprobados is not None:
+        regla_pagos = (
+            f"Movimientos PAGO_APROBADO utilizados: {detalle_pagos}. "
+            f"Suma final: {formato_pesos_argentino(resultado.neto_pagos_aprobados)}. "
+            f"Estos movimientos fueron agrupados por {MP_ID_ORDER} para el control comparable."
+        )
+    elif pagos and resultado.id_orden is None:
+        regla_pagos = (
+            f"Se detectó un pago aprobado en la fila {pagos[0].numero_fila_origen}, pero no posee `{MP_ID_ORDER}`. "
+            f"Importe del movimiento como dato explicativo: {formato_pesos_argentino(pagos[0].monto_neto_impactado)}. "
+            "Por ese motivo no se utiliza para calcular el neto aprobado comparable ni la diferencia contra Mercado Libre. "
+            "No puede agruparse ni compararse por orden. "
+            "Su impacto sí está incluido en el Neto financiero total de este resultado."
+        )
     else:
-        regla_pagos = "No hay movimientos PAGO_APROBADO; por eso el neto aprobado MP queda vacío aunque pueda existir neto financiero total."
-    pasos.append(PasoCalculoOperacion("Neto aprobado MP", formato_pesos_argentino(resultado.neto_pagos_aprobados), regla_pagos, "Mercado Pago", (MP_TIPO, MP_NETO), _solo_filas(tuple(m.numero_fila_origen for m in pagos))))
+        regla_pagos = "No hay movimientos normalizados como pago aprobado; por eso el Neto aprobado MP queda vacío."
+    pasos.append(PasoCalculoOperacion("Neto aprobado MP", formato_pesos_argentino(resultado.neto_pagos_aprobados), regla_pagos, "Mercado Pago", (MP_ID_ORDER, MP_TIPO, MP_NETO), _solo_filas(tuple(m.numero_fila_origen for m in pagos))))
     if resultado.diferencia_control is not None:
         signo = "MP informa más neto que ML" if resultado.diferencia_control > 0 else "MP informa menos neto que ML" if resultado.diferencia_control < 0 else "MP y ML informan el mismo neto comparable"
         formula = f"{formato_pesos_argentino(resultado.neto_pagos_aprobados)} - {formato_pesos_argentino(resultado.neto_comercial_informado)} = {formato_pesos_argentino(resultado.diferencia_control)}. {signo}. Tolerancia aplicada: {formato_pesos_argentino(tolerancia)}."
