@@ -43,6 +43,8 @@ from kiki_control.ui.session_cycle import (
     detectar_cambio,
     invalidar_resultados_conocidos,
     limpiar_claves_conocidas,
+    limpiar_detalle_revision,
+    limpiar_detalle_revision_si_obsoleto,
     limpiar_filtros_de_vista,
     tolerancia_canonica,
 )
@@ -119,6 +121,10 @@ def _limpiar_sesion_streamlit() -> None:
 
 def _limpiar_filtros_por_cambio_de_vista() -> None:
     limpiar_filtros_de_vista(st.session_state)
+
+
+def _limpiar_detalle_revision_por_cambio_de_filtro() -> None:
+    limpiar_detalle_revision(st.session_state)
 
 
 def _inicializar_estado() -> None:
@@ -306,8 +312,8 @@ def _mostrar_revisiones_pendientes(reporte: Any) -> None:
     with st.expander("Ver las revisiones pendientes y qué hacer"):
         tipos = list(conteos)
         c1, c2 = st.columns([2, 2])
-        tipo = c1.selectbox("Tipo de revisión", options=[None, *tipos], format_func=lambda t: "Todos" if t is None else DEFINICIONES_REVISION[t].nombre_visible, key="revision_tipo")
-        busqueda = c2.text_input("Buscar por ID de orden o referencia", key="revision_busqueda")
+        tipo = c1.selectbox("Tipo de revisión", options=[None, *tipos], format_func=lambda t: "Todos" if t is None else DEFINICIONES_REVISION[t].nombre_visible, key="revision_tipo", on_change=_limpiar_detalle_revision_por_cambio_de_filtro)
+        busqueda = c2.text_input("Buscar por ID de orden o referencia", key="revision_busqueda", on_change=_limpiar_detalle_revision_por_cambio_de_filtro)
         visibles = filtrar_casos(casos, tipo, busqueda)
         filas = filas_revisiones(visibles)
         st.dataframe([
@@ -331,6 +337,7 @@ def _mostrar_revisiones_pendientes(reporte: Any) -> None:
         })
         if visibles:
             opciones = [c.resultado.id_orden or clave_resultado(c.resultado) for c in visibles]
+            limpiar_detalle_revision_si_obsoleto(st.session_state, set(opciones))
             elegida = st.selectbox("Seleccionar caso", opciones, key="revision_detalle")
             caso = {c.resultado.id_orden or clave_resultado(c.resultado): c for c in visibles}[elegida]
             st.subheader("Detalle de la revisión")

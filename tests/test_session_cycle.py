@@ -8,6 +8,7 @@ from kiki_control.ui.session_cycle import (
     detectar_cambio,
     invalidar_resultados_conocidos,
     limpiar_claves_conocidas,
+    limpiar_detalle_revision_si_obsoleto,
     limpiar_filtros_de_vista,
     tolerancia_canonica,
 )
@@ -149,3 +150,67 @@ def test_no_quedan_referencias_duplicadas_a_modelos_normalizados_en_ui():
     assert "movimientos_normalizados" not in source
     assert 'normalizacion.get("Mercado Libre")' in source
     assert 'normalizacion.get("Mercado Pago")' in source
+
+
+def test_limpieza_total_de_claves_de_revision():
+    claves_revision = {"revision_tipo", "revision_busqueda", "revision_detalle", "filtro_motivo_revision"}
+    assert claves_revision.issubset(SESSION_KEYS_TO_CLEAR)
+    estado = {clave: f"valor-{clave}" for clave in claves_revision}
+    estado["reporte"] = "reporte-sintetico"
+
+    limpiar_claves_conocidas(estado)
+
+    assert claves_revision.isdisjoint(estado)
+
+
+def test_invalidacion_por_cambio_de_archivo_o_configuracion_limpia_claves_de_revision():
+    claves_revision = {"revision_tipo", "revision_busqueda", "revision_detalle", "filtro_motivo_revision"}
+    assert claves_revision.issubset(RESULT_KEYS_TO_CLEAR)
+
+    for motivo in ("archivo", "zona", "tolerancia"):
+        estado = {clave: f"{motivo}-{clave}" for clave in claves_revision}
+        estado["reporte"] = "reporte-sintetico"
+        invalidar_resultados_conocidos(estado)
+        assert claves_revision.isdisjoint(estado)
+        assert "reporte" not in estado
+
+
+def test_cambio_de_vista_limpia_filtro_motivo_revision_sin_borrar_reporte():
+    assert "filtro_motivo_revision" in VIEW_FILTER_KEYS_TO_CLEAR
+    estado = {
+        "filtro_motivo_revision": "ORDEN_MP_SIN_VENTA_ML",
+        "revision_tipo": "MP_SIN_ID_ORDEN",
+        "revision_busqueda": "SYN",
+        "revision_detalle": "caso-1",
+        "reporte": "reporte-sintetico",
+        "firma_procesamiento": "firma-sintetica",
+    }
+
+    limpiar_filtros_de_vista(estado)
+
+    assert "filtro_motivo_revision" not in estado
+    assert estado["revision_tipo"] == "MP_SIN_ID_ORDEN"
+    assert estado["revision_busqueda"] == "SYN"
+    assert estado["revision_detalle"] == "caso-1"
+    assert estado["reporte"] == "reporte-sintetico"
+    assert estado["firma_procesamiento"] == "firma-sintetica"
+
+
+def test_detalle_revision_obsoleto_se_limpia_al_cambiar_filtros_sin_borrar_reporte():
+    estado = {
+        "revision_detalle": "caso-anterior",
+        "revision_tipo": "ORDEN_MP_SIN_VENTA_ML",
+        "revision_busqueda": "nuevo",
+        "reporte": "reporte-sintetico",
+    }
+
+    limpiar_detalle_revision_si_obsoleto(estado, {"caso-vigente"})
+
+    assert "revision_detalle" not in estado
+    assert estado["revision_tipo"] == "ORDEN_MP_SIN_VENTA_ML"
+    assert estado["revision_busqueda"] == "nuevo"
+    assert estado["reporte"] == "reporte-sintetico"
+
+    estado["revision_detalle"] = "caso-vigente"
+    limpiar_detalle_revision_si_obsoleto(estado, {"caso-vigente"})
+    assert estado["revision_detalle"] == "caso-vigente"

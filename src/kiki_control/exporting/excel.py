@@ -15,7 +15,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
 from kiki_control.domain.reconciliation import ReporteConciliacion, ResultadoConciliacion
-from kiki_control.presentation.review_cases import clasificar_revisiones
+from kiki_control.presentation.review_cases import caso_a_fila, clasificar_revisiones
 from kiki_control.presentation.reconciliation_view import (
     CoberturaArchivosPresentacion,
     clave_resultado,
@@ -241,8 +241,9 @@ def _escribir_revisiones(ws: Worksheet, casos: Iterable[Any]) -> None:
     ws.append(list(columnas))
     for caso in casos:
         r = caso.resultado
+        fila_presentacion = caso_a_fila(caso)
         ws.append([
-            _texto_seguro(r.id_orden or clave_resultado(r)),
+            _texto_seguro(fila_presentacion.id_orden_o_referencia),
             _texto_seguro(caso.nombre_visible),
             _texto_seguro(etiqueta_estado(r.estado)),
             _texto_seguro(caso.descripcion),

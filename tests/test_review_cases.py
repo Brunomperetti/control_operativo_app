@@ -7,7 +7,7 @@ from openpyxl import load_workbook
 from kiki_control.domain.financial_movement import TipoOperacionFinanciera
 from kiki_control.domain.reconciliation import EstadoConciliacion, MotivoConciliacion
 from kiki_control.exporting import generar_revisiones_pendientes_excel
-from kiki_control.presentation.review_cases import TipoRevision, clasificar_revision, clasificar_revisiones, conteo_por_tipo, filas_revisiones, filtrar_casos
+from kiki_control.presentation.review_cases import TipoRevision, caso_a_fila, clasificar_revision, clasificar_revisiones, conteo_por_tipo, filas_revisiones, filtrar_casos
 from kiki_control.reconciliation import reconciliar
 from tests.test_reconciliation_engine import FECHA, mov, op
 
@@ -80,3 +80,21 @@ def test_modulo_puro_no_usa_dependencias_prohibidas_y_no_archivos_reales():
 
     assert "streamlit" not in rc.__dict__ and "pandas" not in rc.__dict__ and "openpyxl" not in rc.__dict__
     assert "review_cases" not in engine.__dict__
+
+
+def test_excel_revisiones_referencia_amigable_para_movimiento_sin_id_orden():
+    reporte = reconciliar([], [mov(id_orden=None, tipo=TipoOperacionFinanciera.CASHBACK, fila=77, id_mp="mp-sintetico")])
+    caso = clasificar_revisiones(reporte.resultados)[0]
+    referencia_esperada = caso_a_fila(caso).id_orden_o_referencia
+
+    data = generar_revisiones_pendientes_excel(reporte, None, "UTC")
+    ws = load_workbook(BytesIO(data), data_only=False)["Revisiones pendientes"]
+    celda = ws["A2"]
+
+    assert referencia_esperada == "Movimiento MP sin ID de orden — referencia interna fila 77"
+    assert celda.value == referencia_esperada
+    assert celda.data_type == "s"
+    assert "movimiento_sin_operacion_comercial-fila-77" not in celda.value
+    valores = [cell.value for row in ws.iter_rows() for cell in row]
+    assert not any("hash" in str(v).lower() for v in valores if v is not None)
+    assert not any(pii in str(v).lower() for v in valores if v is not None for pii in ("pagador", "documento", "tarjeta", "datos extra"))
