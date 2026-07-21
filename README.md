@@ -185,3 +185,31 @@ reporte = reconciliar(operaciones_comerciales, movimientos_financieros, toleranc
 ```
 
 El motor recibe modelos normalizados, no lee archivos externos y no depende de Streamlit.
+
+## Capa explicativa de resultados
+
+La interfaz de Streamlit incluye una capa explicativa orientada a usuarias no técnicas. No cambia el motor de conciliación ni las reglas financieras: centraliza textos y definiciones en un módulo puro de presentación para que los tests verifiquen la trazabilidad y los límites.
+
+### Qué agrega
+
+- Tooltips en métricas de cobertura temporal y resumen ejecutivo.
+- Tooltips en todas las columnas visibles de la tabla principal.
+- Expander **Cómo se calculan los resultados** con guía general y diccionario de estados.
+- Expander **Cómo se calculó esta operación** dentro del detalle de operación, con una tabla de pasos calculados desde modelos normalizados.
+
+### Columnas documentadas
+
+La guía y los tooltips citan las columnas externas necesarias para explicar el cálculo:
+
+- Mercado Libre: `ID Order`, `Sku`, `Monto neto (en MP) ($)`, `Utilidades netas ($)`, `Fecha de venta` y `Hora`.
+- Mercado Pago: `ID DE LA ORDEN`, `CÓDIGO DE PRODUCTO SKU`, `TIPO DE OPERACIÓN`, `MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO`, `FECHA DE ORIGEN` y `FECHA DE LIQUIDACIÓN DEL DINERO`.
+
+### Límites
+
+- El ID de orden es la clave primaria; el SKU es validación secundaria.
+- El neto aprobado MP suma solo movimientos normalizados como `PAGO_APROBADO`.
+- El neto financiero total suma todos los movimientos MP asociados y puede diferir del neto aprobado MP.
+- La utilidad ML se toma exclusivamente de `Utilidades netas ($)` y no se recalcula.
+- La app no recorta automáticamente el XLSX si la cobertura temporal no coincide.
+- Los `PAYOUT` sin orden se informan como movimientos de fondos, no como pérdidas comerciales.
+- La explicación no debe mostrar datos personales, columnas sensibles de pagador o tarjeta, hashes completos ni contenido crudo de datos extra.

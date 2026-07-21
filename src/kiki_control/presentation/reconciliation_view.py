@@ -119,7 +119,7 @@ def clave_resultado(resultado: ResultadoConciliacion) -> str:
 def resultado_a_fila(resultado: ResultadoConciliacion) -> FilaResultadoPresentacion:
     return FilaResultadoPresentacion(
         clave=clave_resultado(resultado),
-        id_orden=resultado.id_orden or clave_resultado(resultado),
+        id_orden=resultado.id_orden or f"Movimiento MP sin ID de orden — referencia interna fila {resultado.numeros_fila_financiera[0] if resultado.numeros_fila_financiera else 'sin fila'}",
         estado=etiqueta_estado(resultado.estado),
         estado_codigo=resultado.estado.value,
         neto_informado_ml=formato_pesos_argentino(resultado.neto_comercial_informado),
@@ -267,7 +267,7 @@ def _sumar(valores: Iterable[Decimal | None]) -> Decimal | None:
 
 def detalle_presentacion(resultado: ResultadoConciliacion) -> dict[str, str | int]:
     return {
-        "ID de orden": resultado.id_orden or clave_resultado(resultado),
+        "ID de orden": resultado.id_orden or f"Movimiento MP sin ID de orden — referencia interna fila {resultado.numeros_fila_financiera[0] if resultado.numeros_fila_financiera else 'sin fila'}",
         "Estado": etiqueta_estado(resultado.estado),
         "Motivos": ", ".join(m.value for m in resultado.motivos) or "—",
         "Explicaciones": " | ".join(resultado.explicaciones) or "—",
@@ -290,7 +290,7 @@ def detalle_presentacion(resultado: ResultadoConciliacion) -> dict[str, str | in
 
 def detalle_cliente(resultado: ResultadoConciliacion) -> dict[str, str | int]:
     return {
-        "ID de orden": resultado.id_orden or clave_resultado(resultado),
+        "ID de orden": resultado.id_orden or f"Movimiento MP sin ID de orden — referencia interna fila {resultado.numeros_fila_financiera[0] if resultado.numeros_fila_financiera else 'sin fila'}",
         "Estado": etiqueta_estado(resultado.estado),
         "Neto informado ML": formato_pesos_argentino(resultado.neto_comercial_informado),
         "Neto aprobado MP": formato_pesos_argentino(resultado.neto_pagos_aprobados),
