@@ -36,6 +36,73 @@ COLUMNAS_OBLIGATORIAS_ECCOMAPP_RENTABILIDAD = frozenset(
     }
 )
 
+COLUMNAS_MERCADO_LIBRE_VENTAS_CONFIRMADAS = (
+    "# de venta",
+    "Fecha de venta",
+    "Estado",
+    "Descripción del estado",
+    "Paquete de varios productos",
+    "Pertenece a un kit",
+    "Unidades",
+    "Unidades",
+    "Unidades",
+    "Ingresos por productos (ARS)",
+    "Cargo por venta e impuestos (ARS)",
+    "Ingresos por envío (ARS)",
+    "Costos de envío (ARS)",
+    "Costo de envío basado en medidas y peso declarados",
+    "Cargo por diferencias en medidas y peso del paquete",
+    "Descuentos y bonificaciones",
+    "Anulaciones y reembolsos (ARS)",
+    "Total (ARS)",
+    "SKU",
+    "# de publicación",
+    "Canal de venta",
+    "Título de la publicación",
+    "Variante",
+    "Precio unitario de venta de la publicación (ARS)",
+    "Forma de entrega",
+    "Forma de entrega",
+    "Fecha en camino",
+    "Fecha en camino",
+    "Fecha entregado",
+    "Fecha entregado",
+    "Transportista",
+    "Transportista",
+    "Número de seguimiento",
+    "Número de seguimiento",
+    "URL de seguimiento",
+    "URL de seguimiento",
+    "Reclamo abierto",
+    "Reclamo cerrado",
+    "Con mediación",
+    "Comprador",
+    "DNI",
+    "Tipo de documento",
+    "Número de documento",
+    "Dirección",
+    "Domicilio",
+    "Ciudad",
+    "Estado fiscal/geográfico",
+    "Código postal",
+    "País",
+    "Condición fiscal (IVA)",
+    "Número IIBB",
+    "Negocio",
+    "Datos personales de empresa",
+    "Teléfono",
+    "Email",
+    "Factura",
+    "Moneda",
+    "Impuestos",
+    "Cupón",
+    "Promoción",
+    "Marketplace",
+    "ID de envío",
+    "ID de paquete",
+    "Observaciones",
+)
+
 COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE_VENTAS = frozenset(
     {
         "# de venta",
@@ -50,6 +117,8 @@ COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE_VENTAS = frozenset(
         "Título de la publicación",
     }
 )
+
+COLUMNAS_OPCIONALES_MERCADO_LIBRE_VENTAS = frozenset(COLUMNAS_MERCADO_LIBRE_VENTAS_CONFIRMADAS) - COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE_VENTAS
 
 COLUMNAS_OBLIGATORIAS_MERCADO_PAGO = frozenset(
     {
@@ -77,26 +146,7 @@ CONTRATOS = (
     ContratoColumnas(
         TipoFuente.MERCADO_LIBRE_VENTAS,
         COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE_VENTAS,
-        frozenset(
-            {
-                "Descripción del estado",
-                "Paquete de varios productos",
-                "Pertenece a un kit",
-                "Cargo por venta e impuestos",
-                "Ingresos por envío (ARS)",
-                "Costos de envío (ARS)",
-                "Costo de envío declarado",
-                "Cargo por diferencias en costos de envío",
-                "Descuentos y bonificaciones",
-                "Anulaciones y reembolsos",
-                "Variante",
-                "Precio unitario",
-                "Forma de entrega",
-                "Reclamo abierto",
-                "Reclamo",
-                "Estado del reclamo",
-            }
-        ),
+        COLUMNAS_OPCIONALES_MERCADO_LIBRE_VENTAS,
     ),
     ContratoColumnas(
         TipoFuente.ECCOMAPP_RENTABILIDAD,

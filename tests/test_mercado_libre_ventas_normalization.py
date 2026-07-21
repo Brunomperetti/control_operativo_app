@@ -4,17 +4,37 @@ from io import BytesIO
 
 from openpyxl import Workbook
 
+from kiki_control.adapters.contracts import COLUMNAS_MERCADO_LIBRE_VENTAS_CONFIRMADAS
 from kiki_control.adapters.mercado_libre_ventas import normalizar_ventas_mercado_libre
 from kiki_control.domain.enums import TipoFuente
 from kiki_control.domain.official_sale import VentaOficialMercadoLibre
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
+from tests.test_reconciliation_engine import mov, op, único
+from kiki_control.reconciliation import reconciliar
+from kiki_control.domain.reconciliation import EstadoConciliacion, MotivoConciliacion
 
-COLUMNAS = [
-    "# de venta", "Fecha de venta", "Estado", "Descripción del estado", "Paquete de varios productos", "Pertenece a un kit", "Unidades",
-    "Ingresos por productos (ARS)", "Cargo por venta e impuestos", "Ingresos por envío (ARS)", "Costos de envío (ARS)", "Costo de envío declarado",
-    "Cargo por diferencias en costos de envío", "Descuentos y bonificaciones", "Anulaciones y reembolsos", "Total (ARS)", "SKU", "# de publicación",
-    "Canal de venta", "Título de la publicación", "Variante", "Precio unitario", "Forma de entrega", "Reclamo abierto", "Estado del reclamo",
-]
+
+
+def _desambiguar(encabezados):
+    vistos = {}
+    resultado = []
+    for encabezado in encabezados:
+        cantidad = vistos.get(encabezado, 0)
+        resultado.append(encabezado if cantidad == 0 else f"{encabezado}.{cantidad}")
+        vistos[encabezado] = cantidad + 1
+    return tuple(resultado)
+
+
+COLUMNAS_DESAMBIGUADAS = _desambiguar(COLUMNAS_MERCADO_LIBRE_VENTAS_CONFIRMADAS)
+
+PII_SENTINELS = (
+    "PII_COMPRADOR_SENTINELA",
+    "PII_DNI_SENTINELA",
+    "PII_DOCUMENTO_SENTINELA",
+    "PII_DOMICILIO_SENTINELA",
+    "PII_SEGUIMIENTO_SENTINELA",
+    "https://pii-seguimiento.example.invalid/sentinel",
+)
 
 
 def xlsx_ventas(filas, hoja="Ventas AR", intro=True):
@@ -22,54 +42,71 @@ def xlsx_ventas(filas, hoja="Ventas AR", intro=True):
     ws = wb.active
     ws.title = hoja
     if intro:
-        ws.append(["Reporte sintético"])
-        ws.append(["Generado para pruebas"])
-    ws.append(COLUMNAS)
+        ws.append(["Reporte sintético sin datos reales"])
+        ws.append(["Fila introductoria sintética"])
+    ws.append(list(COLUMNAS_MERCADO_LIBRE_VENTAS_CONFIRMADAS))
     for fila in filas:
-        ws.append([fila.get(c) for c in COLUMNAS])
+        ws.append([fila.get(c) for c in COLUMNAS_DESAMBIGUADAS])
     bio = BytesIO()
     wb.save(bio)
     return bio.getvalue()
 
 
 def fila(id_venta="12345678901234567890", estado="Entregado", total="100.50"):
-    return {
-        "# de venta": id_venta,
-        "Fecha de venta": "2026-07-01 10:30:00",
-        "Estado": estado,
-        "Descripción del estado": "Estado operativo",
-        "Paquete de varios productos": "No",
-        "Pertenece a un kit": "Sí",
-        "Unidades": 1,
-        "Ingresos por productos (ARS)": "150.75",
-        "Cargo por venta e impuestos": "-20.25",
-        "Ingresos por envío (ARS)": "0",
-        "Costos de envío (ARS)": "-10",
-        "Costo de envío declarado": "0",
-        "Cargo por diferencias en costos de envío": "0",
-        "Descuentos y bonificaciones": "-20",
-        "Anulaciones y reembolsos": "0",
-        "Total (ARS)": total,
-        "SKU": "SKU-SINTETICO-0001",
-        "# de publicación": "98765432109876543210",
-        "Canal de venta": "Mercado Libre",
-        "Título de la publicación": "Producto sintético",
-        "Variante": "Variante sintética",
-        "Precio unitario": "150.75",
-        "Forma de entrega": "Envío",
-        "Reclamo abierto": "No",
-        "Estado del reclamo": "Sin reclamo",
-    }
+    valores = {columna: None for columna in COLUMNAS_DESAMBIGUADAS}
+    valores.update(
+        {
+            "# de venta": id_venta,
+            "Fecha de venta": "2026-07-01 10:30:00",
+            "Estado": estado,
+            "Descripción del estado": "Estado operativo sintético",
+            "Paquete de varios productos": "No",
+            "Pertenece a un kit": "Sí",
+            "Unidades": 1,
+            "Unidades.1": 99,
+            "Unidades.2": 88,
+            "Ingresos por productos (ARS)": "150.75",
+            "Cargo por venta e impuestos (ARS)": "-20.25",
+            "Ingresos por envío (ARS)": "0",
+            "Costos de envío (ARS)": "-10",
+            "Costo de envío basado en medidas y peso declarados": "12.34",
+            "Cargo por diferencias en medidas y peso del paquete": "-1.23",
+            "Descuentos y bonificaciones": "-20",
+            "Anulaciones y reembolsos (ARS)": "-5.50",
+            "Total (ARS)": total,
+            "SKU": "SKU-SINTETICO-0001",
+            "# de publicación": "98765432109876543210",
+            "Canal de venta": "Mercado Libre",
+            "Título de la publicación": "Producto sintético",
+            "Variante": "Variante sintética",
+            "Precio unitario de venta de la publicación (ARS)": "150.75",
+            "Forma de entrega": "Entrega comercial sintética",
+            "Forma de entrega.1": "Entrega logística que no debe sobrescribir",
+            "Reclamo abierto": "Sí",
+            "Reclamo cerrado": "No",
+            "Con mediación": "Sí",
+            "Comprador": PII_SENTINELS[0],
+            "DNI": PII_SENTINELS[1],
+            "Tipo de documento": "DNI",
+            "Número de documento": PII_SENTINELS[2],
+            "Dirección": PII_SENTINELS[3],
+            "Domicilio": PII_SENTINELS[3],
+            "Número de seguimiento": PII_SENTINELS[4],
+            "URL de seguimiento": PII_SENTINELS[5],
+        }
+    )
+    return valores
 
 
-def test_encabezado_despues_de_filas_introductorias_y_metadatos():
+def test_detecta_mercado_libre_ventas_sin_columnas_adicionales_y_metadatos():
     contenido = xlsx_ventas([fila()])
     inspeccion = inspeccionar_archivo("nombre_irrelevante.bin.xlsx", contenido)
     assert inspeccion.es_valido
     assert inspeccion.fuente_detectada == TipoFuente.MERCADO_LIBRE_VENTAS
     assert inspeccion.metadatos.nombre_hoja == "Ventas AR"
     assert inspeccion.metadatos.cantidad_filas == 1
-    assert inspeccion.metadatos.columnas_encontradas == tuple(COLUMNAS)
+    assert inspeccion.metadatos.columnas_encontradas == COLUMNAS_MERCADO_LIBRE_VENTAS_CONFIRMADAS
+    assert not any(a.codigo == "COLUMNAS_ADICIONALES" for a in inspeccion.advertencias)
 
     resultado = normalizar_ventas_mercado_libre("otro_nombre.xlsx", contenido)
     venta = resultado.ventas[0]
@@ -79,29 +116,64 @@ def test_encabezado_despues_de_filas_introductorias_y_metadatos():
     assert venta.hash_importacion == inspeccion.metadatos.sha256
 
 
-def test_importes_decimal_ids_texto_y_estados_operativos():
-    contenido = xlsx_ventas([fila(), fila("22222222222222222222", "Cancelada", "0"), fila("33333333333333333333", "Devuelta", "-25")])
+def test_lee_encabezados_exactos_importes_y_no_sobrescribe_duplicados():
+    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas([fila()]))
+    venta = resultado.ventas[0]
+    assert venta.unidades == 1
+    assert venta.forma_entrega == "Entrega comercial sintética"
+    assert venta.cargo_venta_impuestos == Decimal("-20.25")
+    assert venta.costo_envio_declarado == Decimal("12.34")
+    assert venta.cargo_diferencias_envio == Decimal("-1.23")
+    assert venta.anulaciones_reembolsos == Decimal("-5.50")
+    assert venta.precio_unitario == Decimal("150.75")
+    assert venta.ingresos_envio == Decimal("0")
+    assert venta.id_venta == "12345678901234567890"
+    assert venta.id_publicacion == "98765432109876543210"
+
+
+def test_interpreta_reclamos_desde_tres_columnas_operativas():
+    base = fila()
+    base["Reclamo abierto"] = "No"
+    base["Reclamo cerrado"] = "Sí"
+    base["Con mediación"] = "No"
+    venta = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas([base])).ventas[0]
+    assert venta.reclamo_abierto is False
+    assert venta.reclamo_cerrado is True
+    assert venta.con_mediacion is False
+
+
+def test_importes_fechas_e_identificadores_no_vacios_invalidos_generan_validacion_sin_valor_crudo():
+    invalida = fila()
+    invalida["Cargo por venta e impuestos (ARS)"] = "IMPORTE_INVALIDO_SENTINELA"
+    invalida["Fecha de venta"] = "FECHA_INVALIDA_SENTINELA"
+    invalida["# de publicación"] = "123.45"
+    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas([invalida]))
+    assert not resultado.ventas
+    assert {e.codigo for e in resultado.errores} >= {"IMPORTE_INVALIDO", "FECHA_INVALIDA", "IDENTIFICADOR_INVALIDO"}
+    assert {e.columna for e in resultado.errores} >= {"Cargo por venta e impuestos (ARS)", "Fecha de venta", "# de publicación"}
+    texto_problemas = repr(resultado.errores) + repr(resultado.advertencias)
+    assert "IMPORTE_INVALIDO_SENTINELA" not in texto_problemas
+    assert "FECHA_INVALIDA_SENTINELA" not in texto_problemas
+
+
+def test_ventas_normales_canceladas_devueltas_e_informativas_se_conservan_sin_inventar_valores():
+    informativa = fila("44444444444444444444", "Informativa", None)
+    for campo in ["Ingresos por productos (ARS)", "Cargo por venta e impuestos (ARS)", "Unidades"]:
+        informativa[campo] = None
+    contenido = xlsx_ventas([
+        fila(),
+        fila("22222222222222222222", "Cancelada", "0"),
+        fila("33333333333333333333", "Devuelta", "-25"),
+        informativa,
+    ])
     resultado = normalizar_ventas_mercado_libre("ventas.xlsx", contenido)
-    assert resultado.cantidad_normalizada == 3
-    assert [v.estado for v in resultado.ventas] == ["Entregado", "Cancelada", "Devuelta"]
-    assert resultado.ventas[0].id_venta == "12345678901234567890"
-    assert resultado.ventas[0].id_publicacion == "98765432109876543210"
-    assert resultado.ventas[0].ingresos_productos == Decimal("150.75")
-    assert resultado.ventas[0].cargo_venta_impuestos == Decimal("-20.25")
+    assert resultado.cantidad_normalizada == 4
+    assert [v.estado for v in resultado.ventas] == ["Entregado", "Cancelada", "Devuelta", "Informativa"]
     assert resultado.ventas[1].total_informado_ml == Decimal("0")
     assert resultado.ventas[2].total_informado_ml == Decimal("-25")
-
-
-def test_fila_informativa_sin_importes_conserva_trazabilidad_sin_inventar_valores():
-    informativa = fila("44444444444444444444", "Informativa", None)
-    for campo in ["Ingresos por productos (ARS)", "Cargo por venta e impuestos", "Unidades"]:
-        informativa[campo] = None
-    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas([informativa]))
-    venta = resultado.ventas[0]
-    assert venta.fila_origen == 4
-    assert venta.unidades is None
-    assert venta.ingresos_productos is None
-    assert venta.total_informado_ml is None
+    assert resultado.ventas[3].unidades is None
+    assert resultado.ventas[3].ingresos_productos is None
+    assert resultado.ventas[3].total_informado_ml is None
 
 
 def test_rechaza_xlsx_invalido_o_estructura_incorrecta():
@@ -120,12 +192,23 @@ def test_rechaza_xlsx_invalido_o_estructura_incorrecta():
     assert incorrecto.errores
 
 
-def test_modelo_publico_no_expone_campos_personales_en_asdict_ni_repr():
+def test_sentinelas_personales_no_aparecen_en_modelo_asdict_repr_errores_ni_advertencias():
     nombres = {f.name for f in fields(VentaOficialMercadoLibre)}
-    prohibidos = ["documento", "direccion", "domicilio", "comprador", "dni", "ciudad", "codigo_postal", "pais", "url", "seguimiento", "fiscal"]
+    prohibidos = ["documento", "direccion", "domicilio", "comprador", "dni", "ciudad", "codigo_postal", "pais", "url", "seguimiento", "fiscal", "negocio", "iibb"]
     assert all(not any(p in nombre.lower() for p in prohibidos) for nombre in nombres)
-    venta = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas([fila()])).ventas[0]
-    publico = str(asdict(venta)) + repr(venta)
-    assert "comprador" not in publico.lower()
-    assert "dni" not in publico.lower()
-    assert "seguimiento" not in publico.lower()
+    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas([fila()]))
+    venta = resultado.ventas[0]
+    publico = str(asdict(venta)) + repr(venta) + repr(resultado.errores) + repr(resultado.advertencias)
+    for sentinel in PII_SENTINELS:
+        assert sentinel not in publico
+
+
+def test_conciliacion_existente_conserva_comportamiento():
+    r = único(reconciliar([op(hash_="hash-c", fila=7)], [mov(hash_="hash-f", fila=8)]))
+    assert r.estado == EstadoConciliacion.CONCILIADA
+    assert r.motivos == (MotivoConciliacion.COINCIDENCIA_NETA_EXACTA,)
+    assert r.diferencia_control == Decimal("0")
+    assert r.hashes_importacion_comercial == ("hash-c",)
+    assert r.hashes_importacion_financiera == ("hash-f",)
+    assert r.numeros_fila_comercial == (7,)
+    assert r.numeros_fila_financiera == (8,)

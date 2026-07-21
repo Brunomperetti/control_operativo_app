@@ -1061,7 +1061,11 @@ Cualquier utilidad, rentabilidad o resultado final continúa pendiente de valida
 
 El archivo oficial de ventas de Mercado Libre se procesa exclusivamente como XLSX en memoria. La detección no depende del nombre del archivo: se identifica por estructura cuando una hoja contiene una fila de encabezado con `# de venta`. La hoja observada en archivos oficiales es `Ventas AR`, pero el adaptador debe conservar la hoja realmente utilizada en metadatos.
 
-El encabezado no necesariamente está en la primera fila. La ingesta debe localizar de forma segura la fila cuyo encabezado contiene `# de venta`, conservar hash SHA-256, hoja utilizada, cantidad de filas de datos y columnas originales encontradas, y mantener trazabilidad por número de fila de origen.
+El encabezado no necesariamente está en la primera fila. La ingesta debe localizar de forma segura la fila cuyo encabezado contiene `# de venta`, conservar hash SHA-256, hoja utilizada, cantidad de filas de datos y columnas originales encontradas, y mantener trazabilidad por número de fila de origen. El contrato estructural del reporte oficial reconoce las 64 columnas confirmadas, incluyendo encabezados repetidos y columnas sensibles solo como estructura conocida para evitar falsos positivos de `COLUMNAS_ADICIONALES`.
+
+Los encabezados externos exactos para los importes y reclamos operativos confirmados son `Cargo por venta e impuestos (ARS)`, `Costo de envío basado en medidas y peso declarados`, `Cargo por diferencias en medidas y peso del paquete`, `Anulaciones y reembolsos (ARS)`, `Precio unitario de venta de la publicación (ARS)`, `Reclamo abierto`, `Reclamo cerrado` y `Con mediación`. No deben abreviarse en la frontera de entrada; cualquier nombre interno más corto debe resolverse mediante mapeo explícito.
+
+Cuando el XLSX contiene encabezados duplicados, la normalización debe desambiguarlos de forma determinística por posición (`Unidades`, `Unidades.1`, `Unidades.2`, `Forma de entrega`, `Forma de entrega.1`, etc.) antes de construir filas normalizables. `VentaOficialMercadoLibre` toma la primera columna `Unidades` y la primera `Forma de entrega`, correspondientes a la operación comercial, y no incorpora columnas sensibles duplicadas como seguimientos o URLs.
 
 ### 34.3 Modelo público seguro de ventas oficiales
 
@@ -1075,5 +1079,6 @@ Queda explícitamente prohibido que este modelo público contenga datos personal
 - Los importes se normalizan con `Decimal`; no se usan `float` como contrato público.
 - Las ventas canceladas, devueltas, con total cero o informativas no se eliminan.
 - Las filas informativas o sin importes conservan trazabilidad y no reciben valores inventados.
+- Una celda opcional vacía puede normalizarse como `None`, pero una celda no vacía con importe, fecha, identificador o indicador inválido debe generar un `ProblemaValidacion` con columna y fila, sin convertir silenciosamente a `None` ni a cero.
 - El normalizador público es `normalizar_ventas_mercado_libre(nombre_archivo, contenido, zona_horaria=...)`.
 - El procesamiento no incorpora archivos reales, IDs reales, importes reales ni datos personales al repositorio; las pruebas deben seguir siendo sintéticas y generadas en memoria.

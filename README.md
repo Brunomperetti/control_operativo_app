@@ -181,7 +181,7 @@ for venta in resultado.ventas:
     print(venta.id_venta, venta.total_informado_ml)
 ```
 
-El normalizador procesa XLSX en memoria, localiza el encabezado que contiene `# de venta` aunque no esté en la primera fila, conserva hoja, hash, columnas originales y fila de origen, mantiene IDs como texto e importes como `Decimal`, y no expone datos personales. No reconstruye `Total (ARS)`, no elimina ventas canceladas/devueltas/total cero ni calcula utilidad.
+El normalizador procesa XLSX en memoria, localiza el encabezado que contiene `# de venta` aunque no esté en la primera fila, conserva hoja, hash, columnas originales y fila de origen, mantiene IDs como texto e importes como `Decimal`, y no expone datos personales. Reconoce el contrato confirmado de 64 columnas, incluidos encabezados repetidos que se desambiguan por posición (`Unidades`, `Unidades.1`, `Unidades.2`, `Forma de entrega`, `Forma de entrega.1`, etc.) antes de normalizar. Usa los encabezados externos exactos `Cargo por venta e impuestos (ARS)`, `Costo de envío basado en medidas y peso declarados`, `Cargo por diferencias en medidas y peso del paquete`, `Anulaciones y reembolsos (ARS)`, `Precio unitario de venta de la publicación (ARS)`, `Reclamo abierto`, `Reclamo cerrado` y `Con mediación`. No reconstruye `Total (ARS)`, no elimina ventas canceladas/devueltas/total cero ni calcula utilidad.
 
 ## Uso mínimo de normalización de Mercado Pago
 

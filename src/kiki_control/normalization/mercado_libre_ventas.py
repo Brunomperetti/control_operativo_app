@@ -87,7 +87,7 @@ def _leer_filas(contenido: bytes, hoja: str | None) -> list[tuple[int, dict[str,
     for idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
         valores = tuple("" if v is None else str(v).strip() for v in row)
         if any(v == "# de venta" for v in valores):
-            encabezado = valores
+            encabezado = _desambiguar_encabezados(valores)
             header_idx = idx
             break
     if encabezado is None:
@@ -99,78 +99,123 @@ def _leer_filas(contenido: bytes, hoja: str | None) -> list[tuple[int, dict[str,
     return filas
 
 
+def _desambiguar_encabezados(encabezado: tuple[str, ...]) -> tuple[str, ...]:
+    vistos: dict[str, int] = {}
+    resultado: list[str] = []
+    for nombre in encabezado:
+        cantidad = vistos.get(nombre, 0)
+        resultado.append(nombre if cantidad == 0 else f"{nombre}.{cantidad}")
+        vistos[nombre] = cantidad + 1
+    return tuple(resultado)
+
+
 def _normalizar_fila(fila: dict[str, object], numero: int, hash_importacion: str, zona: ZoneInfo):
     errores: list[ProblemaValidacion] = []
     id_venta = _id(fila.get("# de venta"), "# de venta", numero, errores)
+    fecha_venta = _fecha(fila.get("Fecha de venta"), "Fecha de venta", numero, errores, zona, opcional=True)
+    sku = _id(fila.get("SKU"), "SKU", numero, errores, opcional=True)
+    id_publicacion = _id(fila.get("# de publicación"), "# de publicación", numero, errores, opcional=True)
     if not id_venta:
         return None, errores
-    return VentaOficialMercadoLibre(
+    venta = VentaOficialMercadoLibre(
         fila_origen=numero,
         hash_importacion=hash_importacion,
         id_venta=id_venta,
-        fecha_venta=_fecha(fila.get("Fecha de venta"), zona),
+        fecha_venta=fecha_venta,
         estado=_txt(fila.get("Estado")),
         descripcion_estado=_txt(fila.get("Descripción del estado")),
-        paquete_varios_productos=_bool(fila.get("Paquete de varios productos")),
-        pertenece_kit=_bool(fila.get("Pertenece a un kit")),
-        unidades=_int(fila.get("Unidades")),
-        ingresos_productos=_dec(fila.get("Ingresos por productos (ARS)")),
-        cargo_venta_impuestos=_dec(fila.get("Cargo por venta e impuestos")),
-        ingresos_envio=_dec(fila.get("Ingresos por envío (ARS)")),
-        costos_envio=_dec(fila.get("Costos de envío (ARS)")),
-        costo_envio_declarado=_dec(fila.get("Costo de envío declarado")),
-        cargo_diferencias_envio=_dec(fila.get("Cargo por diferencias en costos de envío")),
-        descuentos_bonificaciones=_dec(fila.get("Descuentos y bonificaciones")),
-        anulaciones_reembolsos=_dec(fila.get("Anulaciones y reembolsos")),
-        total_informado_ml=_dec(fila.get("Total (ARS)")),
-        sku=_id(fila.get("SKU"), "SKU", numero, errores, opcional=True),
-        id_publicacion=_id(fila.get("# de publicación"), "# de publicación", numero, errores, opcional=True),
+        paquete_varios_productos=_bool(fila.get("Paquete de varios productos"), "Paquete de varios productos", numero, errores),
+        pertenece_kit=_bool(fila.get("Pertenece a un kit"), "Pertenece a un kit", numero, errores),
+        unidades=_int(fila.get("Unidades"), "Unidades", numero, errores),
+        ingresos_productos=_dec(fila.get("Ingresos por productos (ARS)"), "Ingresos por productos (ARS)", numero, errores),
+        cargo_venta_impuestos=_dec(fila.get("Cargo por venta e impuestos (ARS)"), "Cargo por venta e impuestos (ARS)", numero, errores),
+        ingresos_envio=_dec(fila.get("Ingresos por envío (ARS)"), "Ingresos por envío (ARS)", numero, errores),
+        costos_envio=_dec(fila.get("Costos de envío (ARS)"), "Costos de envío (ARS)", numero, errores),
+        costo_envio_declarado=_dec(fila.get("Costo de envío basado en medidas y peso declarados"), "Costo de envío basado en medidas y peso declarados", numero, errores),
+        cargo_diferencias_envio=_dec(fila.get("Cargo por diferencias en medidas y peso del paquete"), "Cargo por diferencias en medidas y peso del paquete", numero, errores),
+        descuentos_bonificaciones=_dec(fila.get("Descuentos y bonificaciones"), "Descuentos y bonificaciones", numero, errores),
+        anulaciones_reembolsos=_dec(fila.get("Anulaciones y reembolsos (ARS)"), "Anulaciones y reembolsos (ARS)", numero, errores),
+        total_informado_ml=_dec(fila.get("Total (ARS)"), "Total (ARS)", numero, errores),
+        sku=sku,
+        id_publicacion=id_publicacion,
         canal_venta=_txt(fila.get("Canal de venta")),
         titulo_publicacion=_txt(fila.get("Título de la publicación")),
         variante=_txt(fila.get("Variante")),
-        precio_unitario=_dec(fila.get("Precio unitario")),
+        precio_unitario=_dec(fila.get("Precio unitario de venta de la publicación (ARS)"), "Precio unitario de venta de la publicación (ARS)", numero, errores),
         forma_entrega=_txt(fila.get("Forma de entrega")),
-        reclamo_abierto=_bool(fila.get("Reclamo abierto") or fila.get("Reclamo")),
-        estado_reclamo=_txt(fila.get("Estado del reclamo") or fila.get("Reclamo")),
-    ), errores
+        reclamo_abierto=_bool(fila.get("Reclamo abierto"), "Reclamo abierto", numero, errores),
+        reclamo_cerrado=_bool(fila.get("Reclamo cerrado"), "Reclamo cerrado", numero, errores),
+        con_mediacion=_bool(fila.get("Con mediación"), "Con mediación", numero, errores),
+    )
+    return venta, errores
 
 
 def _id(v: object, campo: str, n: int, errores: list[ProblemaValidacion], opcional: bool=False) -> str | None:
-    try: return normalizar_identificador(v, campo=campo, opcional=opcional)
-    except Exception as exc: errores.append(ProblemaValidacion("IDENTIFICADOR_INVALIDO", str(exc), SeveridadValidacion.ERROR, columna=campo, fila=n)); return None
+    try:
+        return normalizar_identificador(v, campo=campo, opcional=opcional)
+    except Exception:
+        errores.append(_problema("IDENTIFICADOR_INVALIDO", "Identificador inválido.", n, campo))
+        return None
 
-def _dec(v: object) -> Decimal | None:
+
+def _dec(v: object, campo: str, n: int, errores: list[ProblemaValidacion]) -> Decimal | None:
     if es_vacio(v):
         return None
-    try: return normalizar_decimal(v, campo="importe", opcional=True)
+    try:
+        return normalizar_decimal(v, campo=campo, opcional=True)
     except Exception:
-        try: return Decimal(str(v).replace(".", "").replace(",", "."))
-        except (InvalidOperation, ValueError): return None
+        errores.append(_problema("IMPORTE_INVALIDO", "Importe inválido.", n, campo))
+        return None
 
-def _int(v: object) -> int | None:
-    if es_vacio(v): return None
-    try: return int(Decimal(str(v)))
-    except Exception: return None
+
+def _int(v: object, campo: str, n: int, errores: list[ProblemaValidacion]) -> int | None:
+    if es_vacio(v):
+        return None
+    try:
+        valor = Decimal(str(v))
+    except InvalidOperation:
+        errores.append(_problema("ENTERO_INVALIDO", "Entero inválido.", n, campo))
+        return None
+    if valor != valor.to_integral_value():
+        errores.append(_problema("ENTERO_INVALIDO", "Entero inválido.", n, campo))
+        return None
+    return int(valor)
+
 
 def _txt(v: object) -> str | None:
     return None if es_vacio(v) else str(v).strip()
 
-def _bool(v: object) -> bool | None:
-    if es_vacio(v): return None
+
+def _bool(v: object, campo: str, n: int, errores: list[ProblemaValidacion]) -> bool | None:
+    if es_vacio(v):
+        return None
     t = str(v).strip().lower()
-    if t in {"sí", "si", "s", "yes", "true", "1"}: return True
-    if t in {"no", "false", "0"}: return False
+    if t in {"sí", "si", "s", "yes", "true", "1"}:
+        return True
+    if t in {"no", "false", "0"}:
+        return False
+    errores.append(_problema("BOOLEANO_INVALIDO", "Indicador booleano inválido.", n, campo))
     return None
 
-def _fecha(v: object, zona: ZoneInfo) -> datetime | None:
-    if es_vacio(v): return None
-    if isinstance(v, datetime): return v.replace(tzinfo=zona) if v.tzinfo is None else v.astimezone(zona)
+
+def _fecha(v: object, campo: str, n: int, errores: list[ProblemaValidacion], zona: ZoneInfo, opcional: bool = False) -> datetime | None:
+    if es_vacio(v):
+        return None
+    if isinstance(v, datetime):
+        return v.replace(tzinfo=zona) if v.tzinfo is None else v.astimezone(zona)
     texto = str(v).strip()
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
-        try: return datetime.strptime(texto, fmt).replace(tzinfo=zona)
-        except ValueError: pass
+        try:
+            return datetime.strptime(texto, fmt).replace(tzinfo=zona)
+        except ValueError:
+            pass
     try:
         dt = datetime.fromisoformat(texto)
         return dt.replace(tzinfo=zona) if dt.tzinfo is None else dt.astimezone(zona)
     except ValueError:
+        errores.append(_problema("FECHA_INVALIDA", "Fecha inválida.", n, campo))
         return None
+
+
+def _problema(codigo: str, mensaje: str, numero: int, columna: str) -> ProblemaValidacion:
+    return ProblemaValidacion(codigo, mensaje, SeveridadValidacion.ERROR, columna=columna, fila=numero)

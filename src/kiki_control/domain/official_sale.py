@@ -35,4 +35,5 @@ class VentaOficialMercadoLibre:
     precio_unitario: Decimal | None
     forma_entrega: str | None
     reclamo_abierto: bool | None
-    estado_reclamo: str | None
+    reclamo_cerrado: bool | None
+    con_mediacion: bool | None
