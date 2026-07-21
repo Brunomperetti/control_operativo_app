@@ -18,7 +18,7 @@ class ContratoColumnas:
         return self.obligatorias | self.opcionales_conocidas
 
 
-COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE = frozenset(
+COLUMNAS_OBLIGATORIAS_ECCOMAPP_RENTABILIDAD = frozenset(
     {
         "Fecha de venta",
         "Hora",
@@ -33,6 +33,21 @@ COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE = frozenset(
         "Monto neto (en MP) ($)",
         "Utilidades netas ($)",
         "Parámetros cálculo",
+    }
+)
+
+COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE_VENTAS = frozenset(
+    {
+        "# de venta",
+        "Fecha de venta",
+        "Estado",
+        "Unidades",
+        "Ingresos por productos (ARS)",
+        "Total (ARS)",
+        "SKU",
+        "# de publicación",
+        "Canal de venta",
+        "Título de la publicación",
     }
 )
 
@@ -60,8 +75,32 @@ COLUMNAS_OBLIGATORIAS_MERCADO_PAGO = frozenset(
 
 CONTRATOS = (
     ContratoColumnas(
-        TipoFuente.MERCADO_LIBRE,
-        COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE,
+        TipoFuente.MERCADO_LIBRE_VENTAS,
+        COLUMNAS_OBLIGATORIAS_MERCADO_LIBRE_VENTAS,
+        frozenset(
+            {
+                "Descripción del estado",
+                "Paquete de varios productos",
+                "Pertenece a un kit",
+                "Cargo por venta e impuestos",
+                "Ingresos por envío (ARS)",
+                "Costos de envío (ARS)",
+                "Costo de envío declarado",
+                "Cargo por diferencias en costos de envío",
+                "Descuentos y bonificaciones",
+                "Anulaciones y reembolsos",
+                "Variante",
+                "Precio unitario",
+                "Forma de entrega",
+                "Reclamo abierto",
+                "Reclamo",
+                "Estado del reclamo",
+            }
+        ),
+    ),
+    ContratoColumnas(
+        TipoFuente.ECCOMAPP_RENTABILIDAD,
+        COLUMNAS_OBLIGATORIAS_ECCOMAPP_RENTABILIDAD,
         frozenset(
             {
                 "ID Carrito",
