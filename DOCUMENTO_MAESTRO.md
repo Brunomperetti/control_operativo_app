@@ -1082,3 +1082,26 @@ Queda explícitamente prohibido que este modelo público contenga datos personal
 - Una celda opcional vacía puede normalizarse como `None`, pero una celda no vacía con importe, fecha, identificador o indicador inválido debe generar un `ProblemaValidacion` con columna y fila, sin convertir silenciosamente a `None` ni a cero.
 - El normalizador público es `normalizar_ventas_mercado_libre(nombre_archivo, contenido, zona_horaria=...)`.
 - El procesamiento no incorpora archivos reales, IDs reales, importes reales ni datos personales al repositorio; las pruebas deben seguir siendo sintéticas y generadas en memoria.
+
+## 35. Vinculación comercial oficial Mercado Libre / Eccomapp
+
+Se incorpora un motor de dominio puro para resolver la identidad comercial entre el XLSX oficial de ventas de Mercado Libre (`VentaOficialMercadoLibre`) y el CSV normalizado de Eccomapp (`OperacionComercial`). Esta etapa no incorpora Mercado Pago, no cambia la conciliación financiera existente, no recalcula utilidad, no modifica Streamlit y no altera exportaciones ni fórmulas.
+
+La identidad canónica de Eccomapp se define de forma determinística: `id_grupo_canonico` es `id_carrito` cuando existe y `id_orden` cuando `id_carrito` está vacío. El ID Order conserva la identidad de cada operación individual; el ID Carrito define el grupo comercial cuando está presente.
+
+En el XLSX oficial, `VentaOficialMercadoLibre.id_venta` proviene de `# de venta` y puede representar una cabecera de carrito, una venta individual, una fila de detalle perteneciente a un carrito o una venta sin contraparte en Eccomapp. Una cabecera o venta principal es la venta oficial cuyo `id_venta` coincide con el grupo canónico del carrito. Las ventas de detalle son ventas oficiales cuyo `id_venta` coincide con órdenes internas de ese carrito. Una venta individual es aquella vinculada por ID Order a una operación sin carrito.
+
+Las reglas de vinculación son estrictamente por identificadores externos: primero ID Carrito y luego ID Order. SKU es solo una validación secundaria de consistencia agregada por grupo; nunca es clave primaria. Queda prohibido usar fechas, producto o importes para forzar coincidencias. Ante ambigüedad, duplicidad o conflicto de identidad, el motor debe conservar trazabilidad, marcar revisión y no elegir automáticamente un grupo.
+
+Estados comerciales estables:
+
+- `VINCULADA`: existe vínculo por ID sin observaciones relevantes.
+- `VINCULADA_CON_OBSERVACIONES`: existe vínculo por ID, pero falta o sobra principal, difiere SKU u otra condición requiere revisión.
+- `SOLO_MERCADO_LIBRE`: venta oficial sin contraparte por ID Carrito ni ID Order en Eccomapp; puede corresponder a cancelación, devolución, diferencia de cobertura u operación no incluida.
+- `SOLO_ECCOMAPP`: grupo Eccomapp sin contraparte en el archivo oficial cargado; requiere revisión.
+- `AMBIGUA`: un identificador puede conducir a más de un grupo canónico; no se fuerza vínculo.
+- `DUPLICADA`: existe conflicto de identidad por ID Order repetido o asociado a más de un carrito; no se fuerza vínculo.
+
+La validación secundaria de SKU compara los conjuntos de SKU no vacíos de todas las ventas oficiales del grupo —cabecera y detalles— contra los SKU no vacíos de todas las operaciones Eccomapp del grupo. Sus estados son `COINCIDE`, `NO_DISPONIBLE_EN_AMBAS`, `FALTA_EN_MERCADO_LIBRE`, `FALTA_EN_ECCOMAPP` y `DIFIERE`. La ausencia de SKU no rompe una vinculación válida por ID; `DIFIERE` agrega observación y requiere revisión.
+
+Los resultados deben ser inmutables y auditables, conservar hashes de importación, filas de origen, operaciones involucradas, ventas principales o de detalle, métodos aplicados, motivos y explicaciones prudentes sin datos personales. No deben incorporarse archivos reales ni datos reales al repositorio para probar esta lógica.
