@@ -87,6 +87,7 @@ def test_pago_aprobado_sin_id_orden_no_se_presenta_como_usado_y_conserva_estado_
     pasos = explicar_operacion(resultado, [], [movimiento], Decimal("0.01"))
     paso_neto = next(p for p in pasos if p.resultado == "Neto aprobado MP")
     paso_total = next(p for p in pasos if p.resultado == "Neto financiero total")
+    paso_pago_dividido = next(p for p in pasos if p.resultado == "Pago dividido")
 
     assert paso_neto.valor_calculado == "—"
     assert "fila 55" in paso_neto.regla_o_formula
@@ -98,6 +99,21 @@ def test_pago_aprobado_sin_id_orden_no_se_presenta_como_usado_y_conserva_estado_
     assert "no puede agruparse ni compararse por orden" in paso_neto.regla_o_formula.lower()
     assert "Neto financiero total" in paso_neto.regla_o_formula
     assert paso_total.valor_calculado == "$ 123,45"
+    assert "Pago aprobado sin ID de orden" in paso_total.regla_o_formula
+    assert "no comparable" in paso_total.regla_o_formula
+    assert "$ 123,45" in paso_total.regla_o_formula
+    assert "forma parte del Neto financiero total" in paso_total.regla_o_formula
+    assert "no forma parte del neto aprobado comparable" in paso_total.regla_o_formula
+    assert "no genera diferencia contra Mercado Libre" in paso_total.regla_o_formula
+    assert "no modifica el motor ni el modelo de dominio" in paso_total.regla_o_formula
+    assert "Pago aprobado sin ID de orden — no comparable: $ 123,45" in paso_total.regla_o_formula
+    assert paso_pago_dividido.valor_calculado == "No"
+    assert "No se evalúa como pago dividido por orden" in paso_pago_dividido.regla_o_formula
+    assert "no posee `ID DE LA ORDEN`" in paso_pago_dividido.regla_o_formula
+    assert "imposibilidad de agrupar y evaluar pagos por orden" in paso_pago_dividido.regla_o_formula
+    assert "Se encontró cero o un único pago aprobado" not in paso_pago_dividido.regla_o_formula
+    assert resultado.neto_pagos_aprobados is None
+    assert resultado.neto_financiero_total == Decimal("123.45")
     assert resultado.estado == estado_original == EstadoConciliacion.MOVIMIENTO_SIN_OPERACION_COMERCIAL
 
 

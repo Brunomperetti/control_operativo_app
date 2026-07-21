@@ -154,15 +154,37 @@ def explicar_operacion(resultado: ResultadoConciliacion, operaciones: Sequence[O
         signo = "MP informa más neto que ML" if resultado.diferencia_control > 0 else "MP informa menos neto que ML" if resultado.diferencia_control < 0 else "MP y ML informan el mismo neto comparable"
         formula = f"{formato_pesos_argentino(resultado.neto_pagos_aprobados)} - {formato_pesos_argentino(resultado.neto_comercial_informado)} = {formato_pesos_argentino(resultado.diferencia_control)}. {signo}. Tolerancia aplicada: {formato_pesos_argentino(tolerancia)}."
         pasos.append(PasoCalculoOperacion("Diferencia", formato_pesos_argentino(resultado.diferencia_control), formula, "Mercado Libre / Mercado Pago", (ML_NETO, MP_NETO), _filas(resultado.numeros_fila_comercial, resultado.numeros_fila_financiera)))
-    pasos.append(PasoCalculoOperacion("Neto financiero total", formato_pesos_argentino(resultado.neto_financiero_total), f"Suma todos los movimientos MP asociados. Pagos aprobados: {formato_pesos_argentino(resultado.neto_pagos_aprobados)}; pagos de envío: {formato_pesos_argentino(resultado.impacto_pagos_envio)}; devoluciones: {formato_pesos_argentino(resultado.impacto_devoluciones)}; reclamos/disputas: {formato_pesos_argentino(resultado.impacto_reclamos_disputas)}; otros: {formato_pesos_argentino(resultado.impacto_otros)}.", "Mercado Pago", (MP_TIPO, MP_NETO), _solo_filas(resultado.numeros_fila_financiera)))
+    pago_aprobado_sin_id = _sumar_decimales(m.monto_neto_impactado for m in pagos if m.id_orden is None and resultado.id_orden is None)
+    componentes_total = [
+        f"Pagos aprobados comparables: {formato_pesos_argentino(resultado.neto_pagos_aprobados)}",
+        f"pagos de envío: {formato_pesos_argentino(resultado.impacto_pagos_envio)}",
+        f"devoluciones: {formato_pesos_argentino(resultado.impacto_devoluciones)}",
+        f"reclamos/disputas: {formato_pesos_argentino(resultado.impacto_reclamos_disputas)}",
+        f"otros: {formato_pesos_argentino(resultado.impacto_otros)}",
+    ]
+    if pago_aprobado_sin_id is not None:
+        componentes_total.append(f"Pago aprobado sin ID de orden — no comparable: {formato_pesos_argentino(pago_aprobado_sin_id)}")
+    regla_total = "Suma todos los movimientos MP asociados. " + "; ".join(componentes_total) + "."
+    if pago_aprobado_sin_id is not None:
+        regla_total += " Este pago aprobado sin ID de orden forma parte del Neto financiero total, pero no forma parte del neto aprobado comparable, no genera diferencia contra Mercado Libre y no modifica el motor ni el modelo de dominio."
+    pasos.append(PasoCalculoOperacion("Neto financiero total", formato_pesos_argentino(resultado.neto_financiero_total), regla_total, "Mercado Pago", (MP_TIPO, MP_NETO), _solo_filas(resultado.numeros_fila_financiera)))
     if resultado.utilidad_neta_informada is not None:
         pasos.append(PasoCalculoOperacion("Utilidad informada", formato_pesos_argentino(resultado.utilidad_neta_informada), f"Valor informado en {ML_UTILIDAD}. La app no lo recalcula y no es ganancia contable o fiscal definitiva.", "Mercado Libre", (ML_UTILIDAD,), _solo_filas(resultado.numeros_fila_comercial)))
     cantidad_pagos = len(pagos)
+    if resultado.id_orden is None:
+        regla_pago_dividido = (
+            f"No se evalúa como pago dividido por orden porque el movimiento no posee `{MP_ID_ORDER}`. "
+            "El valor No no representa una orden con un único pago, sino la imposibilidad de agrupar y evaluar pagos por orden."
+        )
+    else:
+        regla_pago_dividido = (
+            f"Es Sí cuando existen dos o más movimientos normalizados como pago aprobado (`PAGO_APROBADO`) para la orden. Cantidad encontrada: {cantidad_pagos}. "
+            + ("Se suman sus netos para el control principal." if resultado.es_pago_dividido else "Se encontró cero o un único pago aprobado.")
+        )
     pasos.append(PasoCalculoOperacion(
         "Pago dividido",
         _si_no(resultado.es_pago_dividido),
-        f"Es Sí cuando existen dos o más movimientos normalizados como pago aprobado (`PAGO_APROBADO`) para la orden. Cantidad encontrada: {cantidad_pagos}. "
-        + ("Se suman sus netos para el control principal." if resultado.es_pago_dividido else "Se encontró cero o un único pago aprobado."),
+        regla_pago_dividido,
         "Mercado Pago",
         (MP_ID_ORDER, MP_TIPO, MP_NETO),
         _solo_filas(tuple(m.numero_fila_origen for m in pagos)),
@@ -211,6 +233,14 @@ def explicar_operacion(resultado: ResultadoConciliacion, operaciones: Sequence[O
 
 def cobertura_desigual_no_bloqueante() -> str:
     return "Cuando la cobertura temporal no coincide, la aplicación advierte y continúa: no recorta automáticamente el XLSX ni concluye por sí sola que un movimiento sin venta sea un error."
+
+def _sumar_decimales(importes: Iterable[Decimal]) -> Decimal | None:
+    total = Decimal("0")
+    tiene_importes = False
+    for importe in importes:
+        total += importe
+        tiene_importes = True
+    return total if tiene_importes else None
 
 def _si_no(valor: bool) -> str:
     return "Sí" if valor else "No"
