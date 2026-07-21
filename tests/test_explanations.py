@@ -126,3 +126,54 @@ def test_diccionario_cubre_todos_los_estados_y_motor_no_cambia():
     assert base.estado == EstadoConciliacion.CONCILIADA_CON_DIFERENCIA
     assert base.diferencia_control == Decimal("-5")
     assert MP_ID_ORDER == "ID DE LA ORDEN" and MP_TIPO == "TIPO DE OPERACIÓN" and MP_NETO == "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO"
+
+
+def _paso(resultado, nombre, operaciones, movimientos):
+    return next(p for p in explicar_operacion(resultado, operaciones, movimientos, Decimal("0.01")) if p.resultado == nombre)
+
+
+def test_indicadores_visibles_explican_si_y_no_con_columnas_exactas():
+    op_base = op(id_orden="IND", neto="100")
+    movimientos_si = [
+        mov(id_orden="IND", monto="40", id_mp="p1", liquidado=False),
+        mov(id_orden="IND", monto="60", id_mp="p2", fila=11),
+        mov(id_orden="IND", monto="-10", tipo=TipoOperacionFinanciera.DEVOLUCION_DINERO, id_mp="dev", fila=12),
+        mov(id_orden="IND", monto="-5", tipo=TipoOperacionFinanciera.RECLAMO, id_mp="rec", fila=13),
+    ]
+    resultado_si = reconciliar([op_base], movimientos_si).resultados[0]
+    assert _paso(resultado_si, "Pago dividido", [op_base], movimientos_si).valor_calculado == "Sí"
+    assert "Cantidad encontrada: 2" in _paso(resultado_si, "Pago dividido", [op_base], movimientos_si).regla_o_formula
+    assert _paso(resultado_si, "Pago dividido", [op_base], movimientos_si).columnas_utilizadas == ("ID DE LA ORDEN", "TIPO DE OPERACIÓN", "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO")
+    assert _paso(resultado_si, "Devolución", [op_base], movimientos_si).valor_calculado == "Sí"
+    assert _paso(resultado_si, "Devolución", [op_base], movimientos_si).columnas_utilizadas == ("TIPO DE OPERACIÓN",)
+    assert _paso(resultado_si, "Reclamo o disputa", [op_base], movimientos_si).valor_calculado == "Sí"
+    assert _paso(resultado_si, "Reclamo o disputa", [op_base], movimientos_si).columnas_utilizadas == ("TIPO DE OPERACIÓN",)
+    assert _paso(resultado_si, "Pendiente de acreditación", [op_base], movimientos_si).valor_calculado == "Sí"
+    assert _paso(resultado_si, "Pendiente de acreditación", [op_base], movimientos_si).columnas_utilizadas == ("TIPO DE OPERACIÓN", "FECHA DE LIQUIDACIÓN DEL DINERO")
+    assert _paso(resultado_si, "Requiere revisión", [op_base], movimientos_si).valor_calculado == "Sí"
+    assert "no equivale necesariamente" in _paso(resultado_si, "Requiere revisión", [op_base], movimientos_si).regla_o_formula
+
+    movimientos_no = [mov(id_orden="IND", monto="100", id_mp="ok")]
+    resultado_no = reconciliar([op_base], movimientos_no).resultados[0]
+    assert _paso(resultado_no, "Pago dividido", [op_base], movimientos_no).valor_calculado == "No"
+    assert "cero o un único pago aprobado" in _paso(resultado_no, "Pago dividido", [op_base], movimientos_no).regla_o_formula
+    assert _paso(resultado_no, "Devolución", [op_base], movimientos_no).valor_calculado == "No"
+    assert "No se detectaron" in _paso(resultado_no, "Devolución", [op_base], movimientos_no).regla_o_formula
+    assert _paso(resultado_no, "Reclamo o disputa", [op_base], movimientos_no).valor_calculado == "No"
+    assert "No se detectaron" in _paso(resultado_no, "Reclamo o disputa", [op_base], movimientos_no).regla_o_formula
+    assert _paso(resultado_no, "Pendiente de acreditación", [op_base], movimientos_no).valor_calculado == "No"
+    assert "No se encontró" in _paso(resultado_no, "Pendiente de acreditación", [op_base], movimientos_no).regla_o_formula
+    assert _paso(resultado_no, "Requiere revisión", [op_base], movimientos_no).valor_calculado == "No"
+
+
+def test_estado_final_explica_ganador_en_lenguaje_cliente_y_columnas_intervinientes():
+    op_base = op(id_orden="EST", neto="100")
+    movimientos = [mov(id_orden="EST", monto="95", liquidado=False)]
+    resultado = reconciliar([op_base], movimientos).resultados[0]
+    estado = _paso(resultado, "Estado final", [op_base], movimientos)
+    assert estado.valor_calculado == "Pendiente de acreditación"
+    assert "El estado ganador" in estado.regla_o_formula
+    assert "prioridad oficial" in estado.regla_o_formula
+    assert "ID Order" in estado.columnas_utilizadas
+    assert "ID DE LA ORDEN" in estado.columnas_utilizadas
+    assert "FECHA DE LIQUIDACIÓN DEL DINERO" in estado.columnas_utilizadas

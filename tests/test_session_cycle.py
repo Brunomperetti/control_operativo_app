@@ -110,3 +110,42 @@ def test_limpieza_de_filtros_por_cambio_de_vista_no_borra_reporte():
     assert estado["cobertura"] == "cobertura-sintetica"
     assert estado["normalizacion"] == "normalizacion-sintetica"
     assert estado["firma_procesamiento"] == "firma-sintetica"
+
+
+def test_modelos_normalizados_viven_solo_en_normalizacion_y_se_limpian():
+    claves_duplicadas = {"operaciones_normalizadas", "movimientos_normalizados"}
+    assert claves_duplicadas.isdisjoint(SESSION_KEYS_TO_CLEAR)
+    assert claves_duplicadas.isdisjoint(RESULT_KEYS_TO_CLEAR)
+
+    estado = {
+        "normalizacion": {"Mercado Libre": "ops", "Mercado Pago": "movs"},
+        "reporte": "reporte-sintetico",
+        "cobertura": "cobertura-sintetica",
+    }
+    limpiar_claves_conocidas(estado)
+    assert "normalizacion" not in estado
+    assert not any(clave in estado for clave in claves_duplicadas)
+
+
+def test_invalidacion_por_cambio_de_archivo_zona_o_tolerancia_elimina_modelos_normalizados():
+    for motivo in ["archivo", "zona", "tolerancia"]:
+        estado = {
+            "normalizacion": {"motivo": motivo},
+            "reporte": "reporte-sintetico",
+            "firma_procesamiento": "firma-sintetica",
+            "filtro_busqueda_orden": "SYN",
+        }
+        invalidar_resultados_conocidos(estado)
+        assert "normalizacion" not in estado
+        assert "reporte" not in estado
+        assert "firma_procesamiento" not in estado
+
+
+def test_no_quedan_referencias_duplicadas_a_modelos_normalizados_en_ui():
+    from pathlib import Path
+
+    source = Path("src/kiki_control/ui/streamlit_app.py").read_text()
+    assert "operaciones_normalizadas" not in source
+    assert "movimientos_normalizados" not in source
+    assert 'normalizacion.get("Mercado Libre")' in source
+    assert 'normalizacion.get("Mercado Pago")' in source

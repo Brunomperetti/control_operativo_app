@@ -201,8 +201,6 @@ def _procesar(info_ml: dict[str, Any], info_mp: dict[str, Any], zona: str, toler
             st.error("No quedaron movimientos financieros válidos para conciliar.")
             return
         firma = construir_firma_procesamiento(st.session_state["hash_ml"], st.session_state["hash_mp"], zona, tolerancia)
-        st.session_state["operaciones_normalizadas"] = ml.operaciones
-        st.session_state["movimientos_normalizados"] = mp.movimientos
         st.session_state["cobertura"] = cobertura_archivos(ml.operaciones, mp.movimientos)
         st.session_state["reporte"] = reconciliar(ml.operaciones, mp.movimientos, tolerancia)
         st.session_state["firma_procesamiento"] = firma
@@ -332,7 +330,10 @@ def _mostrar_resultados() -> None:
         st.markdown("#### Información de la operación")
         st.table([{"Campo": k, "Valor": v} for k, v in detalle_cliente(mapa[elegida]).items()])
         with st.expander("Cómo se calculó esta operación"):
-            pasos = explicar_operacion(mapa[elegida], st.session_state.get("operaciones_normalizadas", ()), st.session_state.get("movimientos_normalizados", ()), reporte.tolerancia)
+            normalizacion = st.session_state.get("normalizacion", {})
+            ml_norm = normalizacion.get("Mercado Libre")
+            mp_norm = normalizacion.get("Mercado Pago")
+            pasos = explicar_operacion(mapa[elegida], getattr(ml_norm, "operaciones", ()), getattr(mp_norm, "movimientos", ()), reporte.tolerancia)
             st.table([{
                 "Resultado": p.resultado,
                 "Valor calculado": p.valor_calculado,

@@ -144,12 +144,85 @@ def explicar_operacion(resultado: ResultadoConciliacion, operaciones: Sequence[O
     pasos.append(PasoCalculoOperacion("Neto financiero total", formato_pesos_argentino(resultado.neto_financiero_total), f"Suma todos los movimientos MP asociados. Pagos aprobados: {formato_pesos_argentino(resultado.neto_pagos_aprobados)}; pagos de envío: {formato_pesos_argentino(resultado.impacto_pagos_envio)}; devoluciones: {formato_pesos_argentino(resultado.impacto_devoluciones)}; reclamos/disputas: {formato_pesos_argentino(resultado.impacto_reclamos_disputas)}; otros: {formato_pesos_argentino(resultado.impacto_otros)}.", "Mercado Pago", (MP_TIPO, MP_NETO), _solo_filas(resultado.numeros_fila_financiera)))
     if resultado.utilidad_neta_informada is not None:
         pasos.append(PasoCalculoOperacion("Utilidad informada", formato_pesos_argentino(resultado.utilidad_neta_informada), f"Valor informado en {ML_UTILIDAD}. La app no lo recalcula y no es ganancia contable o fiscal definitiva.", "Mercado Libre", (ML_UTILIDAD,), _solo_filas(resultado.numeros_fila_comercial)))
+    cantidad_pagos = len(pagos)
+    pasos.append(PasoCalculoOperacion(
+        "Pago dividido",
+        _si_no(resultado.es_pago_dividido),
+        f"Es Sí cuando existen más de un movimiento normalizado PAGO_APROBADO para la orden. Cantidad encontrada: {cantidad_pagos}. "
+        + ("Se suman sus netos para el control principal." if resultado.es_pago_dividido else "Se encontró cero o un único pago aprobado."),
+        "Mercado Pago",
+        (MP_ID_ORDER, MP_TIPO, MP_NETO),
+        _solo_filas(tuple(m.numero_fila_origen for m in pagos)),
+    ))
+    devoluciones = tuple(m for m in movs if m.tipo_operacion in {TipoOperacionFinanciera.DEVOLUCION_DINERO, TipoOperacionFinanciera.DEVOLUCION_ENVIO})
+    pasos.append(PasoCalculoOperacion(
+        "Devolución",
+        _si_no(resultado.tiene_devolucion),
+        "Es Sí cuando existe un movimiento normalizado como DEVOLUCION_DINERO o DEVOLUCION_ENVIO. "
+        + (f"Se detectaron {len(devoluciones)} movimientos de devolución." if resultado.tiene_devolucion else "No se detectaron movimientos normalizados como DEVOLUCION_DINERO ni DEVOLUCION_ENVIO."),
+        "Mercado Pago",
+        (MP_TIPO,),
+        _solo_filas(tuple(m.numero_fila_origen for m in devoluciones)),
+    ))
+    reclamos_disputas = tuple(m for m in movs if m.tipo_operacion in {TipoOperacionFinanciera.RECLAMO, TipoOperacionFinanciera.DISPUTA_ENVIO})
+    pasos.append(PasoCalculoOperacion(
+        "Reclamo o disputa",
+        _si_no(resultado.tiene_reclamo or resultado.tiene_disputa),
+        "Es Sí cuando existe un movimiento normalizado como RECLAMO o DISPUTA_ENVIO. "
+        + (f"Se detectaron {len(reclamos_disputas)} movimientos de reclamo o disputa." if (resultado.tiene_reclamo or resultado.tiene_disputa) else "No se detectaron movimientos normalizados como RECLAMO ni DISPUTA_ENVIO."),
+        "Mercado Pago",
+        (MP_TIPO,),
+        _solo_filas(tuple(m.numero_fila_origen for m in reclamos_disputas)),
+    ))
+    pagos_sin_liquidacion = tuple(m for m in pagos if m.fecha_liquidacion_local is None)
+    pasos.append(PasoCalculoOperacion(
+        "Pendiente de acreditación",
+        _si_no(resultado.tiene_liquidacion_pendiente),
+        "Es Sí cuando existe al menos un PAGO_APROBADO sin fecha de liquidación. "
+        + (f"Se detectaron {len(pagos_sin_liquidacion)} pagos aprobados sin liquidación." if resultado.tiene_liquidacion_pendiente else "No se encontró ningún PAGO_APROBADO sin fecha de liquidación."),
+        "Mercado Pago",
+        (MP_TIPO, MP_FECHA_LIQUIDACION),
+        _solo_filas(tuple(m.numero_fila_origen for m in pagos_sin_liquidacion)),
+    ))
+    pasos.append(PasoCalculoOperacion(
+        "Requiere revisión",
+        _si_no(resultado.requiere_revision),
+        _regla_revision(resultado),
+        "Motor de conciliación",
+        _columnas_estado(resultado),
+        _filas(resultado.numeros_fila_comercial, resultado.numeros_fila_financiera),
+    ))
     secundarios = ", ".join([t for t, v in [("pago dividido", resultado.es_pago_dividido), ("devolución", resultado.tiene_devolucion), ("reclamo", resultado.tiene_reclamo), ("disputa", resultado.tiene_disputa), ("liquidación pendiente", resultado.tiene_liquidacion_pendiente), ("requiere revisión", resultado.requiere_revision)] if v]) or "sin indicadores secundarios relevantes"
-    pasos.append(PasoCalculoOperacion("Estado final", etiqueta_estado(resultado.estado), f"Condición principal: {'; '.join(resultado.explicaciones) or 'sin observaciones adicionales'}. Si había varias condiciones, se aplicó la prioridad oficial de estados. Indicadores secundarios: {secundarios}.", "Motor de conciliación", (), _filas(resultado.numeros_fila_comercial, resultado.numeros_fila_financiera)))
+    pasos.append(PasoCalculoOperacion("Estado final", etiqueta_estado(resultado.estado), _explicacion_estado(resultado, secundarios), "Motor de conciliación", _columnas_estado(resultado), _filas(resultado.numeros_fila_comercial, resultado.numeros_fila_financiera)))
     return tuple(pasos)
 
 def cobertura_desigual_no_bloqueante() -> str:
     return "Cuando la cobertura temporal no coincide, la aplicación advierte y continúa: no recorta automáticamente el XLSX ni concluye por sí sola que un movimiento sin venta sea un error."
+
+def _si_no(valor: bool) -> str:
+    return "Sí" if valor else "No"
+
+def _regla_revision(resultado: ResultadoConciliacion) -> str:
+    base = "Es un indicador derivado por las reglas del motor, no una columna directa. Excepción o caso especial no equivale necesariamente a revisión manual. "
+    if resultado.requiere_revision:
+        return base + f"El valor es Sí por el estado vigente {etiqueta_estado(resultado.estado)} o por una condición que el motor marca para intervención manual."
+    return base + f"El valor es No porque el estado vigente {etiqueta_estado(resultado.estado)} no requiere intervención manual según las reglas actuales."
+
+def _explicacion_estado(resultado: ResultadoConciliacion, secundarios: str) -> str:
+    explicaciones = "; ".join(resultado.explicaciones) or "el motor no agregó observaciones adicionales"
+    return f"El estado ganador es {etiqueta_estado(resultado.estado)} porque {explicaciones}. Si había varias condiciones candidatas, se aplicó la prioridad oficial de estados. Indicadores secundarios: {secundarios}."
+
+def _columnas_estado(resultado: ResultadoConciliacion) -> tuple[str, ...]:
+    columnas: list[str] = []
+    if resultado.cantidad_operaciones_comerciales:
+        columnas.extend([ML_ID_ORDER, ML_NETO])
+    if resultado.cantidad_movimientos_financieros:
+        columnas.extend([MP_ID_ORDER, MP_TIPO, MP_NETO])
+    if resultado.tiene_liquidacion_pendiente or resultado.estado == EstadoConciliacion.PENDIENTE_ACREDITACION:
+        columnas.append(MP_FECHA_LIQUIDACION)
+    if resultado.utilidad_neta_informada is not None:
+        columnas.append(ML_UTILIDAD)
+    return tuple(dict.fromkeys(columnas))
 
 def _filas(comerciales: tuple[int, ...], financieras: tuple[int, ...]) -> str:
     return f"ML: {_solo_filas(comerciales)}; MP: {_solo_filas(financieras)}"
