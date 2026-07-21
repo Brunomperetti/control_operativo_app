@@ -15,6 +15,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
 from kiki_control.domain.reconciliation import ReporteConciliacion, ResultadoConciliacion
+from kiki_control.presentation.review_cases import clasificar_revisiones
 from kiki_control.presentation.reconciliation_view import (
     CoberturaArchivosPresentacion,
     clave_resultado,
@@ -26,6 +27,7 @@ from kiki_control.presentation.reconciliation_view import (
 
 TIPO_COMPLETO = "Reporte completo"
 TIPO_EXCEPCIONES = "Solo excepciones"
+TIPO_REVISIONES = "Revisiones pendientes"
 ACLARACION_UTILIDAD = "La utilidad es informada por Mercado Libre y no representa resultado contable definitivo."
 ACLARACION_FONDOS = "Los movimientos de fondos se informan separados y no se consideran pérdidas comerciales."
 ACLARACION_PRIVACIDAD = "El archivo se generó en memoria y excluye datos personales, metadatos sensibles, contenido crudo y nombres de archivos originales."
@@ -74,6 +76,20 @@ def generar_reporte_excepciones_excel(reporte: ReporteConciliacion, cobertura: C
     resultados = _resultados_ordenados(reporte.resultados)
     excepciones = [r for r in resultados if es_excepcion_o_caso_especial(r)]
     return _generar_excel(reporte, cobertura, zona_horaria, TIPO_EXCEPCIONES, resultados, excepciones, incluir_todas=False)
+
+
+def generar_revisiones_pendientes_excel(reporte: ReporteConciliacion, cobertura: CoberturaArchivosPresentacion | None, zona_horaria: str) -> bytes:
+    """Devuelve bytes XLSX con únicamente resultados que requieren revisión."""
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Resumen"
+    casos = clasificar_revisiones(reporte.resultados)
+    _escribir_resumen(ws, reporte, cobertura, zona_horaria, TIPO_REVISIONES, len(reporte.resultados), len(casos))
+    _escribir_revisiones(wb.create_sheet("Revisiones pendientes"), casos)
+    salida = BytesIO()
+    wb.save(salida)
+    return salida.getvalue()
 
 
 def _generar_excel(reporte: ReporteConciliacion, cobertura: CoberturaArchivosPresentacion | None, zona_horaria: str, tipo: str, resultados: list[ResultadoConciliacion], excepciones: list[ResultadoConciliacion], incluir_todas: bool) -> bytes:
@@ -218,3 +234,24 @@ def _estilo_header(celda: Cell) -> None:
 def _asegurar_celda(celda: Cell) -> None:
     if isinstance(celda.value, str):
         celda.value = _texto_seguro(celda.value)
+
+
+def _escribir_revisiones(ws: Worksheet, casos: Iterable[Any]) -> None:
+    columnas = ("ID de orden o referencia", "Tipo de revisión", "Estado", "Motivo explicado", "Acción recomendada", "Neto ML", "Neto aprobado MP", "Neto financiero total", "Filas ML", "Filas MP", "Columnas de origen")
+    ws.append(list(columnas))
+    for caso in casos:
+        r = caso.resultado
+        ws.append([
+            _texto_seguro(r.id_orden or clave_resultado(r)),
+            _texto_seguro(caso.nombre_visible),
+            _texto_seguro(etiqueta_estado(r.estado)),
+            _texto_seguro(caso.descripcion),
+            _texto_seguro(caso.accion_recomendada),
+            _decimal_o_vacio(r.neto_comercial_informado),
+            _decimal_o_vacio(r.neto_pagos_aprobados),
+            _decimal_o_vacio(r.neto_financiero_total),
+            _texto_seguro(", ".join(str(n) for n in r.numeros_fila_comercial)),
+            _texto_seguro(", ".join(str(n) for n in r.numeros_fila_financiera)),
+            _texto_seguro(", ".join(caso.columnas_utilizadas)),
+        ])
+    _formatear_tabla(ws, moneda_columnas={6, 7, 8}, wrap_columnas={4, 5, 11}, freeze=True)
