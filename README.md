@@ -252,3 +252,46 @@ Categorías implementadas:
 - Otra revisión.
 
 Cada caso muestra motivo, acción recomendada, columnas utilizadas y filas de origen. También puede exportarse con **Descargar revisiones pendientes**, que genera un XLSX en memoria con hojas **Resumen** y **Revisiones pendientes**, solo con resultados `requiere_revision=True` y con las protecciones de exportación segura existentes: IDs como texto, importes `Decimal`, prevención de fórmulas y ausencia de PII.
+
+## Vinculación comercial Mercado Libre oficial / Eccomapp
+
+La API pública para resolver identidad comercial entre el XLSX oficial de Mercado Libre y el CSV normalizado de Eccomapp es:
+
+```python
+from kiki_control.linking import vincular_ventas_oficiales_con_eccomapp
+
+reporte = vincular_ventas_oficiales_con_eccomapp(
+    ventas_oficiales=[venta_oficial_normalizada],
+    operaciones_eccomapp=[operacion_eccomapp_normalizada],
+)
+```
+
+La función es pura: no lee archivos, no usa pandas, no depende de Streamlit ni Mercado Pago, no muta entradas y devuelve dataclasses inmutables con colecciones públicas `tuple`.
+
+Ejemplo sintético mínimo:
+
+```python
+reporte = vincular_ventas_oficiales_con_eccomapp(
+    ventas_oficiales=[venta_ml_con_id_venta_igual_a_id_order],
+    operaciones_eccomapp=[operacion_sin_carrito_con_mismo_id_order],
+)
+resultado = reporte.resultados[0]
+assert resultado.estado.value == "VINCULADA"
+assert resultado.metodos_vinculacion[0].value == "ID_ORDER"
+```
+
+Reglas principales:
+
+- En Eccomapp, `id_grupo_canonico` es `id_carrito` cuando existe y `id_orden` cuando no existe carrito.
+- `# de venta` del XLSX oficial puede ser cabecera de carrito, venta individual, detalle interno de carrito o venta sin contraparte.
+- La vinculación se realiza por ID Carrito o ID Order; no se usan fechas, producto ni importes para forzar coincidencias.
+- SKU se valida de manera secundaria por conjunto agregado de cabecera y detalles, pero nunca define la clave primaria; `COINCIDE` requiere igualdad exacta de conjuntos no vacíos.
+- Cada venta oficial y cada operación Eccomapp aparece exactamente una vez en el reporte usando sus identidades de trazabilidad, incluso ante duplicados o ambigüedades.
+- Los estados sin contraparte son prudentes: una venta solo Mercado Libre activa o con importe no cero requiere revisión porque puede faltar el costo de producto; una cancelada/devuelta/reembolsada con total cero puede quedar sin revisión manual; un grupo solo Eccomapp requiere revisión.
+
+Limitaciones actuales:
+
+- Este motor todavía no incorpora Mercado Pago.
+- No calcula utilidad, resultado operativo, comisiones, impuestos, envío ni netos financieros.
+- No modifica la conciliación financiera existente ni las exportaciones.
+- La UI todavía utiliza el flujo de archivos existente y no expone esta vinculación comercial como pantalla nueva.

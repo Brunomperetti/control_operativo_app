@@ -223,3 +223,17 @@ Esta actualización solo incorpora detección estructural y normalización segur
 El modelo público `VentaOficialMercadoLibre` debe permanecer inmutable y sin datos personales. No puede exponer comprador, documentos, DNI, domicilio, ciudad, código postal, país, datos fiscales personales, condición fiscal, número IIBB, negocio, URLs, números de seguimiento ni datos de empresa/persona no necesarios para conciliación. Los tests deben seguir usando datos sintéticos generados en memoria y nunca archivos reales.
 
 El XLSX oficial confirmado tiene 64 columnas y encabezados repetidos. La frontera de entrada debe conservar los encabezados externos exactos, entre ellos `Cargo por venta e impuestos (ARS)`, `Costo de envío basado en medidas y peso declarados`, `Cargo por diferencias en medidas y peso del paquete`, `Anulaciones y reembolsos (ARS)`, `Precio unitario de venta de la publicación (ARS)`, `Reclamo abierto`, `Reclamo cerrado` y `Con mediación`. Antes de armar filas normalizables, los duplicados deben resolverse de manera estable por posición (`Unidades`, `Unidades.1`, `Unidades.2`, etc.) para no sobrescribir valores. Las celdas opcionales vacías pueden ser `None`, pero valores no vacíos inválidos deben generar `ProblemaValidacion` con columna y fila sin filtrar contenido sensible en mensajes.
+
+## Actualización: motor de vinculación comercial ML oficial / Eccomapp
+
+Existe un motor puro de dominio para vincular `VentaOficialMercadoLibre` con `OperacionComercial` antes de cualquier cruce financiero. La API pública es `vincular_ventas_oficiales_con_eccomapp(ventas_oficiales, operaciones_eccomapp)` y devuelve un `ReporteVinculacionComercial` inmutable.
+
+Regla canónica: en Eccomapp, el grupo comercial es `id_carrito` cuando existe y `id_orden` cuando el carrito está vacío. `id_orden` identifica cada operación individual; `id_carrito` agrupa operaciones. El `# de venta` oficial puede ser cabecera de carrito, orden individual, detalle dentro de carrito o venta sin contraparte.
+
+La vinculación solo usa identificadores: ID Carrito e ID Order. SKU es validación secundaria agregada por grupo y nunca clave primaria. `COINCIDE` exige igualdad exacta entre conjuntos no vacíos; cualquier diferencia entre conjuntos no vacíos es `DIFIERE`. No se deben usar fechas, producto ni importes para forzar coincidencias. Los casos ambiguos, IDs duplicados o IDs asociados a más de un carrito deben quedar en revisión sin elección automática.
+
+El reporte debe conservar una partición exacta de registros: cada venta oficial `(hash_importacion, fila_origen)` y cada operación Eccomapp `(hash_importacion, numero_fila_origen)` aparece exactamente una vez, sin omisiones ni repeticiones, aunque existan conflictos. Las ventas `SOLO_MERCADO_LIBRE` activas, entregadas o con importe no cero requieren revisión; las claramente canceladas/devueltas/reembolsadas con total cero pueden quedar sin revisión manual.
+
+Estados creados: `VINCULADA`, `VINCULADA_CON_OBSERVACIONES`, `SOLO_MERCADO_LIBRE`, `SOLO_ECCOMAPP`, `AMBIGUA` y `DUPLICADA`. Métodos: `ID_CARRITO`, `ID_ORDER`, `ID_ORDER_DENTRO_DE_CARRITO` y `SIN_VINCULO`. SKU: `COINCIDE`, `NO_DISPONIBLE_EN_AMBAS`, `FALTA_EN_MERCADO_LIBRE`, `FALTA_EN_ECCOMAPP` y `DIFIERE`.
+
+Esta etapa no incorpora Mercado Pago, no modifica el motor de conciliación financiera, no recalcula utilidad, no cambia Streamlit, no cambia exportaciones y no altera fórmulas. Los tests deben ser sintéticos, sin archivos reales ni datos personales.
