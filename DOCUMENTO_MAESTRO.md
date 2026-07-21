@@ -1038,3 +1038,47 @@ Las categorías visibles son:
 La suma de categorías principales debe coincidir exactamente con el KPI **Requieren revisión**. La interfaz muestra la sección **Revisiones pendientes** debajo del resumen ejecutivo y antes de descargas, con conteo por tipo, filtros, búsqueda, tabla segura y detalle orientado a la acción. La descarga **Revisiones pendientes** genera un XLSX en memoria con hojas **Resumen** y **Revisiones pendientes**, incluye solo resultados que requieren revisión, mantiene IDs como texto, importes como `Decimal`, prevención de fórmulas, formato monetario argentino y exclusión de datos personales.
 
 El lenguaje de la aplicación debe mantenerse prudente: “no se encontró en el archivo cargado”, “requiere verificación”, “puede corresponder a otra cobertura temporal” y “la aplicación no puede resolverlo automáticamente con los datos disponibles”. No debe afirmar automáticamente pérdidas, errores contables ni pertenencia definitiva a otro período.
+
+## 34. Incorporación del reporte oficial de ventas de Mercado Libre
+
+A partir de esta actualización se distinguen explícitamente tres fuentes iniciales, con responsabilidades separadas:
+
+| Fuente canónica | Formato | Función |
+|---|---|---|
+| `MERCADO_LIBRE_VENTAS` | XLSX oficial descargado desde Mercado Libre, hoja observada `Ventas AR` | Fuente comercial oficial de ventas, estados, unidades, importes informados por Mercado Libre y datos operativos seguros para conciliación futura. |
+| `ECCOMAPP_RENTABILIDAD` | CSV que antes se trataba como Mercado Libre | Fuente de costos, rentabilidad e información procesada por Eccomapp, sistema de facturación, stock y costos. |
+| `MERCADO_PAGO` | XLSX financiero | Fuente financiera de cobros, liquidaciones, comisiones, retenciones, devoluciones, reclamos y movimientos de dinero. |
+
+El CSV históricamente llamado `MERCADO_LIBRE` queda confirmado como reporte de Eccomapp. Para compatibilidad técnica, las APIs existentes pueden conservar nombres anteriores cuando resulte razonable, pero toda evolución nueva debe usar `ECCOMAPP_RENTABILIDAD` para ese CSV y `MERCADO_LIBRE_VENTAS` para el XLSX oficial comercial.
+
+### 34.1 Alcance técnico de esta tarea
+
+Esta tarea incorpora detección estructural y normalización pública segura del XLSX oficial de ventas de Mercado Libre. No modifica todavía el motor de conciliación, las fórmulas financieras, la interfaz de usuario ni las exportaciones existentes. No realiza cruces entre Mercado Libre oficial, Eccomapp y Mercado Pago, no calcula utilidad y no define resultado operativo definitivo.
+
+Cualquier utilidad, rentabilidad o resultado final continúa pendiente de validación contable. Los importes informados por Mercado Libre deben conservarse como valores provistos por la fuente; en particular, `Total (ARS)` se preserva como `total_informado_ml` y no debe reconstruirse mediante fórmula propia.
+
+### 34.2 Detección estructural del XLSX oficial
+
+El archivo oficial de ventas de Mercado Libre se procesa exclusivamente como XLSX en memoria. La detección no depende del nombre del archivo: se identifica por estructura cuando una hoja contiene una fila de encabezado con `# de venta`. La hoja observada en archivos oficiales es `Ventas AR`, pero el adaptador debe conservar la hoja realmente utilizada en metadatos.
+
+El encabezado no necesariamente está en la primera fila. La ingesta debe localizar de forma segura la fila cuyo encabezado contiene `# de venta`, conservar hash SHA-256, hoja utilizada, cantidad de filas de datos y columnas originales encontradas, y mantener trazabilidad por número de fila de origen. El contrato estructural del reporte oficial reconoce las 64 columnas confirmadas, incluyendo encabezados repetidos y columnas sensibles solo como estructura conocida para evitar falsos positivos de `COLUMNAS_ADICIONALES`.
+
+Los encabezados externos exactos para los importes y reclamos operativos confirmados son `Cargo por venta e impuestos (ARS)`, `Costo de envío basado en medidas y peso declarados`, `Cargo por diferencias en medidas y peso del paquete`, `Anulaciones y reembolsos (ARS)`, `Precio unitario de venta de la publicación (ARS)`, `Reclamo abierto`, `Reclamo cerrado` y `Con mediación`. No deben abreviarse en la frontera de entrada; cualquier nombre interno más corto debe resolverse mediante mapeo explícito.
+
+Cuando el XLSX contiene encabezados duplicados, la normalización debe desambiguarlos de forma determinística por posición (`Unidades`, `Unidades.1`, `Unidades.2`, `Forma de entrega`, `Forma de entrega.1`, etc.) antes de construir filas normalizables. `VentaOficialMercadoLibre` toma la primera columna `Unidades` y la primera `Forma de entrega`, correspondientes a la operación comercial, y no incorpora columnas sensibles duplicadas como seguimientos o URLs.
+
+### 34.3 Modelo público seguro de ventas oficiales
+
+El modelo público `VentaOficialMercadoLibre` es inmutable y solo puede contener campos operativos necesarios para control y conciliación futura: fila de origen, hash de importación, ID de venta, fecha, estado, descripción de estado, indicadores de paquete o kit, unidades, importes informados por Mercado Libre, SKU, publicación, canal, título, variante, precio unitario, forma de entrega e indicadores estrictamente operativos de reclamo.
+
+Queda explícitamente prohibido que este modelo público contenga datos personales o de empresa, tipo o número de documento, dirección o domicilio, comprador, DNI, ciudad, código postal, país, datos fiscales personales, URLs, números de seguimiento o cualquier otro dato personal no necesario para la conciliación.
+
+### 34.4 Reglas de normalización del XLSX oficial
+
+- Los identificadores se conservan como texto.
+- Los importes se normalizan con `Decimal`; no se usan `float` como contrato público.
+- Las ventas canceladas, devueltas, con total cero o informativas no se eliminan.
+- Las filas informativas o sin importes conservan trazabilidad y no reciben valores inventados.
+- Una celda opcional vacía puede normalizarse como `None`, pero una celda no vacía con importe, fecha, identificador o indicador inválido debe generar un `ProblemaValidacion` con columna y fila, sin convertir silenciosamente a `None` ni a cero.
+- El normalizador público es `normalizar_ventas_mercado_libre(nombre_archivo, contenido, zona_horaria=...)`.
+- El procesamiento no incorpora archivos reales, IDs reales, importes reales ni datos personales al repositorio; las pruebas deben seguir siendo sintéticas y generadas en memoria.

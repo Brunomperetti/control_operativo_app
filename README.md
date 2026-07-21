@@ -1,6 +1,6 @@
 # Control Operativo App
 
-Kiki Control Financiero es una aplicación profesional en Streamlit para controlar la conciliación entre ventas de Mercado Libre y movimientos financieros de Mercado Pago.
+Kiki Control Financiero es una aplicación profesional en Streamlit para controlar la conciliación entre fuentes comerciales, costos operativos y movimientos financieros. Actualmente distingue el XLSX oficial de ventas de Mercado Libre, el CSV de rentabilidad de Eccomapp y el XLSX financiero de Mercado Pago.
 
 > La documentación oficial y completa del proyecto se encuentra en [`DOCUMENTO_MAESTRO.md`](DOCUMENTO_MAESTRO.md).
 
@@ -8,14 +8,14 @@ Kiki Control Financiero es una aplicación profesional en Streamlit para control
 
 La versión actual permite ejecutar el flujo inicial de conciliación en memoria:
 
-- Inspección estructural de CSV de Mercado Libre y XLSX de Mercado Pago.
+- Inspección estructural de tres fuentes: XLSX oficial de ventas de Mercado Libre (`MERCADO_LIBRE_VENTAS`), CSV de rentabilidad de Eccomapp (`ECCOMAPP_RENTABILIDAD`, antes tratado como Mercado Libre) y XLSX financiero de Mercado Pago (`MERCADO_PAGO`).
 - Detección de fuente por firma de columnas, no por nombre de archivo.
-- Normalización a modelos internos inmutables.
+- Normalización a modelos internos inmutables, incluyendo `VentaOficialMercadoLibre` para el XLSX oficial comercial sin datos personales.
 - Conciliación por `ID Order` con el motor `ML_MP_ID_ORDER_NETO_V1`.
 - Interfaz Streamlit para carga, validación, configuración, procesamiento, resumen ejecutivo, descargas Excel, filtros, detalle por operación y ciclo seguro de sesión.
 - Pruebas unitarias e integrales sintéticas, sin datos reales.
 
-No existe persistencia, historial, login, API, cálculo contable definitivo ni dashboard avanzado. La exportación disponible es XLSX en memoria del reporte vigente.
+No existe persistencia, historial, login, API, cálculo contable definitivo ni dashboard avanzado. La exportación disponible es XLSX en memoria del reporte vigente. Todavía no se implementó el cruce de tres fuentes entre Mercado Libre oficial, Eccomapp y Mercado Pago.
 
 ## Requisitos
 
@@ -54,17 +54,18 @@ streamlit run app.py
 
 ## Flujo de carga y conciliación
 
-1. Cargar el CSV de ventas de Mercado Libre.
+1. Cargar el CSV de rentabilidad de Eccomapp mediante el flujo histórico compatible.
 2. Cargar el XLSX de movimientos de Mercado Pago.
-3. La app inspecciona ambos archivos y muestra metadatos seguros: fuente detectada, filas, columnas, tamaño, hash truncado, hoja usada y problemas estructurales.
-4. Configurar la zona horaria operativa y la tolerancia monetaria.
-5. Presionar **Procesar y conciliar** cuando ambos archivos sean válidos.
+3. El XLSX oficial de ventas de Mercado Libre ya puede detectarse y normalizarse por API pública, pero todavía no participa en la conciliación de la UI.
+4. La app inspecciona los archivos de conciliación actuales y muestra metadatos seguros: fuente detectada, filas, columnas, tamaño, hash truncado, hoja usada y problemas estructurales.
+5. Configurar la zona horaria operativa y la tolerancia monetaria.
+6. Presionar **Procesar y conciliar** cuando ambos archivos sean válidos.
    - La aplicación firma el procesamiento con los hashes SHA-256 de ambos archivos, la zona horaria y la tolerancia monetaria normalizada como `Decimal`.
    - Si se elimina o reemplaza cualquiera de los archivos, o cambia la zona horaria o la tolerancia, se invalidan de inmediato normalizaciones, cobertura, reporte, filtros, detalle y firma anterior.
    - Nunca se muestra un reporte cuya firma no coincida con los archivos y la configuración actuales.
-6. La app normaliza ambas fuentes, informa filas recibidas, normalizadas y rechazadas, y permite conciliación parcial si quedan registros válidos.
-7. El motor de conciliación produce el reporte por operación.
-8. La pantalla muestra la cobertura temporal de ambos archivos, conclusión ejecutiva, resumen ejecutivo, descargas Excel, tabla filtrable y detalle de cada resultado.
+7. La app normaliza ambas fuentes, informa filas recibidas, normalizadas y rechazadas, y permite conciliación parcial si quedan registros válidos.
+8. El motor de conciliación produce el reporte por operación.
+9. La pantalla muestra la cobertura temporal de ambos archivos, conclusión ejecutiva, resumen ejecutivo, descargas Excel, tabla filtrable y detalle de cada resultado.
 
 
 ## Cobertura y alcance de métricas
@@ -130,7 +131,7 @@ El sistema no recalcula impuestos, utilidad ni resultado operativo definitivo. L
 
 ## Limitaciones actuales
 
-- Solo se procesan archivos manuales CSV de Mercado Libre y XLSX de Mercado Pago.
+- La conciliación actual sigue usando el CSV de Eccomapp y el XLSX de Mercado Pago; el XLSX oficial de ventas de Mercado Libre ya se detecta y normaliza, pero aún no se cruza con las otras dos fuentes.
 - No hay persistencia, historial ni usuarios.
 - No hay exportación CSV desde la interfaz.
 - No hay gráficos avanzados ni integraciones por API.
@@ -147,7 +148,11 @@ resultado = inspeccionar_archivo("archivo.csv", contenido_en_bytes)
 
 El inspector no guarda archivos en disco y no expone contenidos financieros en mensajes de error.
 
-## Uso mínimo de normalización de Mercado Libre
+## Uso mínimo de normalización del CSV de Eccomapp
+
+La API histórica conserva el nombre `normalizar_mercado_libre` por compatibilidad, pero el CSV corresponde a `ECCOMAPP_RENTABILIDAD`: fuente de costos y rentabilidad informada/procesada.
+
+## Uso mínimo de normalización del CSV histórico
 
 ```python
 from kiki_control.adapters.mercado_libre import normalizar_mercado_libre
@@ -160,6 +165,23 @@ resultado = normalizar_mercado_libre(
 for operacion in resultado.operaciones:
     print(operacion.id_orden, operacion.utilidad_neta_informada)
 ```
+
+
+## Uso mínimo de normalización de ventas oficiales de Mercado Libre
+
+```python
+from kiki_control.adapters.mercado_libre_ventas import normalizar_ventas_mercado_libre
+
+resultado = normalizar_ventas_mercado_libre(
+    nombre_archivo="ventas-oficiales.xlsx",
+    contenido=contenido_xlsx_en_bytes,
+)
+
+for venta in resultado.ventas:
+    print(venta.id_venta, venta.total_informado_ml)
+```
+
+El normalizador procesa XLSX en memoria, localiza el encabezado que contiene `# de venta` aunque no esté en la primera fila, conserva hoja, hash, columnas originales y fila de origen, mantiene IDs como texto e importes como `Decimal`, y no expone datos personales. Reconoce el contrato confirmado de 64 columnas, incluidos encabezados repetidos que se desambiguan por posición (`Unidades`, `Unidades.1`, `Unidades.2`, `Forma de entrega`, `Forma de entrega.1`, etc.) antes de normalizar. Usa los encabezados externos exactos `Cargo por venta e impuestos (ARS)`, `Costo de envío basado en medidas y peso declarados`, `Cargo por diferencias en medidas y peso del paquete`, `Anulaciones y reembolsos (ARS)`, `Precio unitario de venta de la publicación (ARS)`, `Reclamo abierto`, `Reclamo cerrado` y `Con mediación`. No reconstruye `Total (ARS)`, no elimina ventas canceladas/devueltas/total cero ni calcula utilidad.
 
 ## Uso mínimo de normalización de Mercado Pago
 

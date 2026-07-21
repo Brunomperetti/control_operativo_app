@@ -79,8 +79,16 @@ def _leer_textos_compartidos(archivo: ZipFile) -> list[str]:
 def _listar_hojas(archivo: ZipFile) -> list[tuple[str, str]]:
     libro = ET.fromstring(archivo.read("xl/workbook.xml"))
     relaciones = ET.fromstring(archivo.read("xl/_rels/workbook.xml.rels"))
-    rutas = {rel.attrib["Id"]: "xl/" + rel.attrib["Target"] for rel in relaciones}
+    rutas = {rel.attrib["Id"]: _ruta_relacion_libro(rel.attrib["Target"]) for rel in relaciones}
     return [(hoja.attrib["name"], rutas[hoja.attrib["{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"]]) for hoja in libro.findall("main:sheets/main:sheet", NS)]
+
+
+def _ruta_relacion_libro(target: str) -> str:
+    if target.startswith("/"):
+        return target.lstrip("/")
+    if target.startswith("xl/"):
+        return target
+    return "xl/" + target
 
 
 def _leer_hoja(archivo: ZipFile, ruta: str, compartidos: list[str]) -> tuple[tuple[str, ...], int]:
@@ -90,6 +98,9 @@ def _leer_hoja(archivo: ZipFile, ruta: str, compartidos: list[str]) -> tuple[tup
     valores_no_vacios = [fila for fila in valores if any(valor != "" for valor in fila)]
     if not valores_no_vacios:
         return tuple(), 0
+    for indice, fila in enumerate(valores_no_vacios):
+        if any(valor == "# de venta" for valor in fila):
+            return tuple(fila), max(len(valores_no_vacios) - indice - 1, 0)
     return tuple(valores_no_vacios[0]), max(len(valores_no_vacios) - 1, 0)
 
 

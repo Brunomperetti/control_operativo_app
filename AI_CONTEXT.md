@@ -207,3 +207,19 @@ Debe:
 ## Referencia obligatoria
 
 La especificación oficial del proyecto está en `DOCUMENTO_MAESTRO.md`. Este archivo resume el contexto para IA, pero no reemplaza el documento maestro.
+
+## Actualización: tres fuentes iniciales diferenciadas
+
+Antes de modificar reglas futuras, considerar esta separación como oficial:
+
+1. `MERCADO_LIBRE_VENTAS`: reporte XLSX oficial descargado de Mercado Libre. Es la fuente comercial oficial de ventas, estados, unidades e importes informados por Mercado Libre.
+2. `ECCOMAPP_RENTABILIDAD`: CSV previamente tratado como Mercado Libre. Queda confirmado que proviene de Eccomapp, sistema de facturación, stock y costos; su rol es fuente de costos y rentabilidad informada/procesada.
+3. `MERCADO_PAGO`: XLSX financiero de cobros, liquidaciones, comisiones, impuestos, retenciones, devoluciones, reclamos y movimientos de dinero.
+
+La API histórica `normalizar_mercado_libre` se conserva por compatibilidad para el CSV de Eccomapp, pero las implementaciones nuevas deben nombrar explícitamente `ECCOMAPP_RENTABILIDAD` cuando hablen de ese archivo. El reporte comercial oficial nuevo se normaliza con `normalizar_ventas_mercado_libre(nombre_archivo, contenido, zona_horaria=...)` y no depende del nombre del archivo.
+
+Esta actualización solo incorpora detección estructural y normalización segura del XLSX oficial de ventas de Mercado Libre. No modifica el motor de conciliación, la UI, las exportaciones ni las fórmulas financieras; no cruza todavía las tres fuentes; no calcula utilidad; y cualquier utilidad o resultado definitivo permanece pendiente de validación contable.
+
+El modelo público `VentaOficialMercadoLibre` debe permanecer inmutable y sin datos personales. No puede exponer comprador, documentos, DNI, domicilio, ciudad, código postal, país, datos fiscales personales, condición fiscal, número IIBB, negocio, URLs, números de seguimiento ni datos de empresa/persona no necesarios para conciliación. Los tests deben seguir usando datos sintéticos generados en memoria y nunca archivos reales.
+
+El XLSX oficial confirmado tiene 64 columnas y encabezados repetidos. La frontera de entrada debe conservar los encabezados externos exactos, entre ellos `Cargo por venta e impuestos (ARS)`, `Costo de envío basado en medidas y peso declarados`, `Cargo por diferencias en medidas y peso del paquete`, `Anulaciones y reembolsos (ARS)`, `Precio unitario de venta de la publicación (ARS)`, `Reclamo abierto`, `Reclamo cerrado` y `Con mediación`. Antes de armar filas normalizables, los duplicados deben resolverse de manera estable por posición (`Unidades`, `Unidades.1`, `Unidades.2`, etc.) para no sobrescribir valores. Las celdas opcionales vacías pueden ser `None`, pero valores no vacíos inválidos deben generar `ProblemaValidacion` con columna y fila sin filtrar contenido sensible en mensajes.
