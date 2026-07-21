@@ -22,6 +22,10 @@ SESSION_KEYS_TO_CLEAR = (
     "filtro_solo_divididos",
     "detalle_operacion",
     "vista_resultados",
+    "revision_tipo",
+    "revision_busqueda",
+    "revision_detalle",
+    "filtro_motivo_revision",
 )
 
 RESULT_KEYS_TO_CLEAR = (
@@ -36,6 +40,10 @@ RESULT_KEYS_TO_CLEAR = (
     "filtro_solo_divididos",
     "detalle_operacion",
     "vista_resultados",
+    "revision_tipo",
+    "revision_busqueda",
+    "revision_detalle",
+    "filtro_motivo_revision",
 )
 
 VIEW_FILTER_KEYS_TO_CLEAR = (
@@ -44,6 +52,7 @@ VIEW_FILTER_KEYS_TO_CLEAR = (
     "filtro_solo_revision",
     "filtro_solo_divididos",
     "detalle_operacion",
+    "filtro_motivo_revision",
 )
 
 
@@ -83,3 +92,15 @@ def invalidar_resultados_conocidos(estado: MutableMapping[str, Any]) -> None:
 def limpiar_filtros_de_vista(estado: MutableMapping[str, Any]) -> None:
     """Elimina solo filtros dependientes de la vista, sin invalidar resultados procesados."""
     limpiar_claves_conocidas(estado, VIEW_FILTER_KEYS_TO_CLEAR)
+
+
+def limpiar_detalle_revision(estado: MutableMapping[str, Any]) -> None:
+    """Elimina la selección de detalle de revisión sin borrar reporte ni filtros."""
+    estado.pop("revision_detalle", None)
+
+
+def limpiar_detalle_revision_si_obsoleto(estado: MutableMapping[str, Any], claves_validas: set[str]) -> None:
+    """Evita conservar un caso seleccionado que ya no pertenece al filtro vigente."""
+    seleccion = estado.get("revision_detalle")
+    if seleccion is not None and seleccion not in claves_validas:
+        estado.pop("revision_detalle", None)

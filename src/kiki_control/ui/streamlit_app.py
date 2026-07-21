@@ -9,7 +9,7 @@ import streamlit as st
 from kiki_control.adapters.mercado_libre import normalizar_mercado_libre
 from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
 from kiki_control.domain.enums import TipoFuente
-from kiki_control.exporting import generar_reporte_completo_excel, generar_reporte_excepciones_excel
+from kiki_control.exporting import generar_reporte_completo_excel, generar_reporte_excepciones_excel, generar_revisiones_pendientes_excel
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
 from kiki_control.presentation.explanations import (
     COLUMNAS_TABLA,
@@ -17,6 +17,15 @@ from kiki_control.presentation.explanations import (
     METRICAS_RESUMEN,
     explicar_operacion,
     guia_general,
+)
+from kiki_control.presentation.review_cases import (
+    DEFINICIONES_REVISION,
+    clasificar_revisiones,
+    conteo_por_tipo,
+    filas_revisiones,
+    filtrar_casos,
+    clave_caso_revision,
+    referencia_visible_caso,
 )
 from kiki_control.presentation.reconciliation_view import (
     clave_resultado,
@@ -36,6 +45,8 @@ from kiki_control.ui.session_cycle import (
     detectar_cambio,
     invalidar_resultados_conocidos,
     limpiar_claves_conocidas,
+    limpiar_detalle_revision,
+    limpiar_detalle_revision_si_obsoleto,
     limpiar_filtros_de_vista,
     tolerancia_canonica,
 )
@@ -112,6 +123,10 @@ def _limpiar_sesion_streamlit() -> None:
 
 def _limpiar_filtros_por_cambio_de_vista() -> None:
     limpiar_filtros_de_vista(st.session_state)
+
+
+def _limpiar_detalle_revision_por_cambio_de_filtro() -> None:
+    limpiar_detalle_revision(st.session_state)
 
 
 def _inicializar_estado() -> None:
@@ -264,7 +279,7 @@ def _mostrar_descargas() -> None:
     cobertura = st.session_state.get("cobertura")
     zona = st.session_state["zona_horaria"]
     st.header("Descargas")
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     c1.download_button(
         "Descargar reporte completo",
@@ -278,8 +293,63 @@ def _mostrar_descargas() -> None:
         file_name=_nombre_exportacion("kiki_control_excepciones"),
         mime=mime,
     )
+    c3.download_button(
+        "Descargar revisiones pendientes",
+        data=generar_revisiones_pendientes_excel(reporte, cobertura, zona),
+        file_name=_nombre_exportacion("kiki_control_revisiones_pendientes"),
+        mime=mime,
+    )
     st.caption("Los archivos descargados se guardan en tu dispositivo. La aplicación no conserva una copia.")
 
+
+def _mostrar_revisiones_pendientes(reporte: Any) -> None:
+    casos = clasificar_revisiones(reporte.resultados)
+    total = len(casos)
+    st.header("Revisiones pendientes")
+    st.metric("Total de resultados que requieren revisión", total)
+    st.caption("Se cuentan resultados o grupos de conciliación, no filas crudas. La suma por tipo coincide con el KPI Requieren revisión.")
+    conteos = conteo_por_tipo(casos)
+    if conteos:
+        st.table([{"Tipo de revisión": DEFINICIONES_REVISION[t].nombre_visible, "Cantidad": c} for t, c in conteos.items()])
+    with st.expander("Ver las revisiones pendientes y qué hacer"):
+        tipos = list(conteos)
+        c1, c2 = st.columns([2, 2])
+        tipo = c1.selectbox("Tipo de revisión", options=[None, *tipos], format_func=lambda t: "Todos" if t is None else DEFINICIONES_REVISION[t].nombre_visible, key="revision_tipo", on_change=_limpiar_detalle_revision_por_cambio_de_filtro)
+        busqueda = c2.text_input("Buscar por ID de orden o referencia", key="revision_busqueda", on_change=_limpiar_detalle_revision_por_cambio_de_filtro)
+        visibles = filtrar_casos(casos, tipo, busqueda)
+        filas = filas_revisiones(visibles)
+        st.dataframe([
+            {
+                "ID de orden o referencia": f.id_orden_o_referencia,
+                "Tipo de revisión": f.tipo_revision,
+                "Estado": f.estado,
+                "Por qué requiere revisión": f.motivo_explicado,
+                "Acción recomendada": f.accion_recomendada,
+                "Neto informado ML": f.neto_informado_ml,
+                "Neto aprobado MP": f.neto_aprobado_mp,
+                "Neto financiero total": f.neto_financiero_total,
+                "Filas ML": f.filas_ml,
+                "Filas MP": f.filas_mp,
+            } for f in filas
+        ], use_container_width=True, hide_index=True, column_config={
+            "Por qué requiere revisión": st.column_config.TextColumn("Por qué requiere revisión", help="Explicación de presentación basada en estados, motivos e indicadores existentes."),
+            "Acción recomendada": st.column_config.TextColumn("Acción recomendada", help="Siguiente verificación sugerida sin afirmar errores contables ni pérdidas."),
+            "Filas ML": st.column_config.TextColumn("Filas ML", help="Filas comerciales de origen usadas para trazabilidad."),
+            "Filas MP": st.column_config.TextColumn("Filas MP", help="Filas financieras de origen usadas para trazabilidad."),
+        })
+        if visibles:
+            opciones = [clave_caso_revision(c) for c in visibles]
+            casos_por_clave = {clave_caso_revision(c): c for c in visibles}
+            limpiar_detalle_revision_si_obsoleto(st.session_state, set(opciones))
+            elegida = st.selectbox("Seleccionar caso", opciones, key="revision_detalle", format_func=lambda clave: referencia_visible_caso(casos_por_clave[clave]))
+            caso = casos_por_clave[elegida]
+            st.subheader("Detalle de la revisión")
+            st.write(f"**Qué se detectó:** {caso.nombre_visible}.")
+            st.write(f"**Por qué no pudo resolverse automáticamente:** {caso.descripcion} La aplicación no puede resolverlo automáticamente con los datos disponibles.")
+            st.write(f"**Qué debe revisar la clienta:** {caso.accion_recomendada}")
+            st.write(f"**Archivos y columnas involucradas:** {', '.join(caso.columnas_utilizadas)}")
+            st.write(f"**Filas de origen:** ML {', '.join(map(str, caso.filas_ml)) or '—'} · MP {', '.join(map(str, caso.filas_mp)) or '—'}")
+            st.caption("Este detalle se vincula con el detalle de operación existente y no duplica cálculos financieros.")
 
 def _mostrar_resultados() -> None:
     reporte = st.session_state["reporte"]
@@ -300,6 +370,8 @@ def _mostrar_resultados() -> None:
         for col, (nombre, valor) in zip(cols, bloque, strict=False):
             col.metric(nombre, valor, help=METRICAS_RESUMEN[nombre].ayuda)
 
+    _mostrar_revisiones_pendientes(reporte)
+
     _mostrar_descargas()
 
     st.header("Resultados por operación")
@@ -313,12 +385,18 @@ def _mostrar_resultados() -> None:
     resultados_visibles_por_vista = filtrar_resultados_por_vista(reporte.resultados, vista)
     filas = filas_presentacion(resultados_visibles_por_vista)
     estados = sorted({f.estado_codigo: f.estado for f in filas}.items(), key=lambda x: x[1])
-    c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
+    c1, c2, c3, c4, c5 = st.columns([2, 2, 1, 1, 2])
     seleccion = c1.multiselect("Estados", options=[c for c, _ in estados], format_func=dict(estados).get, key="filtro_estados")
     busqueda = c2.text_input("Buscar ID de orden", key="filtro_busqueda_orden")
     solo_revision = c3.checkbox("Solo requieren revisión", key="filtro_solo_revision")
     solo_divididos = c4.checkbox("Solo pagos divididos", key="filtro_solo_divididos")
+    casos_revision = clasificar_revisiones(reporte.resultados)
+    motivos_disponibles = sorted({c.tipo for c in casos_revision}, key=lambda t: DEFINICIONES_REVISION[t].nombre_visible)
+    motivo_revision = c5.selectbox("Motivo de revisión", options=[None, *motivos_disponibles], format_func=lambda t: "Todos" if t is None else DEFINICIONES_REVISION[t].nombre_visible, key="filtro_motivo_revision")
     visibles = filtrar_filas(filas, set(seleccion), busqueda, solo_revision, solo_divididos)
+    if motivo_revision is not None:
+        claves_revision = {c.resultado.id_orden or clave_resultado(c.resultado) for c in casos_revision if c.tipo == motivo_revision}
+        visibles = [f for f in visibles if f.clave in claves_revision]
     st.caption(f"Mostrando {len(visibles)} de {len(filas)} resultados de la vista seleccionada.")
     st.dataframe(tabla_principal(visibles), use_container_width=True, hide_index=True, column_config=_column_config_tabla())
 

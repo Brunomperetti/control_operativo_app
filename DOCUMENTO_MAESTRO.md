@@ -1017,3 +1017,24 @@ La capa explicativa no modifica fórmulas, estados, prioridades ni normalizació
 Si las coberturas temporales de Mercado Libre y Mercado Pago no coinciden, la aplicación advierte y continúa sin recortar automáticamente el XLSX. Un movimiento financiero sin operación comercial asociada puede corresponder a otro período y no demuestra por sí solo una pérdida o error. Los `PAYOUT` sin orden se explican como movimientos de fondos separados, no como pérdidas comerciales.
 
 Por privacidad, las ayudas, tablas, detalles y exportaciones nuevas no deben mostrar datos personales, contenido crudo de datos extra ni columnas sensibles de pagador o tarjeta. Las referencias internas creadas para movimientos sin ID de orden deben mostrarse como referencias internas de fila y no como órdenes reales.
+
+## 33. Revisiones pendientes individualizadas
+
+La aplicación incorpora una clasificación pura de presentación para individualizar los resultados con `requiere_revision=True`, sin modificar el motor de conciliación, fórmulas, estados, prioridades ni normalización. La clasificación trabaja sobre `ResultadoConciliacion` y usa únicamente estados, motivos e indicadores existentes.
+
+Cada resultado que requiere revisión tiene un motivo principal determinístico y puede conservar condiciones adicionales. La prioridad de presentación es: duplicación comercial o financiera; movimiento desconocido o en revisión; reclamo o disputa; pago o movimiento de Mercado Pago sin ID de orden; orden de Mercado Pago no encontrada en el archivo comercial cargado; venta de Mercado Libre sin movimiento en el XLSX cargado; y otra revisión.
+
+Las categorías visibles son:
+
+- Pago o movimiento MP sin ID de orden.
+- Orden MP sin venta en el archivo ML.
+- Venta ML sin movimiento MP.
+- Reclamo o disputa.
+- Movimiento desconocido o en revisión.
+- Duplicación comercial.
+- Duplicación financiera.
+- Otra revisión.
+
+La suma de categorías principales debe coincidir exactamente con el KPI **Requieren revisión**. La interfaz muestra la sección **Revisiones pendientes** debajo del resumen ejecutivo y antes de descargas, con conteo por tipo, filtros, búsqueda, tabla segura y detalle orientado a la acción. La descarga **Revisiones pendientes** genera un XLSX en memoria con hojas **Resumen** y **Revisiones pendientes**, incluye solo resultados que requieren revisión, mantiene IDs como texto, importes como `Decimal`, prevención de fórmulas, formato monetario argentino y exclusión de datos personales.
+
+El lenguaje de la aplicación debe mantenerse prudente: “no se encontró en el archivo cargado”, “requiere verificación”, “puede corresponder a otra cobertura temporal” y “la aplicación no puede resolverlo automáticamente con los datos disponibles”. No debe afirmar automáticamente pérdidas, errores contables ni pertenencia definitiva a otro período.

@@ -213,3 +213,20 @@ La guía y los tooltips citan las columnas externas necesarias para explicar el 
 - La app no recorta automáticamente el XLSX si la cobertura temporal no coincide.
 - Los `PAYOUT` sin orden se informan como movimientos de fondos, no como pérdidas comerciales.
 - La explicación no debe mostrar datos personales, columnas sensibles de pagador o tarjeta, hashes completos ni contenido crudo de datos extra.
+
+## Revisiones pendientes
+
+La interfaz de Streamlit incluye una sección **Revisiones pendientes** para desagregar el KPI **Requieren revisión**. La clasificación vive en `src/kiki_control/presentation/review_cases.py` y es una transformación pura de presentación: no importa Streamlit, pandas ni openpyxl, y no modifica el motor de conciliación.
+
+Categorías implementadas:
+
+- Pago o movimiento MP sin ID de orden.
+- Orden MP sin venta en el archivo ML.
+- Venta ML sin movimiento MP.
+- Reclamo o disputa.
+- Movimiento desconocido o en revisión.
+- Duplicación comercial.
+- Duplicación financiera.
+- Otra revisión.
+
+Cada caso muestra motivo, acción recomendada, columnas utilizadas y filas de origen. También puede exportarse con **Descargar revisiones pendientes**, que genera un XLSX en memoria con hojas **Resumen** y **Revisiones pendientes**, solo con resultados `requiere_revision=True` y con las protecciones de exportación segura existentes: IDs como texto, importes `Decimal`, prevención de fórmulas y ausencia de PII.
