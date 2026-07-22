@@ -53,12 +53,16 @@ from kiki_control.presentation.control_consolidado_view import (
     filas_grupos_involucrados,
     filas_resumen_revisiones,
     filas_tabla_consolidada,
+    filas_cobertura_presentacion,
     filtrar_filas_consolidadas,
     filtrar_grupos_excluidos,
     filtrar_grupos_involucrados_por_motivo,
     etiqueta_selector_detalle,
     formato_importe,
     kpis_consolidados,
+    alcance_completo_consolidado,
+    nombre_archivo_descarga,
+    textos_secundarios_conclusion,
     motivos_disponibles,
     contar_mostrando,
     tabla_consolidada,
@@ -318,7 +322,7 @@ def _mostrar_cobertura(cobertura: Any) -> None:
 def _nombre_exportacion(prefijo: str, reporte: Any | None = None) -> str:
     reporte_fecha = reporte if reporte is not None and hasattr(reporte, "fecha_procesamiento_utc") else st.session_state["reporte"]
     fecha = reporte_fecha.fecha_procesamiento_utc.strftime("%Y%m%d_%H%M%S")
-    return f"{prefijo}_{fecha}.xlsx"
+    return nombre_archivo_descarga(prefijo, fecha)
 
 
 def _mostrar_descargas() -> None:
@@ -329,21 +333,21 @@ def _mostrar_descargas() -> None:
     c1, c2, c3 = st.columns(3)
     mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     c1.download_button(
-        "Descargar reporte completo",
+        "Histórico Eccomapp–MP: descargar reporte completo",
         data=generar_reporte_completo_excel(reporte, cobertura, zona),
-        file_name=_nombre_exportacion("kiki_control_reporte_completo"),
+        file_name=_nombre_exportacion("kiki_control_historico_eccomapp_mp_reporte_completo_"),
         mime=mime,
     )
     c2.download_button(
-        "Descargar solo excepciones",
+        "Histórico Eccomapp–MP: descargar excepciones",
         data=generar_reporte_excepciones_excel(reporte, cobertura, zona),
-        file_name=_nombre_exportacion("kiki_control_excepciones"),
+        file_name=_nombre_exportacion("kiki_control_historico_eccomapp_mp_excepciones_"),
         mime=mime,
     )
     c3.download_button(
-        "Descargar revisiones pendientes",
+        "Histórico Eccomapp–MP: descargar revisiones",
         data=generar_revisiones_pendientes_excel(reporte, cobertura, zona),
-        file_name=_nombre_exportacion("kiki_control_revisiones_pendientes"),
+        file_name=_nombre_exportacion("kiki_control_historico_eccomapp_mp_revisiones_"),
         mime=mime,
     )
     st.caption("Los archivos descargados se guardan en tu dispositivo. La aplicación no conserva una copia.")
@@ -401,19 +405,19 @@ def _mostrar_revisiones_pendientes(reporte: Any) -> None:
 
 def _column_config_control_consolidado() -> dict[str, Any]:
     return {
-        "Grupo u orden": st.column_config.TextColumn("Grupo u orden", help="Identificador operativo del grupo u orden. No incluye datos del comprador ni contenido crudo."),
-        "Estado": st.column_config.TextColumn("Estado", help="Estado consolidado definido por el motor de dominio para este grupo."),
-        "Fuentes disponibles": st.column_config.TextColumn("Fuentes disponibles", help="Indica si el grupo tiene datos de ML oficial, Eccomapp y/o Mercado Pago."),
-        "Venta ML oficial": st.column_config.TextColumn("Venta ML oficial", help="Importe de venta informado por el archivo oficial de Mercado Libre. Columna: Ingresos por productos (ARS). Universo: grupos con venta oficial."),
+        "Grupo u orden": st.column_config.TextColumn("Grupo u orden", width="medium", help="Identificador operativo del grupo u orden. No incluye datos del comprador ni contenido crudo."),
+        "Estado": st.column_config.TextColumn("Estado", width="medium", help="Estado consolidado definido por el motor de dominio para este grupo."),
+        "Fuentes disponibles": st.column_config.TextColumn("Fuentes disponibles", width="medium", help="Indica si el grupo tiene datos de ML oficial, Eccomapp y/o Mercado Pago."),
+        "Venta ML oficial": st.column_config.TextColumn("Venta ML oficial", width="medium", help="Importe de venta informado por el archivo oficial de Mercado Libre. Columna: Ingresos por productos (ARS). Universo: grupos con venta oficial."),
         "Cargos e impuestos ML": st.column_config.TextColumn("Cargos e impuestos ML", help="Cargos e impuestos informados por el archivo oficial de Mercado Libre. Columna: Cargo por venta e impuestos (ARS). Universo: grupos con venta oficial."),
         "Costo envío ML": st.column_config.TextColumn("Costo envío ML", help="Costo de envío informado por el archivo oficial de Mercado Libre. Columna: Costos de envío (ARS). Universo: grupos con venta oficial."),
-        "Neto esperado ML": st.column_config.TextColumn("Neto esperado ML", help="Total informado directamente por Mercado Libre oficial. Columna: Total (ARS). No se reconstruye en Streamlit. Universo: grupos con venta oficial."),
-        "Costo productos": st.column_config.TextColumn("Costo productos", help="Costo de productos informado por Eccomapp. Columna: Costo Total (Con IVA) ($). Universo: grupos con Eccomapp."),
-        "Neto aprobado MP": st.column_config.TextColumn("Neto aprobado MP", help="Neto aprobado proveniente de Mercado Pago. Columna: MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO. Agrupado por el motor. Universo: grupos con movimientos MP aprobados."),
+        "Neto esperado ML": st.column_config.TextColumn("Neto esperado ML", width="medium", help="Total informado directamente por Mercado Libre oficial. Columna: Total (ARS). No se reconstruye en Streamlit. Universo: grupos con venta oficial."),
+        "Costo productos": st.column_config.TextColumn("Costo productos", width="medium", help="Costo de productos informado por Eccomapp. Columna: Costo Total (Con IVA) ($). Universo: grupos con Eccomapp."),
+        "Neto aprobado MP": st.column_config.TextColumn("Neto aprobado MP", width="medium", help="Neto aprobado proveniente de Mercado Pago. Columna: MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO. Agrupado por el motor. Universo: grupos con movimientos MP aprobados."),
         "Neto financiero total MP": st.column_config.TextColumn("Neto financiero total MP", help="Total financiero agrupado por el motor desde Mercado Pago. Columna principal: MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO. Universo: grupos con movimientos MP."),
-        "Diferencia ML–MP": st.column_config.TextColumn("Diferencia ML–MP", help="Diferencia calculada por el dominio entre neto aprobado MP y Total (ARS) de ML oficial. Universo: grupos con ambos datos."),
-        "Utilidad preliminar": st.column_config.TextColumn("Utilidad preliminar", help="Utilidad preliminar de control calculada por el dominio desde Total (ARS) ML oficial y Costo Total (Con IVA) ($) Eccomapp. No es resultado contable o fiscal definitivo."),
-        "Requiere revisión": st.column_config.TextColumn("Requiere revisión", help="Indicador prudente definido por el dominio cuando hay diferencias, fuentes faltantes o ambigüedad."),
+        "Diferencia ML–MP": st.column_config.TextColumn("Diferencia ML–MP", width="medium", help="Diferencia calculada por el dominio entre neto aprobado MP y Total (ARS) de ML oficial. Universo: grupos con ambos datos."),
+        "Utilidad preliminar": st.column_config.TextColumn("Utilidad preliminar", width="medium", help="Utilidad preliminar de control calculada por el dominio desde Total (ARS) ML oficial y Costo Total (Con IVA) ($) Eccomapp. No es resultado contable o fiscal definitivo."),
+        "Requiere revisión": st.column_config.TextColumn("Requiere revisión", width="small", help="Indicador prudente definido por el dominio cuando hay diferencias, fuentes faltantes o ambigüedad."),
         "Motivo principal": st.column_config.TextColumn("Motivo principal", help="Motivo visible de revisión; los motivos internos quedan en trazabilidad técnica."),
         "Qué revisar": st.column_config.TextColumn("Qué revisar", help="Acción recomendada para interpretar el caso sin asumir causas contables no evidenciadas."),
     }
@@ -442,162 +446,129 @@ def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
         "Neto financiero total MP": formato_importe(item.neto_financiero_total_mp),
     }
 
-def _mostrar_resultados() -> None:
-    reporte = st.session_state["reporte_consolidado"]
-    with st.expander("Cómo se calcula el control consolidado", expanded=True):
-        st.write(
-            "El XLSX oficial de Mercado Libre aporta venta, cargos, envíos y Total (ARS) informado por la fuente. "
-            "El CSV de Eccomapp aporta costos de productos y rentabilidad informada. Mercado Pago aporta movimientos, "
-            "netos aprobados, liquidaciones, devoluciones y reclamos. ML oficial y Eccomapp se vinculan con la API de dominio "
-            "por IDs de carrito/orden; Mercado Pago se vincula por ID DE LA ORDEN mediante la conciliación existente. "
-            "Diferencia ML–MP = Neto aprobado MP menos Total (ARS) ML oficial. Utilidad preliminar de control = Total (ARS) "
-            "ML oficial menos Costo Total (Con IVA) Eccomapp. Un importe queda vacío cuando falta la fuente o campo necesario. "
-            "El control es operativo y no es resultado contable o fiscal definitivo."
-        )
-    if "cobertura_consolidada" in st.session_state:
-        st.header("Cobertura de los archivos")
-        cobertura = st.session_state["cobertura_consolidada"]
-        cols = st.columns(len(cobertura))
-        for col, item in zip(cols, cobertura, strict=False):
-            col.metric(item.nombre, f"{item.minimo} a {item.maximo}", help="Fechas normalizadas informadas por la fuente; no se recortan archivos automáticamente.")
-            if item.extra: col.caption(item.extra)
-        st.caption("Las liquidaciones de Mercado Pago pueden extenderse fuera del período de venta; se muestran como cobertura financiera y no disparan por sí solas la advertencia de períodos de origen.")
-        if advertir_periodos_distintos(cobertura):
-            st.warning("Los períodos de origen de ML oficial, Eccomapp y Mercado Pago no coinciden. Esto requiere revisión, pero no implica por sí mismo un error.")
-
-    st.header("Resumen ejecutivo consolidado")
-    inicio_ml, fin_ml = _periodo_ventas_ml_normalizadas()
-    diagnostico = diagnosticar_control_consolidado(reporte, inicio_ml, fin_ml, _fechas_mp_por_fila_normalizadas())
-    st.info(conclusion_ejecutiva_consolidada(reporte, diagnostico))
-    if not diagnostico.particion.cierra_exactamente or not diagnostico.diferencias.identidad_cierra_exactamente:
-        st.error("Error de consistencia en diagnósticos: no se presentan KPIs como confiables hasta revisar la partición o la identidad de diferencias.")
-    st.subheader("Cobertura monetaria entre fuentes")
-    st.warning("No se comparan importes de universos distintos: cada fila muestra su universo y el motivo de exclusión antes de interpretar diferencias.")
-    st.table([{
-        "Fuente": c.fuente, "Universo": c.universo, "Cantidad total": c.cantidad_total, "Importe total del archivo": formato_importe(c.importe_total),
-        "Cantidad usada": c.cantidad_usada, "Importe usado": formato_importe(c.importe_usado), "Cantidad excluida": c.cantidad_excluida,
-        "Importe excluido": formato_importe(c.importe_excluido), "Motivo de exclusión": c.motivo_exclusion,
-    } for c in diagnostico.cobertura_monetaria])
-    st.subheader("Utilidad preliminar auditable")
-    st.table([{
-        "Neto ML del universo calculable": formato_importe(diagnostico.utilidad.neto_ml_universo_utilidad),
-        "Costo Eccomapp del universo calculable": formato_importe(diagnostico.utilidad.costo_productos_universo_utilidad),
-        "Utilidad preliminar": formato_importe(diagnostico.utilidad.utilidad_preliminar),
-        "Costo Eccomapp fuera del universo calculable": formato_importe(diagnostico.utilidad.costo_eccomapp_fuera_universo_calculable),
-        "Grupos excluidos": diagnostico.utilidad.grupos_excluidos,
-        "Motivos": "; ".join(f"{k}: {v}" for k, v in diagnostico.utilidad.motivos_exclusion.items() if v),
-        "Identidad": "utilidad_preliminar = neto_ml_universo_calculable - costo_eccomapp_universo_calculable",
-        "Cierra": "Sí" if diagnostico.utilidad.identidad_cierra_exactamente else "No",
-    }])
-    st.subheader("Residual oficial de Mercado Libre")
-    st.table([{
-        "Nombre visible": diagnostico.residual_ml.nombre_visible, "Fórmula": diagnostico.residual_ml.formula,
-        "Importe": formato_importe(diagnostico.residual_ml.importe), "Universo": diagnostico.residual_ml.universo,
-        "Columnas utilizadas": ", ".join(diagnostico.residual_ml.columnas_utilizadas),
-        "Universo ML oficial": diagnostico.residual_ml.grupos_universo_ml_oficial,
-        "Grupos calculables": diagnostico.residual_ml.grupos_calculables,
-        "Grupos excluidos": diagnostico.residual_ml.grupos_excluidos,
-        "Suma Total (ARS)": formato_importe(diagnostico.residual_ml.suma_total_ars),
-        "Suma Ingresos por productos (ARS)": formato_importe(diagnostico.residual_ml.suma_ingresos_productos),
-        "Suma Cargo por venta e impuestos (ARS)": formato_importe(diagnostico.residual_ml.suma_cargo_venta_impuestos),
-        "Suma Costos de envío (ARS)": formato_importe(diagnostico.residual_ml.suma_costos_envio),
-        "Motivos de exclusión": "; ".join(f"{k}: {v}" for k, v in diagnostico.residual_ml.motivos_exclusion.items() if v),
-        "Identidad": "suma Total (ARS) = suma Ingresos por productos + suma Cargos e impuestos + suma Costos de envío + residual",
-        "Cierra": "Sí" if diagnostico.residual_ml.identidad_cierra_exactamente else "No",
-    }])
-    st.subheader("Puente de importes entre fuentes")
-    st.caption("Universo triple: grupos con Neto ML, Neto Eccomapp y Neto aprobado MP. No oculta excluidos ni atribuye causas sin evidencia.")
-    st.table([{
-        "Universo triple": diagnostico.puente.universo_neto_esperado,
-        "Neto ML": formato_importe(diagnostico.puente.neto_oficial_ml),
-        "Neto Eccomapp": formato_importe(diagnostico.puente.neto_informado_eccomapp),
-        "Neto aprobado MP": formato_importe(diagnostico.puente.neto_aprobado_mp),
-        "Eccomapp − ML": formato_importe(diagnostico.puente.eccomapp_menos_ml),
-        "MP − Eccomapp": formato_importe(diagnostico.puente.mp_menos_eccomapp),
-        "MP − ML": formato_importe(diagnostico.puente.mp_menos_ml),
-        "Identidad cierra": "Sí" if diagnostico.puente.identidad_cierra_exactamente else "No",
-    }])
-    grupos_excluidos = diagnostico.puente.grupos_excluidos_universo_triple
-    if grupos_excluidos:
-        total_excluidos = len(grupos_excluidos)
-        with st.expander(f"Ver {total_excluidos} grupos excluidos del puente triple", expanded=False):
-            st.caption("Grupos excluidos del puente triple y aporte a la diferencia general ML–MP cuando ambos importes existen.")
-            b1, b2 = st.columns([2, 3])
-            busqueda = b1.text_input("Buscar grupo excluido", key="buscar_grupo_excluido_puente")
-            motivos = motivos_disponibles(grupos_excluidos)
-            motivo = b2.selectbox("Filtrar por motivo de exclusión", options=("", *motivos), format_func=lambda x: "Todos los motivos" if x == "" else x, key="motivo_grupo_excluido_puente")
-            grupos_visibles = filtrar_grupos_excluidos(grupos_excluidos, busqueda, motivo)
-            st.caption(contar_mostrando(grupos_visibles, total_excluidos))
-            st.dataframe(filas_grupos_excluidos(grupos_visibles), hide_index=True, use_container_width=True, height=400)
-    if not (diagnostico.particion.cierra_exactamente and diagnostico.diferencias.identidad_cierra_exactamente and diagnostico.puente.identidad_cierra_exactamente and diagnostico.utilidad.motivos_cierran_exactamente and diagnostico.utilidad.identidad_cierra_exactamente and diagnostico.temporal_mp_sin_venta.particion_cierra_exactamente and diagnostico.residual_ml.identidad_cierra_exactamente):
-        st.error("Error de consistencia: al menos una identidad de diagnóstico no cierra exactamente. Revisar partición, diferencias, puente, utilidad o temporalidad antes de confiar en el bloque afectado.")
-    st.subheader("Movimientos MP sin venta oficial: distribución temporal")
-    st.caption(diagnostico.temporal_mp_sin_venta.aclaracion)
-    st.caption("El neto aprobado representa pagos aprobados comparables con ventas. El neto financiero total incorpora además devoluciones, reclamos, disputas y otros impactos; por eso ambos totales no tienen que coincidir.")
-    st.table([
-        _fila_temporal("Anteriores al período ML", diagnostico.temporal_mp_sin_venta.anteriores),
-        _fila_temporal("Dentro del período ML", diagnostico.temporal_mp_sin_venta.dentro),
-        _fila_temporal("Posteriores al período ML", diagnostico.temporal_mp_sin_venta.posteriores),
-        _fila_temporal("Sin fecha", diagnostico.temporal_mp_sin_venta.sin_fecha),
-        _fila_temporal("Fechas mixtas", diagnostico.temporal_mp_sin_venta.fechas_mixtas),
-    ])
-    st.subheader("Revisiones del control consolidado")
-    st.caption(diagnostico.revisiones.aclaracion)
-    st.table(filas_resumen_revisiones(diagnostico.revisiones.revisiones_multietiqueta))
-    if diagnostico.revisiones.revisiones_multietiqueta:
-        with st.expander("Ver grupos involucrados en las revisiones", expanded=False):
-            motivos_revision = tuple(r.motivo_visible for r in diagnostico.revisiones.revisiones_multietiqueta)
-            motivo_revision = st.selectbox("Motivo de revisión", options=motivos_revision, key="motivo_grupos_revision")
-            busqueda_revision = st.text_input("Buscar grupo involucrado", key="buscar_grupo_revision")
-            grupos_revision = filtrar_grupos_involucrados_por_motivo(diagnostico.revisiones.revisiones_multietiqueta, motivo_revision, busqueda_revision)
-            total_motivo = next((r.cantidad for r in diagnostico.revisiones.revisiones_multietiqueta if r.motivo_visible == motivo_revision), 0)
-            st.caption(contar_mostrando(grupos_revision, total_motivo))
-            st.dataframe(filas_grupos_involucrados(grupos_revision), hide_index=True, use_container_width=True, height=400)
-    for titulo, kpis in kpis_consolidados(reporte).items():
-        st.subheader(titulo)
-        cols = st.columns(len(kpis))
-        for col, kpi in zip(cols, kpis, strict=False):
+def _mostrar_kpis_en_filas(titulo: str, kpis: list[Any], tamanos: tuple[int, ...]) -> None:
+    st.subheader(titulo)
+    indice = 0
+    for tamano in tamanos:
+        fila = kpis[indice:indice + tamano]
+        indice += tamano
+        if not fila:
+            continue
+        cols = st.columns(tamano)
+        for col, kpi in zip(cols, fila, strict=False):
             col.metric(kpi.nombre, kpi.valor, help=kpi.ayuda)
 
-    st.header("Control consolidado por operación")
-    vista = st.radio("Vista", options=["Pendientes, diferencias y datos faltantes", "Todas las operaciones"], horizontal=True, key="vista_resultados", on_change=_limpiar_filtros_por_cambio_de_vista)
-    resultados = reporte.resultados if vista == "Todas las operaciones" else tuple(r for r in reporte.resultados if r.requiere_revision or r.diferencia_ml_mp not in (None, Decimal("0")) or not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago))
-    filas = filas_tabla_consolidada(resultados)
-    estados = sorted({f.estado_codigo: f.estado for f in filas}.items(), key=lambda x: x[1])
-    c1, c2, c3, c4, c5 = st.columns([2, 2, 1, 1, 1])
-    seleccion = c1.multiselect("Estado consolidado", options=[c for c, _ in estados], format_func=dict(estados).get, key="filtro_estados")
-    busqueda = c2.text_input("Buscar grupo u orden", key="filtro_busqueda_orden")
-    solo_revision = c3.checkbox("Solo requieren revisión", key="filtro_solo_revision")
-    solo_diferencia = c4.checkbox("Solo con diferencia", key="filtro_solo_diferencia")
-    solo_faltantes = c5.checkbox("Solo con datos faltantes", key="filtro_solo_faltantes")
-    visibles = filtrar_filas_consolidadas(filas, set(seleccion), busqueda, solo_revision, solo_diferencia, solo_faltantes)
-    columnas = ["Grupo u orden", "Estado", "Fuentes disponibles", "Venta ML oficial", "Cargos e impuestos ML", "Costo envío ML", "Neto esperado ML", "Costo productos", "Neto aprobado MP", "Neto financiero total MP", "Diferencia ML–MP", "Utilidad preliminar", "Requiere revisión", "Motivo principal", "Qué revisar"]
-    st.dataframe([{k: row[k] for k in columnas} for row in tabla_consolidada(visibles)], use_container_width=True, hide_index=True, column_config=_column_config_control_consolidado())
 
-    if visibles:
-        elegida = st.selectbox("Seleccionar operación para ver detalle", [f.clave for f in visibles], key="detalle_operacion", format_func={f.clave: etiqueta_selector_detalle(f) for f in visibles}.get)
-        mapa = {r.clave_resultado: r for r in reporte.resultados}
-        resultado = mapa[elegida]
-        st.subheader("Información del control")
-        st.table([{"Campo": k, "Valor": v} for k, v in detalle_control(resultado).items()])
-        with st.expander("Cómo se obtuvo este resultado"):
-            st.table(explicacion_resultado(resultado))
-        with st.expander("Trazabilidad técnica"):
-            hashes = {"ML": st.session_state.get("hash_ml_oficial", ""), "Eccomapp": st.session_state.get("hash_eccomapp", ""), "MP": st.session_state.get("hash_mp", "")}
-            st.table([{"Campo": k, "Valor": v} for k, v in trazabilidad_tecnica(resultado, reporte.tolerancia, hashes).items()])
+def _mostrar_resultados() -> None:
+    reporte = st.session_state["reporte_consolidado"]
+    inicio_ml, fin_ml = _periodo_ventas_ml_normalizadas()
+    diagnostico = diagnosticar_control_consolidado(reporte, inicio_ml, fin_ml, _fechas_mp_por_fila_normalizadas())
+    tab_resumen, tab_operacion, tab_auditoria = st.tabs(["Resumen ejecutivo", "Control por operación", "Auditoría y descargas"])
 
-    st.header("Descargas consolidadas")
-    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    d1, d2, d3 = st.columns(3)
-    d1.download_button("Reporte consolidado de tres fuentes", data=generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico), file_name=_nombre_exportacion("reporte_consolidado_tres_fuentes"), mime=mime)
-    d2.download_button("Excepciones del control consolidado", data=generar_excepciones_consolidadas_excel(reporte), file_name=_nombre_exportacion("excepciones_control_consolidado"), mime=mime)
-    d3.download_button("Revisiones consolidadas", data=generar_revisiones_consolidadas_excel(reporte), file_name=_nombre_exportacion("revisiones_consolidadas"), mime=mime)
+    with tab_resumen:
+        if "cobertura_consolidada" in st.session_state:
+            st.header("Cobertura temporal")
+            cobertura = st.session_state["cobertura_consolidada"]
+            st.dataframe(filas_cobertura_presentacion(cobertura), use_container_width=True, hide_index=True)
+            st.caption("Las liquidaciones de Mercado Pago pueden extenderse fuera del período de venta; se muestran como cobertura financiera y no disparan por sí solas la advertencia de períodos de origen.")
+            if advertir_periodos_distintos(cobertura):
+                st.warning("Los períodos de origen de ML oficial, Eccomapp y Mercado Pago no coinciden. Esto requiere revisión, pero no implica por sí mismo un error.")
+        st.header("Conclusión ejecutiva")
+        st.info(conclusion_ejecutiva_consolidada(reporte, diagnostico))
+        for texto in textos_secundarios_conclusion(reporte):
+            st.caption(texto)
+        with st.expander("Ver interpretación y alcance completo", expanded=False):
+            st.write(alcance_completo_consolidado(reporte, diagnostico))
+        if not diagnostico.particion.cierra_exactamente or not diagnostico.diferencias.identidad_cierra_exactamente:
+            st.error("Error de consistencia en diagnósticos: no se presentan KPIs como confiables hasta revisar la partición o la identidad de diferencias.")
+        bloques = kpis_consolidados(reporte)
+        _mostrar_kpis_en_filas("Bloque A — Importes informados por ML oficial", bloques["Bloque A — Importes informados por ML oficial"], (2, 2))
+        _mostrar_kpis_en_filas("Bloque B — Comparación financiera", bloques["Bloque B — Comparación financiera"], (3, 2))
+        _mostrar_kpis_en_filas("Bloque C — Costos y utilidad", bloques["Bloque C — Costos y utilidad"], (3,))
+        _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", bloques["Bloque D — Calidad y pendientes"], (3, 3))
+        st.subheader("Resumen compacto de revisiones")
+        st.caption(diagnostico.revisiones.aclaracion)
+        st.table(filas_resumen_revisiones(diagnostico.revisiones.revisiones_multietiqueta))
 
-    with st.expander("Auditoría histórica Eccomapp–Mercado Pago (Auditoría de conciliación Eccomapp–Mercado Pago)"):
-        st.warning("Esta es la conciliación financiera anterior: compara el neto informado por Eccomapp contra Mercado Pago. No es el nuevo resultado consolidado; sus descargas se mantienen separadas dentro de esta auditoría histórica.")
-        if "reporte" in st.session_state:
-            _mostrar_revisiones_pendientes(st.session_state["reporte"])
-            _mostrar_descargas()
+    with tab_operacion:
+        st.header("Control por operación")
+        vista = st.radio("Vista", options=["Pendientes, diferencias y datos faltantes", "Todas las operaciones"], horizontal=True, key="vista_resultados", on_change=_limpiar_filtros_por_cambio_de_vista)
+        resultados = reporte.resultados if vista == "Todas las operaciones" else tuple(r for r in reporte.resultados if r.requiere_revision or r.diferencia_ml_mp not in (None, Decimal("0")) or not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago))
+        filas = filas_tabla_consolidada(resultados)
+        estados = sorted({f.estado_codigo: f.estado for f in filas}.items(), key=lambda x: x[1])
+        c1, c2, c3, c4, c5 = st.columns([2, 2, 1, 1, 1])
+        seleccion = c1.multiselect("Estado consolidado", options=[c for c, _ in estados], format_func=dict(estados).get, key="filtro_estados")
+        busqueda = c2.text_input("Buscar grupo u orden", key="filtro_busqueda_orden")
+        solo_revision = c3.checkbox("Solo requieren revisión", key="filtro_solo_revision")
+        solo_diferencia = c4.checkbox("Solo con diferencia", key="filtro_solo_diferencia")
+        solo_faltantes = c5.checkbox("Solo con datos faltantes", key="filtro_solo_faltantes")
+        visibles = filtrar_filas_consolidadas(filas, set(seleccion), busqueda, solo_revision, solo_diferencia, solo_faltantes)
+        columnas = ["Grupo u orden", "Estado", "Fuentes disponibles", "Venta ML oficial", "Neto esperado ML", "Costo productos", "Neto aprobado MP", "Diferencia ML–MP", "Utilidad preliminar", "Requiere revisión", "Cargos e impuestos ML", "Costo envío ML", "Neto financiero total MP", "Motivo principal", "Qué revisar"]
+        st.dataframe([{k: row[k] for k in columnas} for row in tabla_consolidada(visibles)], use_container_width=True, hide_index=True, column_config=_column_config_control_consolidado())
+        if visibles:
+            elegida = st.selectbox("Seleccionar operación para ver detalle", [f.clave for f in visibles], key="detalle_operacion", format_func={f.clave: etiqueta_selector_detalle(f) for f in visibles}.get)
+            mapa = {r.clave_resultado: r for r in reporte.resultados}
+            resultado = mapa[elegida]
+            st.subheader("Información del control")
+            st.table([{"Campo": k, "Valor": v} for k, v in detalle_control(resultado).items()])
+            with st.expander("Cómo se obtuvo este resultado", expanded=False):
+                st.table(explicacion_resultado(resultado))
+            with st.expander("Trazabilidad técnica", expanded=False):
+                hashes = {"ML": st.session_state.get("hash_ml_oficial", ""), "Eccomapp": st.session_state.get("hash_eccomapp", ""), "MP": st.session_state.get("hash_mp", "")}
+                st.table([{"Campo": k, "Valor": v} for k, v in trazabilidad_tecnica(resultado, reporte.tolerancia, hashes).items()])
+
+    with tab_auditoria:
+        st.header("Auditoría y descargas")
+        st.subheader("Cobertura monetaria entre fuentes")
+        st.warning("No se comparan importes de universos distintos: cada fila muestra su universo y el motivo de exclusión antes de interpretar diferencias.")
+        st.table([{"Resumen": "Universos monetarios auditables", "Fuentes": len(diagnostico.cobertura_monetaria)}])
+        with st.expander("Ver cobertura monetaria por universo", expanded=False):
+            st.table([{"Fuente": c.fuente, "Universo": c.universo, "Cantidad total": c.cantidad_total, "Importe total del archivo": formato_importe(c.importe_total), "Cantidad usada": c.cantidad_usada, "Importe usado": formato_importe(c.importe_usado), "Cantidad excluida": c.cantidad_excluida, "Importe excluido": formato_importe(c.importe_excluido), "Motivo de exclusión": c.motivo_exclusion} for c in diagnostico.cobertura_monetaria])
+        st.subheader("Utilidad preliminar auditable")
+        st.table([{"Neto ML calculable": formato_importe(diagnostico.utilidad.neto_ml_universo_utilidad), "Costo Eccomapp calculable": formato_importe(diagnostico.utilidad.costo_productos_universo_utilidad), "Utilidad preliminar": formato_importe(diagnostico.utilidad.utilidad_preliminar)}])
+        with st.expander("Ver cálculo auditable de utilidad", expanded=False):
+            st.table([{"Grupos excluidos": diagnostico.utilidad.grupos_excluidos, "Costo Eccomapp fuera del universo calculable": formato_importe(diagnostico.utilidad.costo_eccomapp_fuera_universo_calculable), "Motivos": "; ".join(f"{k}: {v}" for k, v in diagnostico.utilidad.motivos_exclusion.items() if v), "Identidad": "utilidad_preliminar = neto_ml_universo_calculable - costo_eccomapp_universo_calculable", "Cierra": "Sí" if diagnostico.utilidad.identidad_cierra_exactamente else "No"}])
+        st.subheader("Residual oficial de Mercado Libre")
+        st.table([{"Nombre visible": diagnostico.residual_ml.nombre_visible, "Importe": formato_importe(diagnostico.residual_ml.importe), "Universo": diagnostico.residual_ml.universo}])
+        with st.expander("Ver composición del residual ML", expanded=False):
+            st.table([{"Fórmula": diagnostico.residual_ml.formula, "Columnas utilizadas": ", ".join(diagnostico.residual_ml.columnas_utilizadas), "Universo ML oficial": diagnostico.residual_ml.grupos_universo_ml_oficial, "Grupos calculables": diagnostico.residual_ml.grupos_calculables, "Grupos excluidos": diagnostico.residual_ml.grupos_excluidos, "Suma Total (ARS)": formato_importe(diagnostico.residual_ml.suma_total_ars), "Suma Ingresos por productos (ARS)": formato_importe(diagnostico.residual_ml.suma_ingresos_productos), "Suma Cargo por venta e impuestos (ARS)": formato_importe(diagnostico.residual_ml.suma_cargo_venta_impuestos), "Suma Costos de envío (ARS)": formato_importe(diagnostico.residual_ml.suma_costos_envio), "Motivos de exclusión": "; ".join(f"{k}: {v}" for k, v in diagnostico.residual_ml.motivos_exclusion.items() if v), "Cierra": "Sí" if diagnostico.residual_ml.identidad_cierra_exactamente else "No"}])
+        st.subheader("Puente de importes entre fuentes")
+        st.table([{"Universo triple": diagnostico.puente.universo_neto_esperado, "Neto ML": formato_importe(diagnostico.puente.neto_oficial_ml), "Neto Eccomapp": formato_importe(diagnostico.puente.neto_informado_eccomapp), "Neto aprobado MP": formato_importe(diagnostico.puente.neto_aprobado_mp), "MP − ML": formato_importe(diagnostico.puente.mp_menos_ml), "Identidad cierra": "Sí" if diagnostico.puente.identidad_cierra_exactamente else "No"}])
+        grupos_excluidos = diagnostico.puente.grupos_excluidos_universo_triple
+        if grupos_excluidos:
+            with st.expander("Ver grupos excluidos del puente", expanded=False):
+                b1, b2 = st.columns([2, 3])
+                busqueda = b1.text_input("Buscar grupo excluido", key="buscar_grupo_excluido_puente")
+                motivos = motivos_disponibles(grupos_excluidos)
+                motivo = b2.selectbox("Filtrar por motivo de exclusión", options=("", *motivos), format_func=lambda x: "Todos los motivos" if x == "" else x, key="motivo_grupo_excluido_puente")
+                grupos_visibles = filtrar_grupos_excluidos(grupos_excluidos, busqueda, motivo)
+                st.caption(contar_mostrando(grupos_visibles, len(grupos_excluidos)))
+                st.dataframe(filas_grupos_excluidos(grupos_visibles), hide_index=True, use_container_width=True, height=400)
+        st.subheader("Distribución temporal MP")
+        st.caption(diagnostico.temporal_mp_sin_venta.aclaracion)
+        st.table([_fila_temporal("Anteriores al período ML", diagnostico.temporal_mp_sin_venta.anteriores), _fila_temporal("Dentro del período ML", diagnostico.temporal_mp_sin_venta.dentro), _fila_temporal("Posteriores al período ML", diagnostico.temporal_mp_sin_venta.posteriores), _fila_temporal("Sin fecha", diagnostico.temporal_mp_sin_venta.sin_fecha), _fila_temporal("Fechas mixtas", diagnostico.temporal_mp_sin_venta.fechas_mixtas)])
+        st.subheader("Revisiones consolidadas")
+        st.table(filas_resumen_revisiones(diagnostico.revisiones.revisiones_multietiqueta))
+        if diagnostico.revisiones.revisiones_multietiqueta:
+            with st.expander("Ver grupos que requieren revisión", expanded=False):
+                motivos_revision = tuple(r.motivo_visible for r in diagnostico.revisiones.revisiones_multietiqueta)
+                motivo_revision = st.selectbox("Motivo de revisión", options=motivos_revision, key="motivo_grupos_revision")
+                busqueda_revision = st.text_input("Buscar grupo involucrado", key="buscar_grupo_revision")
+                grupos_revision = filtrar_grupos_involucrados_por_motivo(diagnostico.revisiones.revisiones_multietiqueta, motivo_revision, busqueda_revision)
+                total_motivo = next((r.cantidad for r in diagnostico.revisiones.revisiones_multietiqueta if r.motivo_visible == motivo_revision), 0)
+                st.caption(contar_mostrando(grupos_revision, total_motivo))
+                st.dataframe(filas_grupos_involucrados(grupos_revision), hide_index=True, use_container_width=True, height=400)
+        st.header("Descargas consolidadas")
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        d1, d2, d3 = st.columns(3)
+        d1.download_button("Descargar control consolidado de 3 fuentes", data=generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico), file_name=_nombre_exportacion("kiki_control_consolidado_3_fuentes_", reporte), mime=mime)
+        d2.download_button("Descargar excepciones del control consolidado", data=generar_excepciones_consolidadas_excel(reporte), file_name=_nombre_exportacion("kiki_control_excepciones_consolidadas_", reporte), mime=mime)
+        d3.download_button("Descargar revisiones del control consolidado", data=generar_revisiones_consolidadas_excel(reporte), file_name=_nombre_exportacion("kiki_control_revisiones_consolidadas_", reporte), mime=mime)
+        with st.expander("Auditoría histórica Eccomapp–Mercado Pago (Auditoría de conciliación Eccomapp–Mercado Pago)", expanded=False):
+            st.warning("Este informe no es el control consolidado actual de tres fuentes.")
+            if "reporte" in st.session_state:
+                _mostrar_revisiones_pendientes(st.session_state["reporte"])
+                _mostrar_descargas()
 
 if __name__ == "__main__":
     main()
