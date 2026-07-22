@@ -250,8 +250,6 @@ def test_conclusion_con_diferencias_usa_diagnostico_no_estado_principal():
     assert reporte.total_con_diferencia == 0
     assert diagnostico.diferencias.con_diferencia_ml_mp == 2
     assert diagnostico.diferencias.suma_diferencia_ml_mp == diagnostico.diferencias.suma_neto_mp_comparable - diagnostico.diferencias.suma_neto_ml_comparable
-    assert "En el universo ML–MP existen 3 grupos comparables" in texto
-    assert "1 coinciden dentro de la tolerancia" in texto
+    assert "1 de 3 grupos comparables coinciden dentro de la tolerancia" in texto
     assert "2 presentan diferencias" in texto
     assert "$ 24,34" in texto
-    assert "sin sumar contadores de universos diferentes" in texto

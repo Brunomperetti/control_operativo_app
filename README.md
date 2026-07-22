@@ -380,3 +380,11 @@ La app muestra la distribución temporal de movimientos MP sin venta oficial en 
 ### Organización visual de listas extensas en control consolidado
 
 Para evitar pantallas excesivamente largas sin perder auditabilidad, las listas extensas del diagnóstico consolidado se muestran detrás de expanders cerrados por defecto. El resumen del puente triple permanece siempre visible; la lista completa de grupos excluidos se consulta con la etiqueta dinámica “Ver N grupos excluidos del puente triple”, buscador por grupo, filtro por motivo, conteo “Mostrando X de N grupos” y tabla con scroll interno. Las revisiones consolidadas mantienen una tabla principal resumida con motivo visible, cantidad, importe afectado y acción recomendada; los grupos involucrados se consultan en un expander separado, seleccionando el motivo y viendo una fila por grupo. Esta organización es exclusivamente de presentación: no modifica normalización, vinculación, conciliación, diagnósticos, fórmulas, importes, estados, universos ni exportaciones Excel.
+
+## Organización visual para presentación
+
+La pantalla de resultados del control consolidado se organiza en tres pestañas de Streamlit: **Resumen ejecutivo**, **Control por operación** y **Auditoría y descargas**. El resumen prioriza cobertura temporal compacta, conclusión ejecutiva breve, KPIs agrupados por bloques y un resumen de revisiones sin abrir tablas técnicas extensas por defecto.
+
+La pestaña **Control por operación** concentra filtros, tabla operativa ancha con scroll interno, selector de operación, explicación de resultado y trazabilidad técnica cerrada por defecto. La pestaña **Auditoría y descargas** conserva la auditabilidad completa en expanders cerrados y separa las descargas del control consolidado de tres fuentes del histórico Eccomapp–Mercado Pago.
+
+Las descargas consolidadas usan prefijos `kiki_control_consolidado_3_fuentes_`, `kiki_control_excepciones_consolidadas_` y `kiki_control_revisiones_consolidadas_`. Las descargas históricas usan el prefijo `kiki_control_historico_eccomapp_mp_` y se muestran dentro de la auditoría histórica con la advertencia de que ese informe no es el control consolidado actual de tres fuentes.

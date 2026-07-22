@@ -26,6 +26,26 @@ class CoberturaFuente:
     extra: str = ""
 
 
+def texto_rango_cobertura(minimo: str, maximo: str) -> str:
+    """Devuelve una cobertura legible sin repetir la misma fecha."""
+    if minimo == maximo:
+        return minimo
+    return f"{minimo} a {maximo}"
+
+
+def filas_cobertura_presentacion(cobertura: Iterable[CoberturaFuente]) -> list[dict[str, str]]:
+    """Transforma cobertura temporal en filas compactas para Streamlit."""
+    return [
+        {"Fuente": c.nombre, "Desde": c.minimo, "Hasta": c.maximo, "Observación": c.extra or "—"}
+        for c in cobertura
+    ]
+
+
+def nombre_archivo_descarga(prefijo: str, fecha: str) -> str:
+    """Construye nombres de descarga diferenciados y testeables."""
+    return f"{prefijo}{fecha}.xlsx" if prefijo.endswith("_") else f"{prefijo}_{fecha}.xlsx"
+
+
 @dataclass(frozen=True)
 class FilaControlConsolidado:
     clave: str
@@ -137,20 +157,36 @@ def fuentes_disponibles(r: ResultadoControlConsolidado) -> str:
 
 
 def conclusion_ejecutiva_consolidada(reporte: ReporteControlConsolidado, diagnostico: Any | None = None) -> str:
+    """Conclusión principal breve, sin recalcular valores del dominio."""
     diag = diagnostico or diagnosticar_control_consolidado(reporte)
-    calculables = sum(1 for r in reporte.resultados if r.utilidad_preliminar_control is not None)
     diferencias = diag.diferencias
     return (
-        f"Se consolidaron {reporte.total_resultados} grupos. "
-        f"Estados principales del control: {reporte.total_completa} completos, {reporte.total_con_diferencia} con estado principal con diferencia, "
-        f"{reporte.total_sin_venta_oficial} sin venta oficial, {reporte.total_sin_costo_producto} sin costo de producto, "
-        f"{reporte.total_sin_movimiento_financiero} sin movimiento MP, {reporte.total_solo_movimiento_financiero} solo movimientos financieros y "
-        f"{reporte.total_duplicada_o_ambigua} duplicados o ambiguos. "
-        f"En el universo ML–MP existen {diferencias.comparables_totales} grupos comparables: "
-        f"{diferencias.coincidencias_dentro_tolerancia} coinciden dentro de la tolerancia y "
-        f"{diferencias.con_diferencia_ml_mp} presentan diferencias por un total de {formato_importe(diferencias.suma_diferencia_ml_mp)}. "
+        f"{diferencias.coincidencias_dentro_tolerancia} de {diferencias.comparables_totales} grupos comparables coinciden dentro de la tolerancia. "
+        f"{diferencias.con_diferencia_ml_mp} presentan diferencias por un total de {formato_importe(diferencias.suma_diferencia_ml_mp)}."
+    )
+
+
+def textos_secundarios_conclusion(reporte: ReporteControlConsolidado) -> tuple[str, ...]:
+    calculables = sum(1 for r in reporte.resultados if r.utilidad_preliminar_control is not None)
+    return (
+        f"{reporte.total_resultados} grupos consolidados.",
+        f"{reporte.total_requieren_revision} requieren revisión.",
+        f"Utilidad preliminar calculable para {calculables} de {reporte.total_resultados} grupos.",
+        "El resultado es operativo y no contable o fiscal definitivo.",
+    )
+
+
+def alcance_completo_consolidado(reporte: ReporteControlConsolidado, diagnostico: Any | None = None) -> str:
+    diag = diagnostico or diagnosticar_control_consolidado(reporte)
+    diferencias = diag.diferencias
+    return (
+        f"Se consolidaron {reporte.total_resultados} grupos. Estados principales: {reporte.total_completa} completos, "
+        f"{reporte.total_con_diferencia} con estado principal con diferencia, {reporte.total_sin_venta_oficial} sin venta oficial, "
+        f"{reporte.total_sin_costo_producto} sin costo de producto, {reporte.total_sin_movimiento_financiero} sin movimiento MP, "
+        f"{reporte.total_solo_movimiento_financiero} solo movimientos financieros y {reporte.total_duplicada_o_ambigua} duplicados o ambiguos. "
+        f"En el universo ML–MP existen {diferencias.comparables_totales} grupos comparables: {diferencias.coincidencias_dentro_tolerancia} coinciden dentro de tolerancia y "
+        f"{diferencias.con_diferencia_ml_mp} presentan diferencias por {formato_importe(diferencias.suma_diferencia_ml_mp)}. "
         "Los estados de cobertura y fuentes faltantes se informan por separado, sin sumar contadores de universos diferentes ni atribuir causas contables a la diferencia. "
-        f"Requieren revisión {reporte.total_requieren_revision}; la utilidad preliminar de control pudo calcularse para {calculables}. "
         "Estos importes son informados por la fuente y no constituyen resultado contable o fiscal definitivo."
     )
 
@@ -170,9 +206,9 @@ def kpis_consolidados(reporte: ReporteControlConsolidado) -> dict[str, list[Kpi]
         "Bloque B — Comparación financiera": [
             Kpi("Neto ML comparable", formato_importe(_sumar(r.total_informado_ml for r in comparables)), "Fuente: Mercado Libre oficial. Campo interno: total_informado_ml. Columna utilizada: Total (ARS). Universo: solo resultados donde también existe neto_aprobado_mp. Informado directamente por la fuente." + ayuda_limite),
             Kpi("Neto MP comparable", formato_importe(_sumar(r.neto_aprobado_mp for r in comparables)), "Fuente: Mercado Pago. Campo: neto_aprobado_mp. Columna: MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO. Universo: mismos resultados comparables con ML." + ayuda_limite),
-            Kpi("Grupos comparables con diferencia ML–MP", str(diagnosticar_control_consolidado(reporte).diferencias.con_diferencia_ml_mp), "Cuenta resultados comparables donde Total (ARS) ML y neto aprobado MP existen y abs(diferencia_ml_mp) supera la tolerancia. No usa total_con_diferencia porque ese es un estado principal." + ayuda_limite),
-            Kpi("Diferencia comparable ML–MP", formato_importe(diagnosticar_control_consolidado(reporte).diferencias.suma_diferencia_ml_mp), "Identidad validada: suma_diferencia_ml_mp = suma_neto_mp_comparable - suma_neto_ml_comparable." + ayuda_limite),
-            Kpi("Neto MP sin venta oficial asociada", formato_importe(_sumar(r.neto_aprobado_mp for r in resultados if r.neto_aprobado_mp is not None and not r.tiene_mercado_libre_oficial)), "Fuente: Mercado Pago. Universo: movimientos no encontrados en el archivo de ventas oficiales cargado." + ayuda_limite),
+            Kpi("Grupos con diferencia", str(diagnosticar_control_consolidado(reporte).diferencias.con_diferencia_ml_mp), "Cuenta resultados comparables donde Total (ARS) ML y neto aprobado MP existen y abs(diferencia_ml_mp) supera la tolerancia. No usa total_con_diferencia porque ese es un estado principal." + ayuda_limite),
+            Kpi("Diferencia total", formato_importe(diagnosticar_control_consolidado(reporte).diferencias.suma_diferencia_ml_mp), "Identidad validada: suma_diferencia_ml_mp = suma_neto_mp_comparable - suma_neto_ml_comparable." + ayuda_limite),
+            Kpi("Neto MP sin venta ML", formato_importe(_sumar(r.neto_aprobado_mp for r in resultados if r.neto_aprobado_mp is not None and not r.tiene_mercado_libre_oficial)), "Fuente: Mercado Pago. Universo: movimientos no encontrados en el archivo de ventas oficiales cargado." + ayuda_limite),
         ],
         "Bloque C — Costos y utilidad": [
             Kpi("Costo de productos Eccomapp", formato_importe(_sumar(r.costo_productos_eccomapp for r in resultados)), "Fuente: Eccomapp. Campo: costo_productos_eccomapp. Columna: Costo Total (Con IVA) ($). Universo: resultados con Eccomapp." + ayuda_limite),
@@ -194,14 +230,20 @@ def cobertura_tres_fuentes(ventas_ml: Iterable[Any], operaciones: Iterable[Any],
     def rango(objs, attr):
         fechas = [getattr(o, attr) for o in objs if getattr(o, attr, None) is not None]
         if not fechas: return ("Sin fechas", "Sin fechas")
-        return (formato_fecha(min(fechas).date()), formato_fecha(max(fechas).date()))
+        minimo = min(fechas)
+        maximo = max(fechas)
+        if hasattr(minimo, "date"):
+            minimo = minimo.date()
+        if hasattr(maximo, "date"):
+            maximo = maximo.date()
+        return (formato_fecha(minimo), formato_fecha(maximo))
     movs = tuple(movimientos)
     sin_liq = sum(1 for m in movs if getattr(m, "fecha_liquidacion_local", None) is None)
     return (
         CoberturaFuente("Ventas oficiales ML", *rango(tuple(ventas_ml), "fecha_venta")),
         CoberturaFuente("Ventas/costos Eccomapp", *rango(tuple(operaciones), "fecha_hora_venta")),
-        CoberturaFuente("Origen movimientos MP", *rango(movs, "fecha_origen_local")),
-        CoberturaFuente("Liquidaciones MP", *rango(movs, "fecha_liquidacion_local"), f"Sin fecha de liquidación: {sin_liq}"),
+        CoberturaFuente("Origen de movimientos MP", *rango(movs, "fecha_origen_local")),
+        CoberturaFuente("Liquidaciones MP", *rango(movs, "fecha_liquidacion_local"), f"{sin_liq} movimientos sin fecha de liquidación"),
     )
 
 
@@ -210,7 +252,7 @@ def advertir_periodos_distintos(cobertura: tuple[CoberturaFuente, ...]) -> bool:
 
     Las liquidaciones MP pueden ocurrir más tarde y no deben disparar esta advertencia por sí solas.
     """
-    nombres_origen = {"Ventas oficiales ML", "Ventas/costos Eccomapp", "Origen movimientos MP"}
+    nombres_origen = {"Ventas oficiales ML", "Ventas/costos Eccomapp", "Origen de movimientos MP"}
     rangos = {(c.minimo, c.maximo) for c in cobertura if c.nombre in nombres_origen and c.minimo != "Sin fechas"}
     return len(rangos) > 1
 

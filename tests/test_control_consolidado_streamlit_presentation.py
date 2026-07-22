@@ -39,7 +39,7 @@ def test_streamlit_no_duplica_formulas_financieras_y_usa_apis_existentes():
     assert "Utilidad preliminar =" not in source
     assert "Diferencia =" not in source
     assert "Auditoría de conciliación Eccomapp–Mercado Pago" in source
-    assert "Descargar reporte completo" in source
+    assert "Histórico Eccomapp–MP: descargar reporte completo" in source
 
 
 def test_presentacion_sin_float_y_negativos_con_signo():
@@ -70,8 +70,8 @@ def test_kpis_comparables_utilidad_parcial_y_mp_sin_ml():
     b = {k.nombre: k.valor for ks in bloques.values() for k in ks}
     assert b["Neto ML comparable"] == "$ 100,00"
     assert b["Neto MP comparable"] == "$ 90,00"
-    assert b["Diferencia comparable ML–MP"] == "$ -10,00"
-    assert b["Neto MP sin venta oficial asociada"] == "$ 30,00"
+    assert b["Diferencia total"] == "$ -10,00"
+    assert b["Neto MP sin venta ML"] == "$ 30,00"
     assert b["Utilidad preliminar calculable"] == "$ 60,00"
     assert b["Cobertura de utilidad"] == "1 de 3"
 
@@ -369,3 +369,36 @@ def test_advertencia_envio_vacio_muestra_texto_cliente_y_codigo_en_detalle(monke
 
     assert principal == ["Advertencias: Costo de envío vacío interpretado como $0 según regla confirmada. Filas alcanzadas: 7."]
     assert any("COSTO_ENVIO_VACIO_INTERPRETADO_CERO" in item for item in detalle)
+
+
+def test_cobertura_temporal_compacta_observacion_y_descargas_diferenciadas():
+    from datetime import date
+    from types import SimpleNamespace
+    from kiki_control.presentation.control_consolidado_view import cobertura_tres_fuentes, filas_cobertura_presentacion, texto_rango_cobertura, nombre_archivo_descarga
+
+    assert texto_rango_cobertura("20/07/2026", "20/07/2026") == "20/07/2026"
+    assert texto_rango_cobertura("20/07/2026", "21/07/2026") == "20/07/2026 a 21/07/2026"
+    movs = [SimpleNamespace(fecha_origen_local=date(2026, 7, 20), fecha_liquidacion_local=None) for _ in range(4)]
+    cobertura = cobertura_tres_fuentes([], [], movs)
+    filas = filas_cobertura_presentacion(cobertura)
+    assert next(f for f in filas if f["Fuente"] == "Liquidaciones MP")["Observación"] == "4 movimientos sin fecha de liquidación"
+    assert nombre_archivo_descarga("kiki_control_consolidado_3_fuentes_", "20260722_150405").startswith("kiki_control_consolidado_3_fuentes_")
+    assert nombre_archivo_descarga("kiki_control_excepciones_consolidadas_", "20260722_150405").startswith("kiki_control_excepciones_consolidadas_")
+    assert nombre_archivo_descarga("kiki_control_revisiones_consolidadas_", "20260722_150405").startswith("kiki_control_revisiones_consolidadas_")
+    assert nombre_archivo_descarga("kiki_control_historico_eccomapp_mp_reporte_", "20260722_150405").startswith("kiki_control_historico_eccomapp_mp_")
+
+
+def test_conclusion_breve_requerida_y_decimal_sin_float():
+    from tests.test_control_consolidado_diagnostics import r, rep, D, E
+    from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
+    from kiki_control.presentation.control_consolidado_view import conclusion_ejecutiva_consolidada
+
+    reporte = rep([
+        *[r(f"ok-{i}", E.COMPLETA, ml=D("1"), mp=D("1"), dif=D("0")) for i in range(609)],
+        r("diff-1", E.COMPLETA, ml=D("10000"), mp=D("20000"), dif=D("10000")),
+        r("diff-2", E.COMPLETA, ml=D("10000"), mp=D("24044.34"), dif=D("14044.34")),
+    ])
+    texto = conclusion_ejecutiva_consolidada(reporte, diagnosticar_control_consolidado(reporte))
+    assert texto == "609 de 611 grupos comparables coinciden dentro de la tolerancia. 2 presentan diferencias por un total de $ 24.044,34."
+    source = open("src/kiki_control/presentation/control_consolidado_view.py", encoding="utf-8").read()
+    assert "float(" not in source
