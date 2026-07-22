@@ -232,3 +232,24 @@ def test_exportaciones_consolidadas_tres_descargas_y_hojas():
     assert load_workbook(BytesIO(generar_revisiones_consolidadas_excel(reporte))).sheetnames == ['Resumen', 'Revisiones']
     source = open('src/kiki_control/exporting/excel.py', encoding='utf-8').read().lower()
     assert 'float(' not in source and 'comprador' not in source and 'documento' not in source
+
+def test_streamlit_y_excel_temporal_no_duplican_netos_mp_distintos():
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from tests.test_control_consolidado_diagnostics import r, rep, D, E
+    from kiki_control.exporting import generar_reporte_consolidado_excel
+    from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
+    from kiki_control.ui.streamlit_app import _fila_temporal
+
+    reporte = rep([
+        r('fin:distinto:hash:fila:1', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('100'), neto_fin=D('-20'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(1,)),
+    ])
+    item = diagnosticar_control_consolidado(reporte, None, None, {1: None}).temporal_mp_sin_venta.sin_fecha
+    assert _fila_temporal('Sin fecha', item)['Neto aprobado MP'] == '$ 100,00'
+    assert _fila_temporal('Sin fecha', item)['Neto financiero total MP'] == '$ -20,00'
+
+    wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(reporte)))
+    ws = wb['Distribución temporal MP']
+    row = next(row for row in ws.iter_rows(min_row=2, values_only=False) if row[0].value == 'Sin fecha')
+    assert row[2].value == D('100')
+    assert row[3].value == D('-20')

@@ -16,9 +16,10 @@ _ZERO = Decimal("0")
 
 
 @dataclass(frozen=True)
-class ConteoImporte:
+class ConteoImportesMp:
     cantidad: int
-    importe: Decimal = _ZERO
+    neto_aprobado_mp: Decimal = _ZERO
+    neto_financiero_total_mp: Decimal = _ZERO
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,14 @@ class ResidualMercadoLibre:
     universo: str
     columnas_utilizadas: tuple[str, ...]
     importe: Decimal
+    grupos_calculables: int
+    grupos_excluidos: int
+    suma_total_ars: Decimal
+    suma_ingresos_productos: Decimal
+    suma_cargo_venta_impuestos: Decimal
+    suma_costos_envio: Decimal
+    identidad_cierra_exactamente: bool
+    motivos_exclusion: Mapping[str, int]
 
 
 @dataclass(frozen=True)
@@ -127,11 +136,11 @@ class DiagnosticoRevisionesConsolidadas:
 
 @dataclass(frozen=True)
 class DiagnosticoTemporalMp:
-    anteriores: ConteoImporte
-    dentro: ConteoImporte
-    posteriores: ConteoImporte
-    sin_fecha: ConteoImporte
-    fechas_mixtas: ConteoImporte
+    anteriores: ConteoImportesMp
+    dentro: ConteoImportesMp
+    posteriores: ConteoImportesMp
+    sin_fecha: ConteoImportesMp
+    fechas_mixtas: ConteoImportesMp
     total_solo_movimiento_financiero: int
     particion_cierra_exactamente: bool
     aclaracion: str = "Estar fuera del período de ventas cargado no demuestra que falte una venta. Puede corresponder a acreditaciones, devoluciones o movimientos originados en otro período y requiere revisar la cobertura de los archivos."
@@ -165,14 +174,6 @@ def _grupo(r: ResultadoControlConsolidado) -> str:
     if r.filas_origen_mp:
         return f"fila MP {','.join(map(str, r.filas_origen_mp))}"
     return r.clave_resultado
-
-
-def importe_mp_para_temporal(r: ResultadoControlConsolidado) -> Decimal:
-    if r.neto_financiero_total_mp is not None:
-        return r.neto_financiero_total_mp
-    if r.neto_aprobado_mp is not None:
-        return r.neto_aprobado_mp
-    return _ZERO
 
 
 def motivos_datos_criticos_faltantes(r: ResultadoControlConsolidado) -> tuple[str, ...]:
@@ -275,7 +276,13 @@ def _as_date(v: date | datetime | None) -> date | None:
 
 def diagnosticar_temporal_mp_sin_venta(reporte: ReporteControlConsolidado, inicio_ml: date | datetime | None = None, fin_ml: date | datetime | None = None, fechas_mp_por_fila: Mapping[int, date | datetime | None] | None = None) -> DiagnosticoTemporalMp:
     inicio = _as_date(inicio_ml); fin = _as_date(fin_ml); fechas = fechas_mp_por_fila or {}
-    buckets = {"anteriores": [0,_ZERO], "dentro": [0,_ZERO], "posteriores": [0,_ZERO], "sin_fecha": [0,_ZERO], "fechas_mixtas": [0,_ZERO]}
+    buckets = {
+        "anteriores": [0, _ZERO, _ZERO],
+        "dentro": [0, _ZERO, _ZERO],
+        "posteriores": [0, _ZERO, _ZERO],
+        "sin_fecha": [0, _ZERO, _ZERO],
+        "fechas_mixtas": [0, _ZERO, _ZERO],
+    }
     total = 0
     for r in reporte.resultados:
         if r.estado != EstadoControlConsolidado.SOLO_MOVIMIENTO_FINANCIERO: continue
@@ -294,8 +301,12 @@ def diagnosticar_temporal_mp_sin_venta(reporte: ReporteControlConsolidado, inici
         if not categorias:
             categorias.add("sin_fecha")
         key = next(iter(categorias)) if len(categorias) == 1 else "fechas_mixtas"
-        buckets[key][0] += 1; buckets[key][1] += importe_mp_para_temporal(r)
-    conteos = tuple(ConteoImporte(v[0], v[1]) for v in buckets.values())
+        buckets[key][0] += 1
+        if r.neto_aprobado_mp is not None:
+            buckets[key][1] += r.neto_aprobado_mp
+        if r.neto_financiero_total_mp is not None:
+            buckets[key][2] += r.neto_financiero_total_mp
+    conteos = tuple(ConteoImportesMp(v[0], v[1], v[2]) for v in buckets.values())
     return DiagnosticoTemporalMp(*conteos, total, sum(c.cantidad for c in conteos) == total)
 
 
@@ -325,8 +336,49 @@ def diagnosticar_cobertura_monetaria(reporte: ReporteControlConsolidado) -> tupl
 
 
 def diagnosticar_residual_ml(reporte: ReporteControlConsolidado) -> ResidualMercadoLibre:
-    importe = _sum((r.total_informado_ml - ((r.monto_venta_ml or _ZERO) + (r.cargo_venta_impuestos_ml or _ZERO) + (r.costo_envio_ml or _ZERO))) for r in reporte.resultados if r.total_informado_ml is not None)
-    return ResidualMercadoLibre("Otros conceptos y ajustes ML no desagregados en este resumen", "Total (ARS) - (Ingresos por productos (ARS) + Cargo por venta e impuestos (ARS) + Costos de envío (ARS))", "universo completo ML oficial con Total (ARS)", ("Total (ARS)", "Ingresos por productos (ARS)", "Cargo por venta e impuestos (ARS)", "Costos de envío (ARS)"), importe)
+    calculables = tuple(
+        r for r in reporte.resultados
+        if r.total_informado_ml is not None
+        and r.monto_venta_ml is not None
+        and r.cargo_venta_impuestos_ml is not None
+        and r.costo_envio_ml is not None
+    )
+    excluidos = tuple(r for r in reporte.resultados if r not in calculables)
+    motivos = {
+        "falta Total (ARS)": 0,
+        "falta Ingresos por productos (ARS)": 0,
+        "falta Cargo por venta e impuestos (ARS)": 0,
+        "falta Costos de envío (ARS)": 0,
+    }
+    for r in excluidos:
+        if r.total_informado_ml is None:
+            motivos["falta Total (ARS)"] += 1
+        if r.monto_venta_ml is None:
+            motivos["falta Ingresos por productos (ARS)"] += 1
+        if r.cargo_venta_impuestos_ml is None:
+            motivos["falta Cargo por venta e impuestos (ARS)"] += 1
+        if r.costo_envio_ml is None:
+            motivos["falta Costos de envío (ARS)"] += 1
+    suma_total = _sum(r.total_informado_ml for r in calculables)
+    suma_ingresos = _sum(r.monto_venta_ml for r in calculables)
+    suma_cargos = _sum(r.cargo_venta_impuestos_ml for r in calculables)
+    suma_envios = _sum(r.costo_envio_ml for r in calculables)
+    residual = suma_total - (suma_ingresos + suma_cargos + suma_envios)
+    return ResidualMercadoLibre(
+        "Otros conceptos y ajustes ML no desagregados en este resumen",
+        "Total (ARS) - (Ingresos por productos (ARS) + Cargo por venta e impuestos (ARS) + Costos de envío (ARS))",
+        "universo ML oficial con los cuatro importes presentes",
+        ("Total (ARS)", "Ingresos por productos (ARS)", "Cargo por venta e impuestos (ARS)", "Costos de envío (ARS)"),
+        residual,
+        len(calculables),
+        len(excluidos),
+        suma_total,
+        suma_ingresos,
+        suma_cargos,
+        suma_envios,
+        suma_total == suma_ingresos + suma_cargos + suma_envios + residual,
+        motivos,
+    )
 
 def diagnosticar_control_consolidado(reporte: ReporteControlConsolidado, inicio_ml: date | datetime | None = None, fin_ml: date | datetime | None = None, fechas_mp_por_fila: Mapping[int, date | datetime | None] | None = None) -> DiagnosticoControlConsolidado:
     return DiagnosticoControlConsolidado(diagnosticar_particion(reporte), diagnosticar_diferencias(reporte), diagnosticar_puente(reporte), diagnosticar_utilidad(reporte), diagnosticar_revisiones(reporte), diagnosticar_temporal_mp_sin_venta(reporte, inicio_ml, fin_ml, fechas_mp_por_fila), diagnosticar_cobertura_monetaria(reporte), diagnosticar_residual_ml(reporte))

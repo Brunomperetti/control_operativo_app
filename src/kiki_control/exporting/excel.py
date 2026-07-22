@@ -316,7 +316,16 @@ def _escribir_cobertura_consolidada(ws: Worksheet, diag: Any) -> None:
 def _escribir_puente_consolidado(ws: Worksheet, diag: Any) -> None:
     ws.append(["Concepto", "Valor"])
     p = diag.puente
+    residual = diag.residual_ml
     for fila in (("Neto ML", p.neto_oficial_ml), ("Neto Eccomapp", p.neto_informado_eccomapp), ("Neto aprobado MP", p.neto_aprobado_mp), ("Eccomapp − ML", p.eccomapp_menos_ml), ("MP − Eccomapp", p.mp_menos_eccomapp), ("MP − ML", p.mp_menos_ml), ("Aporte excluidos a diferencia ML–MP", p.aporte_excluidos_a_diferencia_ml_mp)):
+        ws.append(list(fila))
+    for fila in (
+        ("Residual ML", residual.importe),
+        ("Grupos calculables residual ML", residual.grupos_calculables),
+        ("Grupos excluidos residual ML", residual.grupos_excluidos),
+        ("Identidad residual ML cierra", "Sí" if residual.identidad_cierra_exactamente else "No"),
+        ("Motivos exclusión residual ML", "; ".join(f"{k}: {v}" for k, v in residual.motivos_exclusion.items() if v)),
+    ):
         ws.append(list(fila))
     ws.append(["Advertencia", "No comparar importes de universos distintos sin revisar Cobertura y universos."])
     _formatear_tabla(ws, moneda_columnas={2}, wrap_columnas={2}, freeze=False)
@@ -332,7 +341,7 @@ def _escribir_control_consolidado(ws: Worksheet, resultados: Iterable[ResultadoC
 def _escribir_temporal_consolidado(ws: Worksheet, diag: Any) -> None:
     ws.append(["Categoría", "Cantidad", "Neto aprobado MP", "Neto financiero total MP", "Aclaración"])
     for nombre, item in (("Anteriores", diag.temporal_mp_sin_venta.anteriores), ("Dentro", diag.temporal_mp_sin_venta.dentro), ("Posteriores", diag.temporal_mp_sin_venta.posteriores), ("Sin fecha", diag.temporal_mp_sin_venta.sin_fecha), ("Fechas mixtas", diag.temporal_mp_sin_venta.fechas_mixtas)):
-        ws.append([nombre, item.cantidad, item.importe, item.importe, _texto_seguro(diag.temporal_mp_sin_venta.aclaracion)])
+        ws.append([nombre, item.cantidad, item.neto_aprobado_mp, item.neto_financiero_total_mp, _texto_seguro(diag.temporal_mp_sin_venta.aclaracion)])
     _formatear_tabla(ws, moneda_columnas={3,4}, wrap_columnas={5}, freeze=True)
 
 

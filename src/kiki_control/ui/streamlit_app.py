@@ -419,7 +419,12 @@ def _fechas_mp_por_fila_normalizadas() -> dict[int, Any]:
 
 
 def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
-    return {"Categoría temporal": nombre, "Cantidad": item.cantidad, "Neto aprobado MP": formato_importe(item.importe), "Neto financiero total MP": formato_importe(item.importe)}
+    return {
+        "Categoría temporal": nombre,
+        "Cantidad": item.cantidad,
+        "Neto aprobado MP": formato_importe(item.neto_aprobado_mp),
+        "Neto financiero total MP": formato_importe(item.neto_financiero_total_mp),
+    }
 
 def _mostrar_resultados() -> None:
     reporte = st.session_state["reporte_consolidado"]
@@ -473,6 +478,11 @@ def _mostrar_resultados() -> None:
         "Nombre visible": diagnostico.residual_ml.nombre_visible, "Fórmula": diagnostico.residual_ml.formula,
         "Importe": formato_importe(diagnostico.residual_ml.importe), "Universo": diagnostico.residual_ml.universo,
         "Columnas utilizadas": ", ".join(diagnostico.residual_ml.columnas_utilizadas),
+        "Grupos calculables": diagnostico.residual_ml.grupos_calculables,
+        "Grupos excluidos": diagnostico.residual_ml.grupos_excluidos,
+        "Motivos de exclusión": "; ".join(f"{k}: {v}" for k, v in diagnostico.residual_ml.motivos_exclusion.items() if v),
+        "Identidad": "suma Total (ARS) = suma Ingresos por productos + suma Cargos e impuestos + suma Costos de envío + residual",
+        "Cierra": "Sí" if diagnostico.residual_ml.identidad_cierra_exactamente else "No",
     }])
     st.subheader("Puente de importes entre fuentes")
     st.caption("Universo triple: grupos con Neto ML, Neto Eccomapp y Neto aprobado MP. No oculta excluidos ni atribuye causas sin evidencia.")

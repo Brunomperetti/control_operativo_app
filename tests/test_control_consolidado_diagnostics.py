@@ -1,6 +1,6 @@
 from datetime import date
 from decimal import Decimal
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
@@ -74,7 +74,8 @@ def test_temporal_conserva_decimal_cero_y_distingue_none():
     ])
     temporal = diagnosticar_control_consolidado(reporte, date(2026, 7, 1), date(2026, 7, 31), {1: date(2026,7,10), 2: date(2026,7,10)}).temporal_mp_sin_venta
     assert temporal.dentro.cantidad == 2
-    assert temporal.dentro.importe == D('3')
+    assert temporal.dentro.neto_aprobado_mp == D('102')
+    assert temporal.dentro.neto_financiero_total_mp == D('0')
     assert temporal.particion_cierra_exactamente
 
 
@@ -105,7 +106,8 @@ def test_revisiones_multietiqueta_solo_requiere_revision_y_temporal_mixta_cierra
     dif_rev = [x for x in diag.revisiones.revisiones_multietiqueta if x.motivo_visible == 'Diferencia pendiente de clasificación contable'][0]
     assert dif_rev.cantidad == 1
     assert diag.temporal_mp_sin_venta.fechas_mixtas.cantidad == 1
-    assert diag.temporal_mp_sin_venta.fechas_mixtas.importe == D('0')
+    assert diag.temporal_mp_sin_venta.fechas_mixtas.neto_aprobado_mp == D('0')
+    assert diag.temporal_mp_sin_venta.fechas_mixtas.neto_financiero_total_mp == D('0')
     assert diag.temporal_mp_sin_venta.sin_fecha.cantidad == 1
     assert diag.temporal_mp_sin_venta.particion_cierra_exactamente
 
@@ -138,7 +140,63 @@ def test_cobertura_residual_puente_excluidos_y_neto_mp_doble():
     assert {c.universo for c in diag.cobertura_monetaria} >= {'universo completo ML oficial', 'universo completo Eccomapp', 'universo ML–Eccomapp', 'universo ML–MP', 'universo ML–Eccomapp–MP', 'universo calculable de utilidad'}
     assert diag.utilidad.costo_eccomapp_fuera_universo_calculable == D('18560')
     assert diag.residual_ml.nombre_visible == 'Otros conceptos y ajustes ML no desagregados en este resumen'
-    assert diag.residual_ml.importe == D('-120')  # (100-(150+0+0)) + (50-(100+0+0)) con signos originales
+    assert diag.residual_ml.grupos_calculables == 0
+    assert diag.residual_ml.grupos_excluidos == 4
+    assert diag.residual_ml.importe == D('0')
     assert len(diag.puente.grupos_excluidos_universo_triple) == 3
     assert diag.puente.aporte_excluidos_a_diferencia_ml_mp == D('20')
-    assert diag.temporal_mp_sin_venta.dentro.importe == D('-15')
+    assert diag.temporal_mp_sin_venta.dentro.neto_aprobado_mp == D('5')
+    assert diag.temporal_mp_sin_venta.dentro.neto_financiero_total_mp == D('-15')
+
+
+def con_componentes_ml(resultado, total, ingresos, cargos, envio):
+    return replace(
+        resultado,
+        total_informado_ml=total,
+        monto_venta_ml=ingresos,
+        cargo_venta_impuestos_ml=cargos,
+        costo_envio_ml=envio,
+    )
+
+
+def test_temporal_mp_separa_aprobado_financiero_none_y_cero_sin_fallback():
+    reporte = rep([
+        r('fin:distinto:hash:fila:1', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('100'), neto_fin=D('-20'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(1,)),
+        r('fin:solo-fin:hash:fila:2', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=None, neto_fin=D('-30'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(2,)),
+        r('fin:solo-aprobado:hash:fila:3', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('40'), neto_fin=None, costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(3,)),
+        r('fin:cero-vs-none:hash:fila:4', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('0'), neto_fin=None, costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(4,)),
+    ])
+    temporal = diagnosticar_control_consolidado(
+        reporte,
+        date(2026, 7, 1),
+        date(2026, 7, 31),
+        {1: date(2026, 7, 10), 2: date(2026, 7, 10), 3: date(2026, 7, 10), 4: date(2026, 7, 10)},
+    ).temporal_mp_sin_venta
+    assert temporal.dentro.cantidad == 4
+    assert temporal.dentro.neto_aprobado_mp == D('140')
+    assert temporal.dentro.neto_financiero_total_mp == D('-50')
+    assert temporal.particion_cierra_exactamente
+
+
+def test_residual_ml_solo_calcula_grupos_con_cuatro_importes_e_identidad():
+    completo = con_componentes_ml(r('completo'), D('120'), D('150'), D('-20'), D('-10'))
+    ceros_validos = con_componentes_ml(r('ceros'), D('0'), D('0'), D('0'), D('0'))
+    sin_total = con_componentes_ml(r('sin-total'), None, D('10'), D('-1'), D('-2'))
+    sin_ingresos = con_componentes_ml(r('sin-ingresos'), D('10'), None, D('-1'), D('-2'))
+    sin_cargo = con_componentes_ml(r('sin-cargo'), D('10'), D('12'), None, D('-2'))
+    sin_envio = con_componentes_ml(r('sin-envio'), D('10'), D('12'), D('-1'), None)
+    residual = diagnosticar_control_consolidado(rep([completo, ceros_validos, sin_total, sin_ingresos, sin_cargo, sin_envio])).residual_ml
+    assert residual.grupos_calculables == 2
+    assert residual.grupos_excluidos == 4
+    assert residual.importe == D('0')
+    assert residual.suma_total_ars == D('120')
+    assert residual.suma_ingresos_productos == D('150')
+    assert residual.suma_cargo_venta_impuestos == D('-20')
+    assert residual.suma_costos_envio == D('-10')
+    assert residual.identidad_cierra_exactamente
+    assert residual.motivos_exclusion['falta Total (ARS)'] == 1
+    assert residual.motivos_exclusion['falta Ingresos por productos (ARS)'] == 1
+    assert residual.motivos_exclusion['falta Cargo por venta e impuestos (ARS)'] == 1
+    assert residual.motivos_exclusion['falta Costos de envío (ARS)'] == 1
+    source = open('src/kiki_control/presentation/control_consolidado_diagnostics.py', encoding='utf-8').read()
+    assert ' or _ZERO' not in source and 'float(' not in source
