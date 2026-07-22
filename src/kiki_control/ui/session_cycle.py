@@ -9,17 +9,27 @@ from typing import Any
 SESSION_KEYS_TO_CLEAR = (
     "archivo_ml",
     "archivo_mp",
+    "archivo_ml_oficial",
+    "archivo_eccomapp",
     "hash_ml",
     "hash_mp",
+    "hash_ml_oficial",
+    "hash_eccomapp",
     "normalizacion",
     "cobertura",
+    "cobertura_consolidada",
     "reporte",
+    "reporte_comercial",
+    "reporte_financiero",
+    "reporte_consolidado",
     "firma_procesamiento",
     "firma_actual",
     "filtro_estados",
     "filtro_busqueda_orden",
     "filtro_solo_revision",
     "filtro_solo_divididos",
+    "filtro_solo_diferencia",
+    "filtro_solo_faltantes",
     "detalle_operacion",
     "vista_resultados",
     "revision_tipo",
@@ -31,13 +41,19 @@ SESSION_KEYS_TO_CLEAR = (
 RESULT_KEYS_TO_CLEAR = (
     "normalizacion",
     "cobertura",
+    "cobertura_consolidada",
     "reporte",
+    "reporte_comercial",
+    "reporte_financiero",
+    "reporte_consolidado",
     "firma_procesamiento",
     "firma_actual",
     "filtro_estados",
     "filtro_busqueda_orden",
     "filtro_solo_revision",
     "filtro_solo_divididos",
+    "filtro_solo_diferencia",
+    "filtro_solo_faltantes",
     "detalle_operacion",
     "vista_resultados",
     "revision_tipo",
@@ -51,6 +67,8 @@ VIEW_FILTER_KEYS_TO_CLEAR = (
     "filtro_busqueda_orden",
     "filtro_solo_revision",
     "filtro_solo_divididos",
+    "filtro_solo_diferencia",
+    "filtro_solo_faltantes",
     "detalle_operacion",
     "filtro_motivo_revision",
 )
@@ -72,6 +90,19 @@ def construir_firma_procesamiento(hash_ml: str, hash_mp: str, zona_horaria: str,
     serializado = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serializado.encode("utf-8")).hexdigest()
 
+
+
+def construir_firma_procesamiento_tres_fuentes(hash_ml_oficial: str | None, hash_eccomapp: str | None, hash_mp: str | None, zona_horaria: str, tolerancia: Decimal) -> str:
+    """Construye una firma SHA-256 determinística para tres archivos y configuración."""
+    payload = {
+        "hash_ml_oficial": hash_ml_oficial or "",
+        "hash_eccomapp": hash_eccomapp or "",
+        "hash_mp": hash_mp or "",
+        "zona_horaria": zona_horaria,
+        "tolerancia": tolerancia_canonica(tolerancia),
+    }
+    serializado = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serializado.encode("utf-8")).hexdigest()
 
 def detectar_cambio(valor_anterior: Any, valor_actual: Any) -> bool:
     """Indica si una entrada relevante cambió, incluyendo altas y bajas de archivo."""

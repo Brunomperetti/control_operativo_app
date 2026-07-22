@@ -333,3 +333,24 @@ Un `ResultadoConciliacion` puede representar una operación comercial sin movimi
 Un movimiento real con neto cero sí cuenta como Mercado Pago presente y conserva `Decimal("0")`. Además, una venta `SOLO_MERCADO_LIBRE` con un `id_orden` coincidente puede vincularse con MP aunque falte Eccomapp: se puede comparar ML contra MP, pero el costo de productos y la utilidad preliminar quedan en `None`, por lo que el estado es `SIN_COSTO_PRODUCTO` con revisión.
 
 Los hashes Eccomapp del reporte comercial y del reporte financiero deben coincidir exactamente como conjuntos; cualquier diferencia o subconjunto incompleto cancela el consolidado con un error de dominio en español.
+
+## Control consolidado de tres fuentes en Streamlit
+
+La pantalla principal permite cargar tres reportes sintéticos o exportados manualmente, siempre procesados en memoria:
+
+1. **Ventas oficiales de Mercado Libre** (`.xlsx`): aporta ventas, cargos, envíos y `Total (ARS)` informado por Mercado Libre.
+2. **Costos y rentabilidad de Eccomapp** (`.csv`): aporta costo de productos, monto de venta, costo de envío seller, neto informado en MP y utilidad informada por la fuente.
+3. **Movimientos de Mercado Pago** (`.xlsx`): aporta pagos, liquidaciones, devoluciones, reclamos y netos financieros.
+
+El botón **Procesar y consolidar** se habilita solo cuando los tres archivos son válidos, la zona horaria existe y la tolerancia monetaria no es negativa. El flujo reutiliza las APIs de dominio existentes de normalización, vinculación comercial, conciliación financiera y consolidación; la UI no duplica reglas financieras.
+
+La vista consolidada incluye:
+
+- **Cobertura de los archivos**, con rango de fechas por fuente y advertencia cuando los períodos no coinciden.
+- **Resumen ejecutivo consolidado**, con cantidades de grupos completos, con diferencia, sin venta oficial, sin costo, sin MP, solo financieros, ambiguos y pendientes de revisión.
+- **KPIs por bloque**, donde los importes comparables ML–MP solo mezclan resultados que tienen ambas fuentes, y el neto MP sin venta oficial asociada se informa aparte.
+- **Utilidad preliminar de control**, calculada solo cuando existe `Total (ARS)` de ML oficial y `Costo Total (Con IVA) ($)` de Eccomapp, acompañada por cobertura “X de Y grupos”.
+- **Control consolidado por operación**, con vista predeterminada de pendientes, diferencias y datos faltantes, filtros y detalle seguro.
+- **Auditoría de conciliación Eccomapp–Mercado Pago**, separada del nuevo consolidado; las descargas Excel actuales corresponden todavía a esa auditoría histórica.
+
+Privacidad y límites: la app no persiste archivos originales, no muestra datos personales ni contenido crudo, conserva signos negativos y usa lenguaje prudente. Los resultados son controles operativos informados por las fuentes y no constituyen resultado contable o fiscal definitivo. La exportación Excel consolidada todavía no está implementada.
