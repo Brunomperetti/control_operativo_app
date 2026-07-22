@@ -116,3 +116,29 @@ def test_modulo_puro_sin_streamlit_dataframe_float_ni_pii():
     assert 'dataframe' not in source
     assert 'float(' not in source
     assert 'comprador' not in source and 'documento' not in source and 'email' not in source
+
+def test_selector_usa_ids_orden_reales_y_no_compara_claves():
+    con_orden = r('fin:hash:fila:99', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('10'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(99,))
+    # simula un resultado cuya clave técnica parece financiera pero el texto visible trae ID de orden real
+    fila = filas_tabla_consolidada([con_orden])[0]
+    fila = fila.__class__(fila.clave, '123456789', fila.estado, fila.estado_codigo, fila.fuentes_disponibles, fila.venta_ml_oficial, fila.cargos_impuestos_ml, fila.costo_envio_ml, fila.neto_esperado_ml, fila.costo_productos, fila.neto_aprobado_mp, fila.neto_financiero_total_mp, fila.diferencia_ml_mp, fila.utilidad_preliminar, fila.requiere_revision, fila.tiene_diferencia, fila.tiene_datos_faltantes, fila.motivo_principal, fila.que_revisar)
+    assert etiqueta_selector_detalle(fila) == 'Orden 123456789 — Solo movimiento de Mercado Pago'
+    sin_orden = filas_tabla_consolidada([r('fin:x:hash:fila:7', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('1'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(7,))])[0]
+    assert etiqueta_selector_detalle(sin_orden) == 'Movimiento MP sin orden — fila 7'
+
+
+def test_cobertura_residual_puente_excluidos_y_neto_mp_doble():
+    reporte = rep([
+        r('triple', ml=D('100'), mp=D('100'), costo=D('40'), dif=D('0'), neto_ec=D('100'), venta_ml=D('150'), venta_ec=D('150')),
+        r('fuera-triple', ml=D('50'), mp=D('70'), costo=D('20'), dif=D('20'), neto_ec=None),
+        r('solo-ec', E.SIN_VENTA_OFICIAL, ml=None, mp=None, costo=D('18560'), dif=None, tiene_ml=False, tiene_mp=False),
+        r('fin:solo:hash:fila:21', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('5'), neto_fin=D('-15'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(21,)),
+    ])
+    diag = diagnosticar_control_consolidado(reporte, date(2026,7,1), date(2026,7,31), {21: date(2026,7,10)})
+    assert {c.universo for c in diag.cobertura_monetaria} >= {'universo completo ML oficial', 'universo completo Eccomapp', 'universo ML–Eccomapp', 'universo ML–MP', 'universo ML–Eccomapp–MP', 'universo calculable de utilidad'}
+    assert diag.utilidad.costo_eccomapp_fuera_universo_calculable == D('18560')
+    assert diag.residual_ml.nombre_visible == 'Otros conceptos y ajustes ML no desagregados en este resumen'
+    assert diag.residual_ml.importe == D('-120')  # (100-(150+0+0)) + (50-(100+0+0)) con signos originales
+    assert len(diag.puente.grupos_excluidos_universo_triple) == 3
+    assert diag.puente.aporte_excluidos_a_diferencia_ml_mp == D('20')
+    assert diag.temporal_mp_sin_venta.dentro.importe == D('-15')

@@ -11,7 +11,7 @@ from kiki_control.adapters.mercado_libre_ventas import normalizar_ventas_mercado
 from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
 from kiki_control.domain.enums import TipoFuente
 from kiki_control.domain.control_consolidado import ErrorControlConsolidado
-from kiki_control.exporting import generar_reporte_completo_excel, generar_reporte_excepciones_excel, generar_revisiones_pendientes_excel
+from kiki_control.exporting import generar_excepciones_consolidadas_excel, generar_reporte_completo_excel, generar_reporte_consolidado_excel, generar_reporte_excepciones_excel, generar_revisiones_consolidadas_excel, generar_revisiones_pendientes_excel
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
 from kiki_control.presentation.explanations import (
     COLUMNAS_TABLA,
@@ -52,6 +52,7 @@ from kiki_control.presentation.control_consolidado_view import (
     filas_tabla_consolidada,
     filtrar_filas_consolidadas,
     etiqueta_selector_detalle,
+    formato_importe,
     kpis_consolidados,
     tabla_consolidada,
     trazabilidad_tecnica,
@@ -418,7 +419,7 @@ def _fechas_mp_por_fila_normalizadas() -> dict[int, Any]:
 
 
 def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
-    return {"Categoría temporal": nombre, "Cantidad": item.cantidad, "Importe financiero": item.importe}
+    return {"Categoría temporal": nombre, "Cantidad": item.cantidad, "Neto aprobado MP": formato_importe(item.importe), "Neto financiero total MP": formato_importe(item.importe)}
 
 def _mostrar_resultados() -> None:
     reporte = st.session_state["reporte_consolidado"]
@@ -449,23 +450,53 @@ def _mostrar_resultados() -> None:
     diagnostico = diagnosticar_control_consolidado(reporte, inicio_ml, fin_ml, _fechas_mp_por_fila_normalizadas())
     if not diagnostico.particion.cierra_exactamente or not diagnostico.diferencias.identidad_cierra_exactamente:
         st.error("Error de consistencia en diagnósticos: no se presentan KPIs como confiables hasta revisar la partición o la identidad de diferencias.")
-    st.subheader("Puente de importes entre fuentes")
-    st.caption("Universos explícitos: venta comercial usa grupos con venta ML y venta Eccomapp; neto esperado usa grupos con Total (ARS), neto Eccomapp y neto MP. Diferencia pendiente de clasificación contable.")
+    st.subheader("Cobertura monetaria entre fuentes")
+    st.warning("No se comparan importes de universos distintos: cada fila muestra su universo y el motivo de exclusión antes de interpretar diferencias.")
     st.table([{
-        "Universo venta comercial": diagnostico.puente.universo_venta_comercial,
-        "Venta oficial ML": diagnostico.puente.venta_oficial_ml,
-        "Venta informada Eccomapp": diagnostico.puente.venta_informada_eccomapp,
-        "ML oficial − Eccomapp": diagnostico.puente.diferencia_ml_oficial_eccomapp,
-        "Universo neto esperado": diagnostico.puente.universo_neto_esperado,
-        "Eccomapp − ML": diagnostico.puente.eccomapp_menos_ml,
-        "MP − Eccomapp": diagnostico.puente.mp_menos_eccomapp,
-        "MP − ML": diagnostico.puente.mp_menos_ml,
+        "Fuente": c.fuente, "Universo": c.universo, "Cantidad total": c.cantidad_total, "Importe total del archivo": formato_importe(c.importe_total),
+        "Cantidad usada": c.cantidad_usada, "Importe usado": formato_importe(c.importe_usado), "Cantidad excluida": c.cantidad_excluida,
+        "Importe excluido": formato_importe(c.importe_excluido), "Motivo de exclusión": c.motivo_exclusion,
+    } for c in diagnostico.cobertura_monetaria])
+    st.subheader("Utilidad preliminar auditable")
+    st.table([{
+        "Neto ML del universo calculable": formato_importe(diagnostico.utilidad.neto_ml_universo_utilidad),
+        "Costo Eccomapp del universo calculable": formato_importe(diagnostico.utilidad.costo_productos_universo_utilidad),
+        "Utilidad preliminar": formato_importe(diagnostico.utilidad.utilidad_preliminar),
+        "Costo Eccomapp fuera del universo calculable": formato_importe(diagnostico.utilidad.costo_eccomapp_fuera_universo_calculable),
+        "Grupos excluidos": diagnostico.utilidad.grupos_excluidos,
+        "Motivos": "; ".join(f"{k}: {v}" for k, v in diagnostico.utilidad.motivos_exclusion.items() if v),
+        "Identidad": "utilidad_preliminar = neto_ml_universo_calculable - costo_eccomapp_universo_calculable",
+        "Cierra": "Sí" if diagnostico.utilidad.identidad_cierra_exactamente else "No",
+    }])
+    st.subheader("Residual oficial de Mercado Libre")
+    st.table([{
+        "Nombre visible": diagnostico.residual_ml.nombre_visible, "Fórmula": diagnostico.residual_ml.formula,
+        "Importe": formato_importe(diagnostico.residual_ml.importe), "Universo": diagnostico.residual_ml.universo,
+        "Columnas utilizadas": ", ".join(diagnostico.residual_ml.columnas_utilizadas),
+    }])
+    st.subheader("Puente de importes entre fuentes")
+    st.caption("Universo triple: grupos con Neto ML, Neto Eccomapp y Neto aprobado MP. No oculta excluidos ni atribuye causas sin evidencia.")
+    st.table([{
+        "Universo triple": diagnostico.puente.universo_neto_esperado,
+        "Neto ML": formato_importe(diagnostico.puente.neto_oficial_ml),
+        "Neto Eccomapp": formato_importe(diagnostico.puente.neto_informado_eccomapp),
+        "Neto aprobado MP": formato_importe(diagnostico.puente.neto_aprobado_mp),
+        "Eccomapp − ML": formato_importe(diagnostico.puente.eccomapp_menos_ml),
+        "MP − Eccomapp": formato_importe(diagnostico.puente.mp_menos_eccomapp),
+        "MP − ML": formato_importe(diagnostico.puente.mp_menos_ml),
         "Identidad cierra": "Sí" if diagnostico.puente.identidad_cierra_exactamente else "No",
     }])
+    if diagnostico.puente.grupos_excluidos_universo_triple:
+        st.caption("Grupos excluidos del puente triple y aporte a la diferencia general ML–MP cuando ambos importes existen.")
+        st.table([{
+            "Grupo": g.grupo, "Motivo": g.motivo, "Neto ML": formato_importe(g.neto_ml), "Neto Eccomapp": formato_importe(g.neto_eccomapp),
+            "Neto aprobado MP": formato_importe(g.neto_aprobado_mp), "Aporte MP − ML": formato_importe(g.aporte_diferencia_ml_mp),
+        } for g in diagnostico.puente.grupos_excluidos_universo_triple])
     if not (diagnostico.particion.cierra_exactamente and diagnostico.diferencias.identidad_cierra_exactamente and diagnostico.puente.identidad_cierra_exactamente and diagnostico.utilidad.motivos_cierran_exactamente and diagnostico.utilidad.identidad_cierra_exactamente and diagnostico.temporal_mp_sin_venta.particion_cierra_exactamente):
         st.error("Error de consistencia: al menos una identidad de diagnóstico no cierra exactamente. Revisar partición, diferencias, puente, utilidad o temporalidad antes de confiar en el bloque afectado.")
     st.subheader("Movimientos MP sin venta oficial: distribución temporal")
     st.caption(diagnostico.temporal_mp_sin_venta.aclaracion)
+    st.caption("El neto aprobado representa pagos aprobados comparables con ventas. El neto financiero total incorpora además devoluciones, reclamos, disputas y otros impactos; por eso ambos totales no tienen que coincidir.")
     st.table([
         _fila_temporal("Anteriores al período ML", diagnostico.temporal_mp_sin_venta.anteriores),
         _fila_temporal("Dentro del período ML", diagnostico.temporal_mp_sin_venta.dentro),
@@ -475,7 +506,7 @@ def _mostrar_resultados() -> None:
     ])
     st.subheader("Revisiones del control consolidado")
     st.caption(diagnostico.revisiones.aclaracion)
-    st.table([{"Motivo visible": r.motivo_visible, "Cantidad": r.cantidad, "Importe afectado": r.importe_afectado, "Acción recomendada": r.accion_recomendada, "Grupos involucrados": ", ".join(r.grupos_involucrados[:20])} for r in diagnostico.revisiones.revisiones_multietiqueta])
+    st.table([{"Motivo visible": r.motivo_visible, "Cantidad": r.cantidad, "Importe afectado": formato_importe(r.importe_afectado), "Acción recomendada": r.accion_recomendada, "Grupos involucrados": ", ".join(r.grupos_involucrados[:20])} for r in diagnostico.revisiones.revisiones_multietiqueta])
     for titulo, kpis in kpis_consolidados(reporte).items():
         st.subheader(titulo)
         cols = st.columns(len(kpis))
@@ -509,8 +540,15 @@ def _mostrar_resultados() -> None:
             hashes = {"ML": st.session_state.get("hash_ml_oficial", ""), "Eccomapp": st.session_state.get("hash_eccomapp", ""), "MP": st.session_state.get("hash_mp", "")}
             st.table([{"Campo": k, "Valor": v} for k, v in trazabilidad_tecnica(resultado, reporte.tolerancia, hashes).items()])
 
-    with st.expander("Auditoría de conciliación Eccomapp–Mercado Pago"):
-        st.warning("Esta es la conciliación financiera anterior: compara el neto informado por Eccomapp contra Mercado Pago. No es el nuevo resultado consolidado; los Excel actuales todavía corresponden a esta conciliación.")
+    st.header("Descargas consolidadas")
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    d1, d2, d3 = st.columns(3)
+    d1.download_button("Reporte consolidado de tres fuentes", data=generar_reporte_consolidado_excel(reporte), file_name=_nombre_descarga("reporte_consolidado_tres_fuentes"), mime=mime)
+    d2.download_button("Excepciones del control consolidado", data=generar_excepciones_consolidadas_excel(reporte), file_name=_nombre_descarga("excepciones_control_consolidado"), mime=mime)
+    d3.download_button("Revisiones consolidadas", data=generar_revisiones_consolidadas_excel(reporte), file_name=_nombre_descarga("revisiones_consolidadas"), mime=mime)
+
+    with st.expander("Auditoría histórica Eccomapp–Mercado Pago (Auditoría de conciliación Eccomapp–Mercado Pago)"):
+        st.warning("Esta es la conciliación financiera anterior: compara el neto informado por Eccomapp contra Mercado Pago. No es el nuevo resultado consolidado; sus descargas se mantienen separadas dentro de esta auditoría histórica.")
         if "reporte" in st.session_state:
             _mostrar_revisiones_pendientes(st.session_state["reporte"])
             _mostrar_descargas()

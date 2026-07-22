@@ -256,3 +256,100 @@ def _escribir_revisiones(ws: Worksheet, casos: Iterable[Any]) -> None:
             _texto_seguro(", ".join(caso.columnas_utilizadas)),
         ])
     _formatear_tabla(ws, moneda_columnas={6, 7, 8}, wrap_columnas={4, 5, 11}, freeze=True)
+
+from kiki_control.domain.control_consolidado import ReporteControlConsolidado, ResultadoControlConsolidado
+from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
+
+TIPO_CONSOLIDADO_TRES_FUENTES = "Reporte consolidado de tres fuentes"
+TIPO_EXCEPCIONES_CONSOLIDADAS = "Excepciones del control consolidado"
+TIPO_REVISIONES_CONSOLIDADAS = "Revisiones consolidadas"
+COLUMNAS_CONTROL_CONSOLIDADO = (
+    "Grupo u orden", "Estado", "Neto ML", "Neto Eccomapp", "Neto aprobado MP", "Neto financiero total MP",
+    "Eccomapp − ML", "MP − Eccomapp", "MP − ML", "Utilidad preliminar", "Motivo principal", "Filas ML", "Filas Eccomapp", "Filas MP",
+)
+
+
+def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado) -> bytes:
+    wb = Workbook(); ws = wb.active; ws.title = "Resumen"
+    diag = diagnosticar_control_consolidado(reporte)
+    _escribir_resumen_consolidado(ws, reporte, TIPO_CONSOLIDADO_TRES_FUENTES)
+    _escribir_cobertura_consolidada(wb.create_sheet("Cobertura y universos"), diag)
+    _escribir_puente_consolidado(wb.create_sheet("Puente de fuentes"), diag)
+    _escribir_control_consolidado(wb.create_sheet("Control por operación"), reporte.resultados)
+    _escribir_temporal_consolidado(wb.create_sheet("Distribución temporal MP"), diag)
+    _escribir_revisiones_consolidadas(wb.create_sheet("Revisiones"), diag)
+    _escribir_diccionario_consolidado(wb.create_sheet("Diccionario de cálculos"))
+    salida = BytesIO(); wb.save(salida); return salida.getvalue()
+
+
+def generar_excepciones_consolidadas_excel(reporte: ReporteControlConsolidado) -> bytes:
+    wb = Workbook(); ws = wb.active; ws.title = "Resumen"
+    excepciones = tuple(r for r in reporte.resultados if r.requiere_revision or r.estado.value != "COMPLETA" or (r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia))
+    _escribir_resumen_consolidado(ws, reporte, TIPO_EXCEPCIONES_CONSOLIDADAS)
+    _escribir_control_consolidado(wb.create_sheet("Excepciones"), excepciones)
+    salida = BytesIO(); wb.save(salida); return salida.getvalue()
+
+
+def generar_revisiones_consolidadas_excel(reporte: ReporteControlConsolidado) -> bytes:
+    wb = Workbook(); ws = wb.active; ws.title = "Resumen"
+    diag = diagnosticar_control_consolidado(reporte)
+    _escribir_resumen_consolidado(ws, reporte, TIPO_REVISIONES_CONSOLIDADAS)
+    _escribir_revisiones_consolidadas(wb.create_sheet("Revisiones"), diag)
+    salida = BytesIO(); wb.save(salida); return salida.getvalue()
+
+
+def _escribir_resumen_consolidado(ws: Worksheet, reporte: ReporteControlConsolidado, tipo: str) -> None:
+    ws.append(["Campo", "Valor"])
+    for fila in (("Nombre", "Kiki Control Financiero"), ("Tipo de reporte", tipo), ("Versión de regla", reporte.version_regla), ("Tolerancia", _decimal_o_vacio(reporte.tolerancia)), ("Total grupos", reporte.total_resultados), ("Aclaración", "Control operativo preliminar; no es resultado contable ni fiscal definitivo.")):
+        ws.append(list(fila))
+    _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2}, freeze=False)
+    for row in ws.iter_rows(min_row=2):
+        if row[0].value == "Tolerancia" and row[1].value != "": row[1].number_format = _FORMATO_MONEDA_ARS
+
+
+def _escribir_cobertura_consolidada(ws: Worksheet, diag: Any) -> None:
+    ws.append(["Fuente", "Universo", "Cantidad total", "Importe total", "Cantidad usada", "Importe usado", "Cantidad excluida", "Importe excluido", "Motivo de exclusión"])
+    for c in diag.cobertura_monetaria:
+        ws.append([_texto_seguro(c.fuente), _texto_seguro(c.universo), c.cantidad_total, c.importe_total, c.cantidad_usada, c.importe_usado, c.cantidad_excluida, c.importe_excluido, _texto_seguro(c.motivo_exclusion)])
+    _formatear_tabla(ws, moneda_columnas={4,6,8}, wrap_columnas={9}, freeze=True)
+
+
+def _escribir_puente_consolidado(ws: Worksheet, diag: Any) -> None:
+    ws.append(["Concepto", "Valor"])
+    p = diag.puente
+    for fila in (("Neto ML", p.neto_oficial_ml), ("Neto Eccomapp", p.neto_informado_eccomapp), ("Neto aprobado MP", p.neto_aprobado_mp), ("Eccomapp − ML", p.eccomapp_menos_ml), ("MP − Eccomapp", p.mp_menos_eccomapp), ("MP − ML", p.mp_menos_ml), ("Aporte excluidos a diferencia ML–MP", p.aporte_excluidos_a_diferencia_ml_mp)):
+        ws.append(list(fila))
+    ws.append(["Advertencia", "No comparar importes de universos distintos sin revisar Cobertura y universos."])
+    _formatear_tabla(ws, moneda_columnas={2}, wrap_columnas={2}, freeze=False)
+
+
+def _escribir_control_consolidado(ws: Worksheet, resultados: Iterable[ResultadoControlConsolidado]) -> None:
+    ws.append(list(COLUMNAS_CONTROL_CONSOLIDADO))
+    for r in resultados:
+        ws.append([_texto_seguro(r.id_grupo_canonico or ", ".join(r.ids_orden) or f"fila MP {', '.join(map(str, r.filas_origen_mp))}"), _texto_seguro(r.estado.value), _decimal_o_vacio(r.total_informado_ml), _decimal_o_vacio(r.neto_mp_eccomapp_informado), _decimal_o_vacio(r.neto_aprobado_mp), _decimal_o_vacio(r.neto_financiero_total_mp), _decimal_o_vacio(r.diferencia_neto_ml_eccomapp), _decimal_o_vacio((r.neto_aprobado_mp - r.neto_mp_eccomapp_informado) if r.neto_aprobado_mp is not None and r.neto_mp_eccomapp_informado is not None else None), _decimal_o_vacio(r.diferencia_ml_mp), _decimal_o_vacio(r.utilidad_preliminar_control), _texto_seguro("; ".join(r.motivos)), _texto_seguro(", ".join(map(str, r.filas_origen_ml))), _texto_seguro(", ".join(map(str, r.filas_origen_eccomapp))), _texto_seguro(", ".join(map(str, r.filas_origen_mp)))])
+    _formatear_tabla(ws, moneda_columnas={3,4,5,6,7,8,9,10}, wrap_columnas={11}, freeze=True)
+
+
+def _escribir_temporal_consolidado(ws: Worksheet, diag: Any) -> None:
+    ws.append(["Categoría", "Cantidad", "Neto aprobado MP", "Neto financiero total MP", "Aclaración"])
+    for nombre, item in (("Anteriores", diag.temporal_mp_sin_venta.anteriores), ("Dentro", diag.temporal_mp_sin_venta.dentro), ("Posteriores", diag.temporal_mp_sin_venta.posteriores), ("Sin fecha", diag.temporal_mp_sin_venta.sin_fecha), ("Fechas mixtas", diag.temporal_mp_sin_venta.fechas_mixtas)):
+        ws.append([nombre, item.cantidad, item.importe, item.importe, _texto_seguro(diag.temporal_mp_sin_venta.aclaracion)])
+    _formatear_tabla(ws, moneda_columnas={3,4}, wrap_columnas={5}, freeze=True)
+
+
+def _escribir_revisiones_consolidadas(ws: Worksheet, diag: Any) -> None:
+    ws.append(["Motivo", "Cantidad", "Importe afectado", "Acción", "Grupos"])
+    for r in diag.revisiones.revisiones_multietiqueta:
+        ws.append([_texto_seguro(r.motivo_visible), r.cantidad, _decimal_o_vacio(r.importe_afectado), _texto_seguro(r.accion_recomendada), _texto_seguro(", ".join(r.grupos_involucrados))])
+    _formatear_tabla(ws, moneda_columnas={3}, wrap_columnas={4,5}, freeze=True)
+
+
+def _escribir_diccionario_consolidado(ws: Worksheet) -> None:
+    ws.append(["Cálculo", "Fórmula", "Universo", "Columnas utilizadas"])
+    filas = [
+        ("Utilidad preliminar", "Total (ARS) ML - Costo Total (Con IVA) Eccomapp", "universo calculable de utilidad", "Total (ARS); Costo Total (Con IVA) ($)"),
+        ("Otros conceptos y ajustes ML no desagregados en este resumen", "Total (ARS) - (Ingresos por productos (ARS) + Cargo por venta e impuestos (ARS) + Costos de envío (ARS))", "universo completo ML oficial", "Total (ARS); Ingresos por productos (ARS); Cargo por venta e impuestos (ARS); Costos de envío (ARS)"),
+        ("MP − ML", "Neto aprobado MP - Neto ML", "universo ML–Eccomapp–MP para puente triple", "Total (ARS); neto Eccomapp; movimientos aprobados MP"),
+    ]
+    for fila in filas: ws.append([_texto_seguro(x) for x in fila])
+    _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2,3,4}, freeze=True)

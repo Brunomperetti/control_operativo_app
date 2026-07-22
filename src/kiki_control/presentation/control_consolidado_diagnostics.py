@@ -45,6 +45,38 @@ class DiagnosticoDiferenciasFuentes:
 
 
 @dataclass(frozen=True)
+class CoberturaMonetariaFuente:
+    fuente: str
+    universo: str
+    cantidad_total: int
+    importe_total: Decimal
+    cantidad_usada: int
+    importe_usado: Decimal
+    cantidad_excluida: int
+    importe_excluido: Decimal
+    motivo_exclusion: str
+
+
+@dataclass(frozen=True)
+class ResidualMercadoLibre:
+    nombre_visible: str
+    formula: str
+    universo: str
+    columnas_utilizadas: tuple[str, ...]
+    importe: Decimal
+
+
+@dataclass(frozen=True)
+class GrupoExcluidoPuente:
+    grupo: str
+    motivo: str
+    neto_ml: Decimal | None
+    neto_eccomapp: Decimal | None
+    neto_aprobado_mp: Decimal | None
+    aporte_diferencia_ml_mp: Decimal | None
+
+
+@dataclass(frozen=True)
 class PuenteImportesFuentes:
     universo_venta_comercial: int
     venta_oficial_ml: Decimal
@@ -58,6 +90,8 @@ class PuenteImportesFuentes:
     mp_menos_eccomapp: Decimal
     mp_menos_ml: Decimal
     identidad_cierra_exactamente: bool
+    grupos_excluidos_universo_triple: tuple[GrupoExcluidoPuente, ...] = ()
+    aporte_excluidos_a_diferencia_ml_mp: Decimal = _ZERO
     clasificacion_pendiente: str = "Diferencia pendiente de clasificación contable"
 
 
@@ -111,6 +145,8 @@ class DiagnosticoControlConsolidado:
     utilidad: DiagnosticoCoberturaUtilidad
     revisiones: DiagnosticoRevisionesConsolidadas
     temporal_mp_sin_venta: DiagnosticoTemporalMp
+    cobertura_monetaria: tuple[CoberturaMonetariaFuente, ...]
+    residual_ml: ResidualMercadoLibre
 
 
 def _sum(valores: Iterable[Decimal | None]) -> Decimal:
@@ -189,7 +225,18 @@ def diagnosticar_puente(reporte: ReporteControlConsolidado) -> PuenteImportesFue
     venta_ml = _sum(r.monto_venta_ml for r in venta); venta_ec = _sum(r.monto_venta_eccomapp_informado for r in venta)
     neto_ml = _sum(r.total_informado_ml for r in neto); neto_ec = _sum(r.neto_mp_eccomapp_informado for r in neto); neto_mp = _sum(r.neto_aprobado_mp for r in neto)
     ec_ml = neto_ec - neto_ml; mp_ec = neto_mp - neto_ec; mp_ml = neto_mp - neto_ml
-    return PuenteImportesFuentes(len(venta), venta_ml, venta_ec, venta_ml - venta_ec, len(neto), neto_ml, neto_ec, neto_mp, ec_ml, mp_ec, mp_ml, mp_ml == mp_ec + ec_ml)
+    excluidos = tuple(_grupo_excluido_puente(r) for r in reporte.resultados if r not in neto)
+    aporte = _sum(g.aporte_diferencia_ml_mp for g in excluidos)
+    return PuenteImportesFuentes(len(venta), venta_ml, venta_ec, venta_ml - venta_ec, len(neto), neto_ml, neto_ec, neto_mp, ec_ml, mp_ec, mp_ml, mp_ml == mp_ec + ec_ml, excluidos, aporte)
+
+
+def _grupo_excluido_puente(r: ResultadoControlConsolidado) -> GrupoExcluidoPuente:
+    faltan = []
+    if r.total_informado_ml is None: faltan.append("Neto ML")
+    if r.neto_mp_eccomapp_informado is None: faltan.append("Neto Eccomapp")
+    if r.neto_aprobado_mp is None: faltan.append("Neto aprobado MP")
+    aporte = r.neto_aprobado_mp - r.total_informado_ml if r.neto_aprobado_mp is not None and r.total_informado_ml is not None else None
+    return GrupoExcluidoPuente(_grupo(r), "Fuera del puente triple por faltar " + ", ".join(faltan), r.total_informado_ml, r.neto_mp_eccomapp_informado, r.neto_aprobado_mp, aporte)
 
 
 def diagnosticar_utilidad(reporte: ReporteControlConsolidado) -> DiagnosticoCoberturaUtilidad:
@@ -252,5 +299,34 @@ def diagnosticar_temporal_mp_sin_venta(reporte: ReporteControlConsolidado, inici
     return DiagnosticoTemporalMp(*conteos, total, sum(c.cantidad for c in conteos) == total)
 
 
+
+def diagnosticar_cobertura_monetaria(reporte: ReporteControlConsolidado) -> tuple[CoberturaMonetariaFuente, ...]:
+    resultados = reporte.resultados
+    comun_ml_ec = tuple(r for r in resultados if r.total_informado_ml is not None and r.costo_productos_eccomapp is not None)
+    comun_ml_mp = tuple(r for r in resultados if r.total_informado_ml is not None and r.neto_aprobado_mp is not None)
+    comun_triple = tuple(r for r in resultados if r.total_informado_ml is not None and r.neto_mp_eccomapp_informado is not None and r.neto_aprobado_mp is not None)
+    utilidad = comun_ml_ec
+    def item(fuente, universo, total_rs, usado_rs, attr, motivo):
+        return CoberturaMonetariaFuente(fuente, universo, len(total_rs), _sum(getattr(r, attr) for r in total_rs), len(usado_rs), _sum(getattr(r, attr) for r in usado_rs), len(total_rs)-len(usado_rs), _sum(getattr(r, attr) for r in total_rs if r not in usado_rs), motivo)
+    ml_total=tuple(r for r in resultados if r.total_informado_ml is not None); ec_total=tuple(r for r in resultados if r.costo_productos_eccomapp is not None); mp_total=tuple(r for r in resultados if r.neto_aprobado_mp is not None)
+    return (
+        item("Mercado Libre oficial", "universo completo ML oficial", ml_total, ml_total, "total_informado_ml", "Sin exclusiones dentro del universo completo."),
+        item("Eccomapp", "universo completo Eccomapp", ec_total, ec_total, "costo_productos_eccomapp", "Sin exclusiones dentro del universo completo."),
+        item("Mercado Libre oficial", "universo ML–Eccomapp", ml_total, comun_ml_ec, "total_informado_ml", "Excluido cuando falta ML Total (ARS) o costo Eccomapp."),
+        item("Eccomapp", "universo ML–Eccomapp", ec_total, comun_ml_ec, "costo_productos_eccomapp", "Excluido cuando falta ML Total (ARS) o costo Eccomapp."),
+        item("Mercado Libre oficial", "universo ML–MP", ml_total, comun_ml_mp, "total_informado_ml", "Excluido cuando falta ML Total (ARS) o neto aprobado MP."),
+        item("Mercado Pago", "universo ML–MP", mp_total, comun_ml_mp, "neto_aprobado_mp", "Excluido cuando falta ML Total (ARS) o neto aprobado MP."),
+        item("Mercado Libre oficial", "universo ML–Eccomapp–MP", ml_total, comun_triple, "total_informado_ml", "Excluido cuando falta alguno de los tres netos del puente."),
+        item("Eccomapp", "universo ML–Eccomapp–MP", tuple(r for r in resultados if r.neto_mp_eccomapp_informado is not None), comun_triple, "neto_mp_eccomapp_informado", "Excluido cuando falta alguno de los tres netos del puente."),
+        item("Mercado Pago", "universo ML–Eccomapp–MP", mp_total, comun_triple, "neto_aprobado_mp", "Excluido cuando falta alguno de los tres netos del puente."),
+        item("Mercado Libre oficial", "universo calculable de utilidad", ml_total, utilidad, "total_informado_ml", "Excluido cuando falta Total (ARS) ML o costo Eccomapp."),
+        item("Eccomapp", "universo calculable de utilidad", ec_total, utilidad, "costo_productos_eccomapp", "Excluido cuando falta Total (ARS) ML o costo Eccomapp."),
+    )
+
+
+def diagnosticar_residual_ml(reporte: ReporteControlConsolidado) -> ResidualMercadoLibre:
+    importe = _sum((r.total_informado_ml - ((r.monto_venta_ml or _ZERO) + (r.cargo_venta_impuestos_ml or _ZERO) + (r.costo_envio_ml or _ZERO))) for r in reporte.resultados if r.total_informado_ml is not None)
+    return ResidualMercadoLibre("Otros conceptos y ajustes ML no desagregados en este resumen", "Total (ARS) - (Ingresos por productos (ARS) + Cargo por venta e impuestos (ARS) + Costos de envío (ARS))", "universo completo ML oficial con Total (ARS)", ("Total (ARS)", "Ingresos por productos (ARS)", "Cargo por venta e impuestos (ARS)", "Costos de envío (ARS)"), importe)
+
 def diagnosticar_control_consolidado(reporte: ReporteControlConsolidado, inicio_ml: date | datetime | None = None, fin_ml: date | datetime | None = None, fechas_mp_por_fila: Mapping[int, date | datetime | None] | None = None) -> DiagnosticoControlConsolidado:
-    return DiagnosticoControlConsolidado(diagnosticar_particion(reporte), diagnosticar_diferencias(reporte), diagnosticar_puente(reporte), diagnosticar_utilidad(reporte), diagnosticar_revisiones(reporte), diagnosticar_temporal_mp_sin_venta(reporte, inicio_ml, fin_ml, fechas_mp_por_fila))
+    return DiagnosticoControlConsolidado(diagnosticar_particion(reporte), diagnosticar_diferencias(reporte), diagnosticar_puente(reporte), diagnosticar_utilidad(reporte), diagnosticar_revisiones(reporte), diagnosticar_temporal_mp_sin_venta(reporte, inicio_ml, fin_ml, fechas_mp_por_fila), diagnosticar_cobertura_monetaria(reporte), diagnosticar_residual_ml(reporte))

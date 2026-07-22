@@ -8,6 +8,7 @@ from typing import Iterable, Any
 
 from kiki_control.domain.control_consolidado import EstadoControlConsolidado, ReporteControlConsolidado, ResultadoControlConsolidado
 from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado, motivos_datos_criticos_faltantes, tiene_datos_criticos_faltantes
+from kiki_control.presentation.formatters import formato_pesos_argentino
 
 
 @dataclass(frozen=True)
@@ -68,9 +69,11 @@ def estado_visible(estado: EstadoControlConsolidado | str) -> str:
 
 def etiqueta_selector_detalle(f: FilaControlConsolidado) -> str:
     grupo = f.grupo_orden
-    if grupo.startswith("fin:") or ":hash:" in grupo or f.clave.startswith("fin:") or ":hash:" in f.clave or grupo == f.clave:
-        return f"Movimiento MP sin orden — fila {grupo_mp_visible_desde_clave(f.clave)}"
-    return f"Orden {grupo} — {f.estado}"
+    # La etiqueta se decide por presencia real de ids_orden reflejada en el texto visible,
+    # no por comparar grupo_orden con clave_resultado.
+    if grupo and not grupo.startswith("fila MP"):
+        return f"Orden {grupo} — {f.estado}"
+    return f"Movimiento MP sin orden — fila {grupo_mp_visible_desde_clave(f.clave)}"
 
 def grupo_mp_visible_desde_clave(clave: str) -> str:
     import re
@@ -104,7 +107,14 @@ def que_revisar_visible(r: ResultadoControlConsolidado) -> str:
 def formato_importe(valor: Decimal | None) -> str:
     if valor is None:
         return "No calculado"
-    return f"$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return formato_pesos_argentino(valor).replace("-$ ", "$ -")
+
+def formato_fecha(valor: Any) -> str:
+    if valor is None:
+        return "Sin fecha"
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%d/%m/%Y")
+    return str(valor)
 
 
 def _sumar(valores: Iterable[Decimal | None]) -> Decimal:
@@ -177,7 +187,7 @@ def cobertura_tres_fuentes(ventas_ml: Iterable[Any], operaciones: Iterable[Any],
     def rango(objs, attr):
         fechas = [getattr(o, attr) for o in objs if getattr(o, attr, None) is not None]
         if not fechas: return ("Sin fechas", "Sin fechas")
-        return (min(fechas).date().isoformat(), max(fechas).date().isoformat())
+        return (formato_fecha(min(fechas).date()), formato_fecha(max(fechas).date()))
     movs = tuple(movimientos)
     sin_liq = sum(1 for m in movs if getattr(m, "fecha_liquidacion_local", None) is None)
     return (

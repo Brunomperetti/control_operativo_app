@@ -187,7 +187,7 @@ def test_integral_tres_fuentes_sintetico_en_memoria_presentacion_y_cobertura():
 
     cobertura = cobertura_tres_fuentes(ventas_ml.ventas, eccomapp.operaciones, mercado_pago.movimientos)
     assert not advertir_periodos_distintos(cobertura)
-    assert next(c for c in cobertura if c.nombre == "Liquidaciones MP").minimo == "2026-07-10"
+    assert next(c for c in cobertura if c.nombre == "Liquidaciones MP").minimo == "10/07/2026"
 
     filas = filas_tabla_consolidada(consolidado.resultados)
     tabla = tabla_consolidada(filas)
@@ -212,3 +212,23 @@ def test_ayudas_y_column_config_declaran_columnas_externas_exactas():
     ):
         assert expected in ui
     assert "column_config=_column_config_control_consolidado()" in ui
+
+def test_formato_monetario_argentino_cliente_y_fechas_ddmmaaaa():
+    from datetime import date
+    from kiki_control.presentation.control_consolidado_view import formato_fecha
+    assert formato_importe(Decimal('1234.56')) == '$ 1.234,56'
+    assert formato_fecha(date(2026, 7, 22)) == '22/07/2026'
+
+
+def test_exportaciones_consolidadas_tres_descargas_y_hojas():
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from tests.test_control_consolidado_diagnostics import r, rep, D
+    from kiki_control.exporting import generar_excepciones_consolidadas_excel, generar_reporte_consolidado_excel, generar_revisiones_consolidadas_excel
+    reporte = rep([r('a'), r('b')])
+    wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(reporte)))
+    assert wb.sheetnames == ['Resumen', 'Cobertura y universos', 'Puente de fuentes', 'Control por operación', 'Distribución temporal MP', 'Revisiones', 'Diccionario de cálculos']
+    assert load_workbook(BytesIO(generar_excepciones_consolidadas_excel(reporte))).sheetnames == ['Resumen', 'Excepciones']
+    assert load_workbook(BytesIO(generar_revisiones_consolidadas_excel(reporte))).sheetnames == ['Resumen', 'Revisiones']
+    source = open('src/kiki_control/exporting/excel.py', encoding='utf-8').read().lower()
+    assert 'float(' not in source and 'comprador' not in source and 'documento' not in source
