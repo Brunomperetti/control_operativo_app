@@ -65,6 +65,7 @@ class ResidualMercadoLibre:
     universo: str
     columnas_utilizadas: tuple[str, ...]
     importe: Decimal
+    grupos_universo_ml_oficial: int
     grupos_calculables: int
     grupos_excluidos: int
     suma_total_ars: Decimal
@@ -336,14 +337,15 @@ def diagnosticar_cobertura_monetaria(reporte: ReporteControlConsolidado) -> tupl
 
 
 def diagnosticar_residual_ml(reporte: ReporteControlConsolidado) -> ResidualMercadoLibre:
+    candidatos_ml = tuple(r for r in reporte.resultados if r.tiene_mercado_libre_oficial)
     calculables = tuple(
-        r for r in reporte.resultados
+        r for r in candidatos_ml
         if r.total_informado_ml is not None
         and r.monto_venta_ml is not None
         and r.cargo_venta_impuestos_ml is not None
         and r.costo_envio_ml is not None
     )
-    excluidos = tuple(r for r in reporte.resultados if r not in calculables)
+    excluidos = tuple(r for r in candidatos_ml if r not in calculables)
     motivos = {
         "falta Total (ARS)": 0,
         "falta Ingresos por productos (ARS)": 0,
@@ -370,6 +372,7 @@ def diagnosticar_residual_ml(reporte: ReporteControlConsolidado) -> ResidualMerc
         "universo ML oficial con los cuatro importes presentes",
         ("Total (ARS)", "Ingresos por productos (ARS)", "Cargo por venta e impuestos (ARS)", "Costos de envío (ARS)"),
         residual,
+        len(candidatos_ml),
         len(calculables),
         len(excluidos),
         suma_total,

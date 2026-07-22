@@ -140,8 +140,9 @@ def test_cobertura_residual_puente_excluidos_y_neto_mp_doble():
     assert {c.universo for c in diag.cobertura_monetaria} >= {'universo completo ML oficial', 'universo completo Eccomapp', 'universo ML–Eccomapp', 'universo ML–MP', 'universo ML–Eccomapp–MP', 'universo calculable de utilidad'}
     assert diag.utilidad.costo_eccomapp_fuera_universo_calculable == D('18560')
     assert diag.residual_ml.nombre_visible == 'Otros conceptos y ajustes ML no desagregados en este resumen'
+    assert diag.residual_ml.grupos_universo_ml_oficial == 2
     assert diag.residual_ml.grupos_calculables == 0
-    assert diag.residual_ml.grupos_excluidos == 4
+    assert diag.residual_ml.grupos_excluidos == 2
     assert diag.residual_ml.importe == D('0')
     assert len(diag.puente.grupos_excluidos_universo_triple) == 3
     assert diag.puente.aporte_excluidos_a_diferencia_ml_mp == D('20')
@@ -186,6 +187,7 @@ def test_residual_ml_solo_calcula_grupos_con_cuatro_importes_e_identidad():
     sin_cargo = con_componentes_ml(r('sin-cargo'), D('10'), D('12'), None, D('-2'))
     sin_envio = con_componentes_ml(r('sin-envio'), D('10'), D('12'), D('-1'), None)
     residual = diagnosticar_control_consolidado(rep([completo, ceros_validos, sin_total, sin_ingresos, sin_cargo, sin_envio])).residual_ml
+    assert residual.grupos_universo_ml_oficial == 6
     assert residual.grupos_calculables == 2
     assert residual.grupos_excluidos == 4
     assert residual.importe == D('0')
@@ -200,3 +202,17 @@ def test_residual_ml_solo_calcula_grupos_con_cuatro_importes_e_identidad():
     assert residual.motivos_exclusion['falta Costos de envío (ARS)'] == 1
     source = open('src/kiki_control/presentation/control_consolidado_diagnostics.py', encoding='utf-8').read()
     assert ' or _ZERO' not in source and 'float(' not in source
+
+
+def test_residual_ml_excluye_solo_mp_y_solo_eccomapp_del_universo():
+    completo = con_componentes_ml(r('ml-completo'), D('120'), D('150'), D('-20'), D('-10'))
+    faltante_ml = con_componentes_ml(r('ml-faltante'), D('10'), None, D('0'), D('0'))
+    solo_mp = r('fin:solo-mp:hash:fila:1', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('50'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(1,))
+    solo_ec = r('solo-ec', E.SIN_VENTA_OFICIAL, ml=None, mp=None, costo=D('70'), dif=None, tiene_ml=False, tiene_mp=False)
+    residual = diagnosticar_control_consolidado(rep([completo, faltante_ml, solo_mp, solo_ec])).residual_ml
+    assert residual.grupos_universo_ml_oficial == 2
+    assert residual.grupos_calculables == 1
+    assert residual.grupos_excluidos == 1
+    assert residual.grupos_calculables + residual.grupos_excluidos == residual.grupos_universo_ml_oficial
+    assert residual.motivos_exclusion['falta Ingresos por productos (ARS)'] == 1
+    assert residual.identidad_cierra_exactamente

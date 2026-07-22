@@ -253,3 +253,59 @@ def test_streamlit_y_excel_temporal_no_duplican_netos_mp_distintos():
     row = next(row for row in ws.iter_rows(min_row=2, values_only=False) if row[0].value == 'Sin fecha')
     assert row[2].value == D('100')
     assert row[3].value == D('-20')
+
+def test_excel_consolidado_usa_mismo_diagnostico_temporal_que_interfaz():
+    from datetime import date
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from tests.test_control_consolidado_diagnostics import r, rep, D, E
+    from kiki_control.exporting import generar_reporte_consolidado_excel
+    from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
+    from kiki_control.ui.streamlit_app import _fila_temporal
+
+    reporte = rep([
+        r('fin:anterior:hash:fila:1', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('10'), neto_fin=D('-1'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(1,)),
+        r('fin:dentro:hash:fila:2', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('20'), neto_fin=D('-2'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(2,)),
+        r('fin:posterior:hash:fila:3', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('30'), neto_fin=D('-3'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(3,)),
+        r('fin:sin-fecha:hash:fila:4', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('40'), neto_fin=D('-4'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(4,)),
+        r('fin:mixto:hash:fila:5', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('50'), neto_fin=D('-5'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(5, 6)),
+    ])
+    diagnostico = diagnosticar_control_consolidado(
+        reporte,
+        date(2026, 7, 10),
+        date(2026, 7, 20),
+        {1: date(2026, 7, 1), 2: date(2026, 7, 15), 3: date(2026, 7, 30), 4: None, 5: date(2026, 7, 1), 6: date(2026, 7, 30)},
+    )
+    interfaz = {
+        'Anteriores': _fila_temporal('Anteriores', diagnostico.temporal_mp_sin_venta.anteriores),
+        'Dentro': _fila_temporal('Dentro', diagnostico.temporal_mp_sin_venta.dentro),
+        'Posteriores': _fila_temporal('Posteriores', diagnostico.temporal_mp_sin_venta.posteriores),
+        'Sin fecha': _fila_temporal('Sin fecha', diagnostico.temporal_mp_sin_venta.sin_fecha),
+        'Fechas mixtas': _fila_temporal('Fechas mixtas', diagnostico.temporal_mp_sin_venta.fechas_mixtas),
+    }
+    wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico)))
+    excel = {row[0].value: row for row in wb['Distribución temporal MP'].iter_rows(min_row=2, values_only=False)}
+    for categoria in interfaz:
+        assert excel[categoria][1].value == interfaz[categoria]['Cantidad']
+        assert excel[categoria][2].value == D(interfaz[categoria]['Neto aprobado MP'].replace('$ ', '').replace('.', '').replace(',', '.'))
+        assert excel[categoria][3].value == D(interfaz[categoria]['Neto financiero total MP'].replace('$ ', '').replace('.', '').replace(',', '.'))
+    assert {excel[c][1].value for c in interfaz} == {1}
+
+
+def test_excel_residual_muestra_universo_sumas_y_no_formatea_cantidades_como_moneda():
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from tests.test_control_consolidado_diagnostics import r, rep, D, con_componentes_ml
+    from kiki_control.exporting import generar_reporte_consolidado_excel
+    reporte = rep([con_componentes_ml(r('ml'), D('120'), D('150'), D('-20'), D('-10'))])
+    wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(reporte)))
+    ws = wb['Puente de fuentes']
+    filas = {row[0].value: row[1] for row in ws.iter_rows(min_row=2, values_only=False)}
+    assert filas['Universo ML oficial'].value == 1
+    assert '$' not in filas['Universo ML oficial'].number_format
+    assert filas['Suma Total (ARS)'].value == D('120')
+    assert '$' in filas['Suma Total (ARS)'].number_format
+    assert filas['Identidad residual ML cierra'].value == 'Sí'
+    assert '$' not in filas['Identidad residual ML cierra'].number_format
+    diccionario = wb['Diccionario de cálculos']
+    assert any(row[2].value == 'universo ML oficial con los cuatro importes presentes' for row in diccionario.iter_rows(min_row=2))

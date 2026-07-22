@@ -478,8 +478,13 @@ def _mostrar_resultados() -> None:
         "Nombre visible": diagnostico.residual_ml.nombre_visible, "Fórmula": diagnostico.residual_ml.formula,
         "Importe": formato_importe(diagnostico.residual_ml.importe), "Universo": diagnostico.residual_ml.universo,
         "Columnas utilizadas": ", ".join(diagnostico.residual_ml.columnas_utilizadas),
+        "Universo ML oficial": diagnostico.residual_ml.grupos_universo_ml_oficial,
         "Grupos calculables": diagnostico.residual_ml.grupos_calculables,
         "Grupos excluidos": diagnostico.residual_ml.grupos_excluidos,
+        "Suma Total (ARS)": formato_importe(diagnostico.residual_ml.suma_total_ars),
+        "Suma Ingresos por productos (ARS)": formato_importe(diagnostico.residual_ml.suma_ingresos_productos),
+        "Suma Cargo por venta e impuestos (ARS)": formato_importe(diagnostico.residual_ml.suma_cargo_venta_impuestos),
+        "Suma Costos de envío (ARS)": formato_importe(diagnostico.residual_ml.suma_costos_envio),
         "Motivos de exclusión": "; ".join(f"{k}: {v}" for k, v in diagnostico.residual_ml.motivos_exclusion.items() if v),
         "Identidad": "suma Total (ARS) = suma Ingresos por productos + suma Cargos e impuestos + suma Costos de envío + residual",
         "Cierra": "Sí" if diagnostico.residual_ml.identidad_cierra_exactamente else "No",
@@ -502,7 +507,7 @@ def _mostrar_resultados() -> None:
             "Grupo": g.grupo, "Motivo": g.motivo, "Neto ML": formato_importe(g.neto_ml), "Neto Eccomapp": formato_importe(g.neto_eccomapp),
             "Neto aprobado MP": formato_importe(g.neto_aprobado_mp), "Aporte MP − ML": formato_importe(g.aporte_diferencia_ml_mp),
         } for g in diagnostico.puente.grupos_excluidos_universo_triple])
-    if not (diagnostico.particion.cierra_exactamente and diagnostico.diferencias.identidad_cierra_exactamente and diagnostico.puente.identidad_cierra_exactamente and diagnostico.utilidad.motivos_cierran_exactamente and diagnostico.utilidad.identidad_cierra_exactamente and diagnostico.temporal_mp_sin_venta.particion_cierra_exactamente):
+    if not (diagnostico.particion.cierra_exactamente and diagnostico.diferencias.identidad_cierra_exactamente and diagnostico.puente.identidad_cierra_exactamente and diagnostico.utilidad.motivos_cierran_exactamente and diagnostico.utilidad.identidad_cierra_exactamente and diagnostico.temporal_mp_sin_venta.particion_cierra_exactamente and diagnostico.residual_ml.identidad_cierra_exactamente):
         st.error("Error de consistencia: al menos una identidad de diagnóstico no cierra exactamente. Revisar partición, diferencias, puente, utilidad o temporalidad antes de confiar en el bloque afectado.")
     st.subheader("Movimientos MP sin venta oficial: distribución temporal")
     st.caption(diagnostico.temporal_mp_sin_venta.aclaracion)
@@ -553,7 +558,7 @@ def _mostrar_resultados() -> None:
     st.header("Descargas consolidadas")
     mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     d1, d2, d3 = st.columns(3)
-    d1.download_button("Reporte consolidado de tres fuentes", data=generar_reporte_consolidado_excel(reporte), file_name=_nombre_descarga("reporte_consolidado_tres_fuentes"), mime=mime)
+    d1.download_button("Reporte consolidado de tres fuentes", data=generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico), file_name=_nombre_descarga("reporte_consolidado_tres_fuentes"), mime=mime)
     d2.download_button("Excepciones del control consolidado", data=generar_excepciones_consolidadas_excel(reporte), file_name=_nombre_descarga("excepciones_control_consolidado"), mime=mime)
     d3.download_button("Revisiones consolidadas", data=generar_revisiones_consolidadas_excel(reporte), file_name=_nombre_descarga("revisiones_consolidadas"), mime=mime)
 

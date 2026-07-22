@@ -16,7 +16,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from kiki_control.domain.control_consolidado import ReporteControlConsolidado, ResultadoControlConsolidado
 from kiki_control.domain.reconciliation import ReporteConciliacion, ResultadoConciliacion
-from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
+from kiki_control.presentation.control_consolidado_diagnostics import DiagnosticoControlConsolidado, diagnosticar_control_consolidado
 from kiki_control.presentation.review_cases import caso_a_fila, clasificar_revisiones
 from kiki_control.presentation.reconciliation_view import (
     CoberturaArchivosPresentacion,
@@ -268,9 +268,9 @@ COLUMNAS_CONTROL_CONSOLIDADO = (
 )
 
 
-def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado) -> bytes:
+def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagnostico: DiagnosticoControlConsolidado | None = None) -> bytes:
     wb = Workbook(); ws = wb.active; ws.title = "Resumen"
-    diag = diagnosticar_control_consolidado(reporte)
+    diag = diagnostico or diagnosticar_control_consolidado(reporte)
     _escribir_resumen_consolidado(ws, reporte, TIPO_CONSOLIDADO_TRES_FUENTES)
     _escribir_cobertura_consolidada(wb.create_sheet("Cobertura y universos"), diag)
     _escribir_puente_consolidado(wb.create_sheet("Puente de fuentes"), diag)
@@ -317,18 +317,33 @@ def _escribir_puente_consolidado(ws: Worksheet, diag: Any) -> None:
     ws.append(["Concepto", "Valor"])
     p = diag.puente
     residual = diag.residual_ml
+    filas_monetarias = set()
     for fila in (("Neto ML", p.neto_oficial_ml), ("Neto Eccomapp", p.neto_informado_eccomapp), ("Neto aprobado MP", p.neto_aprobado_mp), ("Eccomapp − ML", p.eccomapp_menos_ml), ("MP − Eccomapp", p.mp_menos_eccomapp), ("MP − ML", p.mp_menos_ml), ("Aporte excluidos a diferencia ML–MP", p.aporte_excluidos_a_diferencia_ml_mp)):
         ws.append(list(fila))
+        filas_monetarias.add(ws.max_row)
     for fila in (
         ("Residual ML", residual.importe),
+        ("Universo ML oficial", residual.grupos_universo_ml_oficial),
         ("Grupos calculables residual ML", residual.grupos_calculables),
         ("Grupos excluidos residual ML", residual.grupos_excluidos),
+        ("Suma Total (ARS)", residual.suma_total_ars),
+        ("Suma Ingresos por productos (ARS)", residual.suma_ingresos_productos),
+        ("Suma Cargo por venta e impuestos (ARS)", residual.suma_cargo_venta_impuestos),
+        ("Suma Costos de envío (ARS)", residual.suma_costos_envio),
         ("Identidad residual ML cierra", "Sí" if residual.identidad_cierra_exactamente else "No"),
         ("Motivos exclusión residual ML", "; ".join(f"{k}: {v}" for k, v in residual.motivos_exclusion.items() if v)),
     ):
         ws.append(list(fila))
+        if fila[0] in {"Residual ML", "Suma Total (ARS)", "Suma Ingresos por productos (ARS)", "Suma Cargo por venta e impuestos (ARS)", "Suma Costos de envío (ARS)"}:
+            filas_monetarias.add(ws.max_row)
     ws.append(["Advertencia", "No comparar importes de universos distintos sin revisar Cobertura y universos."])
-    _formatear_tabla(ws, moneda_columnas={2}, wrap_columnas={2}, freeze=False)
+    ws.append(["Aclaración temporal", "Si se genera sin diagnóstico de sesión, la distribución temporal no puede clasificar contra período ML ni fechas MP y queda sin fecha."])
+    _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2}, freeze=False)
+    for row_idx in filas_monetarias:
+        ws.cell(row=row_idx, column=2).number_format = _FORMATO_MONEDA_ARS
+    for row in range(2, ws.max_row + 1):
+        if row not in filas_monetarias and isinstance(ws.cell(row=row, column=2).value, int):
+            ws.cell(row=row, column=2).number_format = "0"
 
 
 def _escribir_control_consolidado(ws: Worksheet, resultados: Iterable[ResultadoControlConsolidado]) -> None:
@@ -356,7 +371,7 @@ def _escribir_diccionario_consolidado(ws: Worksheet) -> None:
     ws.append(["Cálculo", "Fórmula", "Universo", "Columnas utilizadas"])
     filas = [
         ("Utilidad preliminar", "Total (ARS) ML - Costo Total (Con IVA) Eccomapp", "universo calculable de utilidad", "Total (ARS); Costo Total (Con IVA) ($)"),
-        ("Otros conceptos y ajustes ML no desagregados en este resumen", "Total (ARS) - (Ingresos por productos (ARS) + Cargo por venta e impuestos (ARS) + Costos de envío (ARS))", "universo completo ML oficial", "Total (ARS); Ingresos por productos (ARS); Cargo por venta e impuestos (ARS); Costos de envío (ARS)"),
+        ("Otros conceptos y ajustes ML no desagregados en este resumen", "Total (ARS) - (Ingresos por productos (ARS) + Cargo por venta e impuestos (ARS) + Costos de envío (ARS))", "universo ML oficial con los cuatro importes presentes", "Total (ARS); Ingresos por productos (ARS); Cargo por venta e impuestos (ARS); Costos de envío (ARS)"),
         ("MP − ML", "Neto aprobado MP - Neto ML", "universo ML–Eccomapp–MP para puente triple", "Total (ARS); neto Eccomapp; movimientos aprobados MP"),
     ]
     for fila in filas: ws.append([_texto_seguro(x) for x in fila])
