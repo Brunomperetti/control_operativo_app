@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Iterable, Any
 
-from kiki_control.domain.control_consolidado import ReporteControlConsolidado, ResultadoControlConsolidado
+from kiki_control.domain.control_consolidado import EstadoControlConsolidado, ReporteControlConsolidado, ResultadoControlConsolidado
+from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado, motivos_datos_criticos_faltantes, tiene_datos_criticos_faltantes
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,62 @@ class FilaControlConsolidado:
     requiere_revision: str
     tiene_diferencia: bool
     tiene_datos_faltantes: bool
+    motivo_principal: str = ""
+    que_revisar: str = ""
 
+
+
+_ESTADOS_VISIBLES = {
+    EstadoControlConsolidado.COMPLETA: "Completo",
+    EstadoControlConsolidado.CON_DIFERENCIA: "Con diferencia",
+    EstadoControlConsolidado.SIN_VENTA_OFICIAL: "Sin venta oficial",
+    EstadoControlConsolidado.SIN_COSTO_PRODUCTO: "Sin costo de producto",
+    EstadoControlConsolidado.SIN_MOVIMIENTO_FINANCIERO: "Sin movimiento de Mercado Pago",
+    EstadoControlConsolidado.SOLO_MOVIMIENTO_FINANCIERO: "Solo movimiento de Mercado Pago",
+    EstadoControlConsolidado.EN_REVISION_FINANCIERA: "En revisión financiera",
+    EstadoControlConsolidado.DUPLICADA_O_AMBIGUA: "Duplicado o ambiguo",
+}
+
+def estado_visible(estado: EstadoControlConsolidado | str) -> str:
+    try:
+        return _ESTADOS_VISIBLES[EstadoControlConsolidado(estado)]
+    except Exception:
+        return str(estado).replace("_", " ").capitalize()
+
+def etiqueta_selector_detalle(f: FilaControlConsolidado) -> str:
+    grupo = f.grupo_orden
+    if grupo.startswith("fin:") or ":hash:" in grupo or f.clave.startswith("fin:") or ":hash:" in f.clave or grupo == f.clave:
+        return f"Movimiento MP sin orden — fila {grupo_mp_visible_desde_clave(f.clave)}"
+    return f"Orden {grupo} — {f.estado}"
+
+def grupo_mp_visible_desde_clave(clave: str) -> str:
+    import re
+    m = re.search(r"fila:?(\d+)|:(\d+)$", clave)
+    return next((g for g in (m.groups() if m else ()) if g), "sin identificar")
+
+def motivo_principal_visible(r: ResultadoControlConsolidado) -> str:
+    motivos_criticos = motivos_datos_criticos_faltantes(r)
+    if motivos_criticos:
+        return "; ".join(motivos_criticos)
+    if r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia:
+        return "Diferencia pendiente de clasificación contable"
+    if not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago):
+        return "Fuente faltante"
+    if r.requiere_revision:
+        return "Revisión del control consolidado"
+    return "Sin motivo de revisión"
+
+def que_revisar_visible(r: ResultadoControlConsolidado) -> str:
+    motivo = motivo_principal_visible(r)
+    if "Total (ARS)" in motivo or "Costo de producto" in motivo or "Sin neto aprobado" in motivo:
+        return "Completar o revisar el dato crítico indicado sin mezclarlo con devoluciones, reclamos o movimientos de fondos."
+    if motivo == "Diferencia pendiente de clasificación contable":
+        return "Comparar Neto oficial ML, neto Eccomapp y neto aprobado MP sin asumir causa."
+    if motivo == "Fuente faltante":
+        return "Verificar cobertura de archivos y si el grupo pertenece al período cargado."
+    if motivo == "Revisión del control consolidado":
+        return "Revisar indicadores financieros y trazabilidad técnica."
+    return "No requiere acción visible."
 
 def formato_importe(valor: Decimal | None) -> str:
     if valor is None:
@@ -97,13 +153,14 @@ def kpis_consolidados(reporte: ReporteControlConsolidado) -> dict[str, list[Kpi]
         "Bloque B — Comparación financiera": [
             Kpi("Neto ML comparable", formato_importe(_sumar(r.total_informado_ml for r in comparables)), "Fuente: Mercado Libre oficial. Campo interno: total_informado_ml. Columna utilizada: Total (ARS). Universo: solo resultados donde también existe neto_aprobado_mp. Informado directamente por la fuente." + ayuda_limite),
             Kpi("Neto MP comparable", formato_importe(_sumar(r.neto_aprobado_mp for r in comparables)), "Fuente: Mercado Pago. Campo: neto_aprobado_mp. Columna: MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO. Universo: mismos resultados comparables con ML." + ayuda_limite),
-            Kpi("Diferencia comparable ML–MP", formato_importe(_sumar(r.diferencia_ml_mp for r in comparables)), "Fórmula: suma de diferencia_ml_mp en resultados comparables; no mezcla movimientos MP sin ML ni PAYOUT." + ayuda_limite),
+            Kpi("Grupos comparables con diferencia ML–MP", str(diagnosticar_control_consolidado(reporte).diferencias.con_diferencia_ml_mp), "Cuenta resultados comparables donde Total (ARS) ML y neto aprobado MP existen y abs(diferencia_ml_mp) supera la tolerancia. No usa total_con_diferencia porque ese es un estado principal." + ayuda_limite),
+            Kpi("Diferencia comparable ML–MP", formato_importe(diagnosticar_control_consolidado(reporte).diferencias.suma_diferencia_ml_mp), "Identidad validada: suma_diferencia_ml_mp = suma_neto_mp_comparable - suma_neto_ml_comparable." + ayuda_limite),
             Kpi("Neto MP sin venta oficial asociada", formato_importe(_sumar(r.neto_aprobado_mp for r in resultados if r.neto_aprobado_mp is not None and not r.tiene_mercado_libre_oficial)), "Fuente: Mercado Pago. Universo: movimientos no encontrados en el archivo de ventas oficiales cargado." + ayuda_limite),
         ],
         "Bloque C — Costos y utilidad": [
             Kpi("Costo de productos Eccomapp", formato_importe(_sumar(r.costo_productos_eccomapp for r in resultados)), "Fuente: Eccomapp. Campo: costo_productos_eccomapp. Columna: Costo Total (Con IVA) ($). Universo: resultados con Eccomapp." + ayuda_limite),
             Kpi("Utilidad preliminar calculable", formato_importe(_sumar(r.utilidad_preliminar_control for r in utilidad_calc)), "Fórmula: Total (ARS) ML oficial menos Costo Total (Con IVA) Eccomapp, solo donde ambos existen." + ayuda_limite),
-            Kpi("Cobertura de utilidad", f"{len(utilidad_calc)} de {len(resultados)} grupos con los datos necesarios", "Universo: grupos consolidados. Requiere venta oficial ML y costo de producto Eccomapp." + ayuda_limite),
+            Kpi("Cobertura de utilidad", f"{len(utilidad_calc)} de {len(resultados)}", "Universo: grupos consolidados. Requiere venta oficial ML y costo de producto Eccomapp." + ayuda_limite),
         ],
         "Bloque D — Calidad y pendientes": [
             Kpi("Resultados completos", str(reporte.total_completa), "Resultados con fuentes y comparaciones suficientes según el dominio."),
@@ -141,11 +198,21 @@ def advertir_periodos_distintos(cobertura: tuple[CoberturaFuente, ...]) -> bool:
     return len(rangos) > 1
 
 
+def grupo_visible(r: ResultadoControlConsolidado) -> str:
+    if r.id_grupo_canonico:
+        return r.id_grupo_canonico
+    if r.ids_orden:
+        return ", ".join(r.ids_orden)
+    if r.filas_origen_mp:
+        return f"fila MP {', '.join(str(n) for n in r.filas_origen_mp)}"
+    return r.clave_resultado
+
+
 def filas_tabla_consolidada(resultados: Iterable[ResultadoControlConsolidado]) -> list[FilaControlConsolidado]:
     filas=[]
     for r in resultados:
         faltan = not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago)
-        filas.append(FilaControlConsolidado(r.clave_resultado, r.id_grupo_canonico or ", ".join(r.ids_orden) or r.clave_resultado, r.estado.value.replace("_"," ").title(), r.estado.value, fuentes_disponibles(r), formato_importe(r.monto_venta_ml), formato_importe(r.cargo_venta_impuestos_ml), formato_importe(r.costo_envio_ml), formato_importe(r.total_informado_ml), formato_importe(r.costo_productos_eccomapp), formato_importe(r.neto_aprobado_mp), formato_importe(r.neto_financiero_total_mp), formato_importe(r.diferencia_ml_mp), formato_importe(r.utilidad_preliminar_control), "Sí" if r.requiere_revision else "No", r.diferencia_ml_mp not in (None, Decimal("0")), faltan))
+        filas.append(FilaControlConsolidado(r.clave_resultado, grupo_visible(r), estado_visible(r.estado), r.estado.value, fuentes_disponibles(r), formato_importe(r.monto_venta_ml), formato_importe(r.cargo_venta_impuestos_ml), formato_importe(r.costo_envio_ml), formato_importe(r.total_informado_ml), formato_importe(r.costo_productos_eccomapp), formato_importe(r.neto_aprobado_mp), formato_importe(r.neto_financiero_total_mp), formato_importe(r.diferencia_ml_mp), formato_importe(r.utilidad_preliminar_control), "Sí" if r.requiere_revision else "No", r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia, faltan or tiene_datos_criticos_faltantes(r), motivo_principal_visible(r), que_revisar_visible(r)))
     return filas
 
 
@@ -163,14 +230,14 @@ def filtrar_filas_consolidadas(filas, estados:set[str], busqueda:str, solo_revis
 
 
 def tabla_consolidada(filas):
-    return [f.__dict__ | {"Grupo u orden": f.grupo_orden, "Estado": f.estado, "Fuentes disponibles": f.fuentes_disponibles, "Venta ML oficial": f.venta_ml_oficial, "Cargos e impuestos ML": f.cargos_impuestos_ml, "Costo envío ML": f.costo_envio_ml, "Neto esperado ML": f.neto_esperado_ml, "Costo productos": f.costo_productos, "Neto aprobado MP": f.neto_aprobado_mp, "Neto financiero total MP": f.neto_financiero_total_mp, "Diferencia ML–MP": f.diferencia_ml_mp, "Utilidad preliminar": f.utilidad_preliminar, "Requiere revisión": f.requiere_revision} for f in filas]
+    return [f.__dict__ | {"Grupo u orden": f.grupo_orden, "Estado": f.estado, "Fuentes disponibles": f.fuentes_disponibles, "Venta ML oficial": f.venta_ml_oficial, "Cargos e impuestos ML": f.cargos_impuestos_ml, "Costo envío ML": f.costo_envio_ml, "Neto esperado ML": f.neto_esperado_ml, "Costo productos": f.costo_productos, "Neto aprobado MP": f.neto_aprobado_mp, "Neto financiero total MP": f.neto_financiero_total_mp, "Diferencia ML–MP": f.diferencia_ml_mp, "Utilidad preliminar": f.utilidad_preliminar, "Requiere revisión": f.requiere_revision, "Motivo principal": f.motivo_principal, "Qué revisar": f.que_revisar} for f in filas]
 
 
 def detalle_control(r: ResultadoControlConsolidado) -> dict[str, str]:
     return {
-        "Grupo": r.id_grupo_canonico or "No informado",
+        "Grupo": grupo_visible(r),
         "Órdenes": ", ".join(r.ids_orden) or "No informado",
-        "Estado": r.estado.value,
+        "Estado": estado_visible(r.estado),
         "Fuentes presentes": fuentes_disponibles(r),
         "Venta ML oficial": formato_importe(r.monto_venta_ml),
         "Cargos e impuestos ML": formato_importe(r.cargo_venta_impuestos_ml),

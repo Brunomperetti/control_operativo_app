@@ -73,7 +73,7 @@ def test_kpis_comparables_utilidad_parcial_y_mp_sin_ml():
     assert b["Diferencia comparable ML–MP"] == "$ -10,00"
     assert b["Neto MP sin venta oficial asociada"] == "$ 30,00"
     assert b["Utilidad preliminar calculable"] == "$ 60,00"
-    assert b["Cobertura de utilidad"] == "1 de 3 grupos con los datos necesarios"
+    assert b["Cobertura de utilidad"] == "1 de 3"
 
 
 def test_integral_tres_fuentes_sintetico_en_memoria_presentacion_y_cobertura():

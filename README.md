@@ -354,3 +354,25 @@ La vista consolidada incluye:
 - **Auditoría de conciliación Eccomapp–Mercado Pago**, separada del nuevo consolidado; las descargas Excel actuales corresponden todavía a esa auditoría histórica.
 
 Privacidad y límites: la app no persiste archivos originales, no muestra datos personales ni contenido crudo, conserva signos negativos y usa lenguaje prudente. Los resultados son controles operativos informados por las fuentes y no constituyen resultado contable o fiscal definitivo. La exportación Excel consolidada todavía no está implementada.
+
+## Diagnóstico auditable del control consolidado
+
+El proyecto incluye una capa pura de diagnóstico para el control consolidado de Mercado Libre oficial, Eccomapp y Mercado Pago: `src/kiki_control/presentation/control_consolidado_diagnostics.py`. Esta capa no depende de Streamlit ni de DataFrames y usa `Decimal` para reconciliar importes.
+
+### Universos e identidades
+
+- **Partición primaria:** `total_resultados` debe ser igual a completos + con diferencia como estado principal + sin venta oficial + sin costo producto + sin movimiento financiero + solo movimiento financiero + en revisión financiera + duplicados o ambiguos.
+- **Diferencia real ML–MP:** cuenta grupos comparables donde existen `total_informado_ml` y `neto_aprobado_mp`, y `abs(diferencia_ml_mp)` supera la tolerancia. No depende de `total_con_diferencia`, porque ese campo es un estado principal.
+- **Identidad comparable:** `suma_diferencia_ml_mp = suma_neto_mp_comparable - suma_neto_ml_comparable`.
+- **Puente de fuentes:** separa venta comercial, neto esperado y puente financiero; valida `MP − ML = (MP − Eccomapp) + (Eccomapp − ML)`.
+- **Cobertura de utilidad:** calcula solo cuando existen `total_informado_ml` y `costo_productos_eccomapp`; valida `utilidad_preliminar = neto ML del universo - costo de productos del universo` y separa costo Eccomapp excluido.
+
+La interfaz muestra estados en español, motivos visibles y acciones sugeridas; claves técnicas, hashes y motivos internos quedan restringidos a **Trazabilidad técnica**. Las revisiones consolidadas de tres fuentes se presentan separadas de la auditoría histórica Eccomapp–Mercado Pago, porque sus universos no son comparables directamente.
+
+### Cero, netos MP y temporalidad
+
+En el diagnóstico consolidado, cero es dato válido: `Decimal("0")` no se interpreta como ausencia. Las selecciones entre `neto_financiero_total_mp`, `neto_aprobado_mp` y cero explícito se hacen con `is None` para conservar movimientos financieros de importe cero.
+
+`neto_aprobado_mp` identifica pagos aprobados comparables; `neto_financiero_total_mp` conserva el impacto total de movimientos financieros que pueden ser devoluciones, reclamos, disputas, PAYOUT o movimientos de fondos. Por eso un caso MP sin neto aprobado no se marca automáticamente como dato crítico faltante si tiene neto financiero total válido o indicadores financieros legítimos.
+
+La app muestra la distribución temporal de movimientos MP sin venta oficial en categorías mutuamente excluyentes: anteriores, dentro, posteriores, sin fecha y fechas mixtas. La categoría fechas mixtas evita elegir silenciosamente la primera fecha cuando un grupo incluye movimientos de distintos períodos.
