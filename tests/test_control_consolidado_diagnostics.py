@@ -121,7 +121,7 @@ def test_selector_usa_ids_orden_reales_y_no_compara_claves():
     con_orden = r('fin:hash:fila:99', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('10'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(99,))
     # simula un resultado cuya clave técnica parece financiera pero el texto visible trae ID de orden real
     fila = filas_tabla_consolidada([con_orden])[0]
-    fila = fila.__class__(fila.clave, '123456789', fila.estado, fila.estado_codigo, fila.fuentes_disponibles, fila.venta_ml_oficial, fila.cargos_impuestos_ml, fila.costo_envio_ml, fila.neto_esperado_ml, fila.costo_productos, fila.neto_aprobado_mp, fila.neto_financiero_total_mp, fila.diferencia_ml_mp, fila.utilidad_preliminar, fila.requiere_revision, fila.tiene_diferencia, fila.tiene_datos_faltantes, fila.motivo_principal, fila.que_revisar)
+    fila = fila.__class__(fila.clave, fila.grupo_orden, fila.estado, fila.estado_codigo, fila.fuentes_disponibles, fila.venta_ml_oficial, fila.cargos_impuestos_ml, fila.costo_envio_ml, fila.neto_esperado_ml, fila.costo_productos, fila.neto_aprobado_mp, fila.neto_financiero_total_mp, fila.diferencia_ml_mp, fila.utilidad_preliminar, fila.requiere_revision, fila.tiene_diferencia, fila.tiene_datos_faltantes, fila.motivo_principal, fila.que_revisar, ('123456789',), fila.filas_origen_mp)
     assert etiqueta_selector_detalle(fila) == 'Orden 123456789 — Solo movimiento de Mercado Pago'
     sin_orden = filas_tabla_consolidada([r('fin:x:hash:fila:7', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('1'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(7,))])[0]
     assert etiqueta_selector_detalle(sin_orden) == 'Movimiento MP sin orden — fila 7'

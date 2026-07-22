@@ -47,6 +47,8 @@ class FilaControlConsolidado:
     tiene_datos_faltantes: bool
     motivo_principal: str = ""
     que_revisar: str = ""
+    ids_orden: tuple[str, ...] = ()
+    filas_origen_mp: tuple[int, ...] = ()
 
 
 
@@ -68,12 +70,10 @@ def estado_visible(estado: EstadoControlConsolidado | str) -> str:
         return str(estado).replace("_", " ").capitalize()
 
 def etiqueta_selector_detalle(f: FilaControlConsolidado) -> str:
-    grupo = f.grupo_orden
-    # La etiqueta se decide por presencia real de ids_orden reflejada en el texto visible,
-    # no por comparar grupo_orden con clave_resultado.
-    if grupo and not grupo.startswith("fila MP"):
-        return f"Orden {grupo} — {f.estado}"
-    return f"Movimiento MP sin orden — fila {grupo_mp_visible_desde_clave(f.clave)}"
+    if f.ids_orden:
+        return f"Orden {', '.join(f.ids_orden)} — {f.estado}"
+    fila = f.filas_origen_mp[0] if f.filas_origen_mp else grupo_mp_visible_desde_clave(f.clave)
+    return f"Movimiento MP sin orden — fila {fila}"
 
 def grupo_mp_visible_desde_clave(clave: str) -> str:
     import re
@@ -222,7 +222,29 @@ def filas_tabla_consolidada(resultados: Iterable[ResultadoControlConsolidado]) -
     filas=[]
     for r in resultados:
         faltan = not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago)
-        filas.append(FilaControlConsolidado(r.clave_resultado, grupo_visible(r), estado_visible(r.estado), r.estado.value, fuentes_disponibles(r), formato_importe(r.monto_venta_ml), formato_importe(r.cargo_venta_impuestos_ml), formato_importe(r.costo_envio_ml), formato_importe(r.total_informado_ml), formato_importe(r.costo_productos_eccomapp), formato_importe(r.neto_aprobado_mp), formato_importe(r.neto_financiero_total_mp), formato_importe(r.diferencia_ml_mp), formato_importe(r.utilidad_preliminar_control), "Sí" if r.requiere_revision else "No", r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia, faltan or tiene_datos_criticos_faltantes(r), motivo_principal_visible(r), que_revisar_visible(r)))
+        filas.append(FilaControlConsolidado(
+            r.clave_resultado,
+            grupo_visible(r),
+            estado_visible(r.estado),
+            r.estado.value,
+            fuentes_disponibles(r),
+            formato_importe(r.monto_venta_ml),
+            formato_importe(r.cargo_venta_impuestos_ml),
+            formato_importe(r.costo_envio_ml),
+            formato_importe(r.total_informado_ml),
+            formato_importe(r.costo_productos_eccomapp),
+            formato_importe(r.neto_aprobado_mp),
+            formato_importe(r.neto_financiero_total_mp),
+            formato_importe(r.diferencia_ml_mp),
+            formato_importe(r.utilidad_preliminar_control),
+            "Sí" if r.requiere_revision else "No",
+            r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia,
+            faltan or tiene_datos_criticos_faltantes(r),
+            motivo_principal_visible(r),
+            que_revisar_visible(r),
+            r.ids_orden,
+            r.filas_origen_mp,
+        ))
     return filas
 
 

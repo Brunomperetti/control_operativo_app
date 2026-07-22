@@ -14,7 +14,9 @@ from openpyxl.cell.cell import Cell
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
+from kiki_control.domain.control_consolidado import ReporteControlConsolidado, ResultadoControlConsolidado
 from kiki_control.domain.reconciliation import ReporteConciliacion, ResultadoConciliacion
+from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
 from kiki_control.presentation.review_cases import caso_a_fila, clasificar_revisiones
 from kiki_control.presentation.reconciliation_view import (
     CoberturaArchivosPresentacion,
@@ -256,9 +258,6 @@ def _escribir_revisiones(ws: Worksheet, casos: Iterable[Any]) -> None:
             _texto_seguro(", ".join(caso.columnas_utilizadas)),
         ])
     _formatear_tabla(ws, moneda_columnas={6, 7, 8}, wrap_columnas={4, 5, 11}, freeze=True)
-
-from kiki_control.domain.control_consolidado import ReporteControlConsolidado, ResultadoControlConsolidado
-from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
 
 TIPO_CONSOLIDADO_TRES_FUENTES = "Reporte consolidado de tres fuentes"
 TIPO_EXCEPCIONES_CONSOLIDADAS = "Excepciones del control consolidado"
