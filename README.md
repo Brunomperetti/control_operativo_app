@@ -295,3 +295,33 @@ Limitaciones actuales:
 - No calcula utilidad, resultado operativo, comisiones, impuestos, envío ni netos financieros.
 - No modifica la conciliación financiera existente ni las exportaciones.
 - La UI todavía utiliza el flujo de archivos existente y no expone esta vinculación comercial como pantalla nueva.
+
+## Motor consolidado de control financiero de tres fuentes
+
+La API pública `consolidar_control_financiero(reporte_comercial, reporte_financiero)` genera un `ReporteControlConsolidado` inmutable a partir de:
+
+1. `ReporteVinculacionComercial`, producido por `vincular_ventas_oficiales_con_eccomapp(...)` entre Mercado Libre oficial y Eccomapp.
+2. `ReporteConciliacion`, producido por el motor de conciliación Mercado Pago existente.
+
+El motor es puro: trabaja con dataclasses en memoria, no lee archivos, no usa DataFrames y no depende de Streamlit, pandas ni openpyxl. En esta etapa no hay UI, exportación Excel ni persistencia para el consolidado.
+
+### Responsabilidad de fuentes
+
+- **Mercado Libre oficial**: fuente primaria de monto de venta (`Ingresos por productos (ARS)`), cargo por venta e impuestos, ingresos y costos de envío, descuentos, anulaciones y `Total (ARS)`. El `Total (ARS)` se conserva como informado y no se reconstruye.
+- **Eccomapp**: fuente primaria de costo de productos por suma de `costo_total_con_iva`. También conserva como diagnóstico `monto_venta`, `costo_envio_vendedor`, `monto_neto_mercado_pago_informado` y `utilidad_neta_informada`.
+- **Mercado Pago**: fuente financiera de neto aprobado MP, neto financiero total, impactos de envíos, devoluciones, reclamos/disputas, otros movimientos e indicadores financieros.
+
+### Fórmulas permitidas
+
+- `diferencia_venta_ml_eccomapp = monto_venta_ml - monto_venta_eccomapp_informado`.
+- `diferencia_neto_ml_eccomapp = total_informado_ml - neto_mp_eccomapp_informado`.
+- `diferencia_ml_mp = neto_aprobado_mp - total_informado_ml`; positivo significa que MP informa más que ML, negativo significa que informa menos.
+- `utilidad_preliminar_control = total_informado_ml - costo_productos_eccomapp`.
+
+Todas las fórmulas usan `Decimal`, solo se calculan cuando existen ambos operandos y no constituyen resultado contable o fiscal definitivo. No se calculan IVA, IIBB, retenciones ni percepciones.
+
+### Unión y estados
+
+La unión con Mercado Pago es solo por `id_orden`; no se usan fecha, importe, SKU, producto ni aproximaciones. Los movimientos sin orden, los financieros sin grupo comercial y los PAYOUT quedan como resultados financieros independientes. La prioridad de estados es: `DUPLICADA_O_AMBIGUA`, `SOLO_MOVIMIENTO_FINANCIERO`, `SIN_VENTA_OFICIAL`, `SIN_COSTO_PRODUCTO`, `SIN_MOVIMIENTO_FINANCIERO`, `EN_REVISION_FINANCIERA`, `CON_DIFERENCIA`, `COMPLETA`.
+
+El reporte valida hashes compatibles entre Eccomapp y conciliación financiera, y garantiza partición exacta: cada resultado comercial y cada resultado financiero de entrada aparece exactamente una vez.

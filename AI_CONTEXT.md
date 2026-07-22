@@ -237,3 +237,17 @@ El reporte debe conservar una partición exacta de registros: cada venta oficial
 Estados creados: `VINCULADA`, `VINCULADA_CON_OBSERVACIONES`, `SOLO_MERCADO_LIBRE`, `SOLO_ECCOMAPP`, `AMBIGUA` y `DUPLICADA`. Métodos: `ID_CARRITO`, `ID_ORDER`, `ID_ORDER_DENTRO_DE_CARRITO` y `SIN_VINCULO`. SKU: `COINCIDE`, `NO_DISPONIBLE_EN_AMBAS`, `FALTA_EN_MERCADO_LIBRE`, `FALTA_EN_ECCOMAPP` y `DIFIERE`.
 
 Esta etapa no incorpora Mercado Pago, no modifica el motor de conciliación financiera, no recalcula utilidad, no cambia Streamlit, no cambia exportaciones y no altera fórmulas. Los tests deben ser sintéticos, sin archivos reales ni datos personales.
+
+## Actualización: motor consolidado de control financiero de tres fuentes
+
+Existe una API pública pura de dominio: `consolidar_control_financiero(reporte_comercial: ReporteVinculacionComercial, reporte_financiero: ReporteConciliacion) -> ReporteControlConsolidado`. Reutiliza la vinculación comercial ML oficial / Eccomapp y el reporte de conciliación Mercado Pago; no lee archivos, no usa DataFrames y no depende de Streamlit, pandas ni openpyxl.
+
+Jerarquía oficial: Mercado Libre oficial es fuente primaria de importes de venta, cargos, envíos, descuentos, anulaciones y `Total (ARS)`; Eccomapp es fuente primaria de costo de productos y conserva sus importes informados como diagnóstico; Mercado Pago es fuente financiera para neto aprobado MP, neto financiero total, impactos e indicadores. El `Total (ARS)` de Mercado Libre nunca se reconstruye ni se reemplaza por fórmulas propias.
+
+La unión con Mercado Pago es exclusivamente por `id_orden`. No se debe unir por fecha, importe, SKU, producto ni aproximación. Si un ID Order es ambiguo entre resultados comerciales, el resultado financiero queda separado y en revisión. Los movimientos sin orden y PAYOUT se conservan como movimientos financieros independientes; PAYOUT sin orden se clasifica como movimiento de fondos, no como pérdida de una venta.
+
+Fórmulas permitidas con `Decimal`: diferencia de venta ML vs Eccomapp, diferencia de neto ML vs Eccomapp, diferencia ML vs MP (`neto_aprobado_mp - total_informado_ml`) y utilidad preliminar de control (`total_informado_ml - costo_productos_eccomapp`). Esta última no es utilidad contable, ganancia definitiva ni resultado fiscal. No calcular IVA, IIBB, retenciones, percepciones ni reglas fiscales propias.
+
+Estados consolidados por prioridad: `DUPLICADA_O_AMBIGUA`, `SOLO_MOVIMIENTO_FINANCIERO`, `SIN_VENTA_OFICIAL`, `SIN_COSTO_PRODUCTO`, `SIN_MOVIMIENTO_FINANCIERO`, `EN_REVISION_FINANCIERA`, `CON_DIFERENCIA`, `COMPLETA`. Un resultado completo puede requerir revisión por SKU, devolución, reclamo, duplicado, liquidación pendiente u otra condición heredada.
+
+El reporte consolidado valida compatibilidad de hashes Eccomapp con hashes comerciales del reporte financiero y garantiza partición exacta: cada resultado comercial y cada resultado financiero de entrada aparece exactamente una vez. Esta etapa no modifica Streamlit, carga visual de tres archivos, presentación, exportaciones Excel, normalizadores, persistencia ni el motor histórico de conciliación.
