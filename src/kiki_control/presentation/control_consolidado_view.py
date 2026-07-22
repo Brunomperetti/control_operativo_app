@@ -272,6 +272,66 @@ def tabla_consolidada(filas):
     return [f.__dict__ | {"Grupo u orden": f.grupo_orden, "Estado": f.estado, "Fuentes disponibles": f.fuentes_disponibles, "Venta ML oficial": f.venta_ml_oficial, "Cargos e impuestos ML": f.cargos_impuestos_ml, "Costo envío ML": f.costo_envio_ml, "Neto esperado ML": f.neto_esperado_ml, "Costo productos": f.costo_productos, "Neto aprobado MP": f.neto_aprobado_mp, "Neto financiero total MP": f.neto_financiero_total_mp, "Diferencia ML–MP": f.diferencia_ml_mp, "Utilidad preliminar": f.utilidad_preliminar, "Requiere revisión": f.requiere_revision, "Motivo principal": f.motivo_principal, "Qué revisar": f.que_revisar} for f in filas]
 
 
+
+def motivos_disponibles(valores: Iterable[Any]) -> tuple[str, ...]:
+    """Devuelve motivos visibles únicos en orden determinista para filtros de presentación."""
+    return tuple(sorted({str(getattr(v, "motivo", getattr(v, "motivo_visible", v))) for v in valores if str(getattr(v, "motivo", getattr(v, "motivo_visible", v))).strip()}))
+
+
+def contar_mostrando(visibles: Iterable[Any], total: Iterable[Any] | int) -> str:
+    cantidad_visible = len(tuple(visibles))
+    cantidad_total = total if isinstance(total, int) else len(tuple(total))
+    return f"Mostrando {cantidad_visible} de {cantidad_total} grupos"
+
+
+def filtrar_grupos_excluidos(grupos: Iterable[Any], busqueda_grupo: str = "", motivo: str = "") -> tuple[Any, ...]:
+    q = (busqueda_grupo or "").strip().lower()
+    m = (motivo or "").strip()
+    salida = []
+    for grupo in grupos:
+        grupo_visible_valor = str(getattr(grupo, "grupo", ""))
+        motivo_valor = str(getattr(grupo, "motivo", ""))
+        if q and q not in grupo_visible_valor.lower():
+            continue
+        if m and motivo_valor != m:
+            continue
+        salida.append(grupo)
+    return tuple(salida)
+
+
+def filas_grupos_excluidos(grupos: Iterable[Any]) -> list[dict[str, str]]:
+    return [{
+        "Grupo": g.grupo,
+        "Motivo": g.motivo,
+        "Neto ML": formato_importe(g.neto_ml),
+        "Neto Eccomapp": formato_importe(g.neto_eccomapp),
+        "Neto aprobado MP": formato_importe(g.neto_aprobado_mp),
+        "Aporte MP–ML": formato_importe(g.aporte_diferencia_ml_mp),
+    } for g in grupos]
+
+
+def filas_resumen_revisiones(revisiones: Iterable[Any]) -> list[dict[str, str | int]]:
+    return [{
+        "Motivo visible": r.motivo_visible,
+        "Cantidad": r.cantidad,
+        "Importe afectado": formato_importe(r.importe_afectado),
+        "Acción recomendada": r.accion_recomendada,
+    } for r in revisiones]
+
+
+def filtrar_grupos_involucrados_por_motivo(revisiones: Iterable[Any], motivo: str, busqueda_grupo: str = "") -> tuple[str, ...]:
+    q = (busqueda_grupo or "").strip().lower()
+    grupos: tuple[str, ...] = ()
+    for revision in revisiones:
+        if revision.motivo_visible == motivo:
+            grupos = revision.grupos_involucrados
+            break
+    return tuple(g for g in grupos if not q or q in g.lower())
+
+
+def filas_grupos_involucrados(grupos: Iterable[str]) -> list[dict[str, str]]:
+    return [{"Grupo": grupo} for grupo in grupos]
+
 def detalle_control(r: ResultadoControlConsolidado) -> dict[str, str]:
     return {
         "Grupo": grupo_visible(r),
