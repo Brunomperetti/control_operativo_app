@@ -1010,6 +1010,14 @@ La explicación usa nombres exactos de columnas externas solo cuando son necesar
 
 La clave primaria de vinculación es el ID de orden. El SKU se mantiene como dato de validación secundaria y no reemplaza al ID de orden. Los movimientos de Mercado Pago se agrupan por orden, por lo que un grupo financiero no equivale necesariamente a una fila del XLSX.
 
+### 32.2.1 Formato confirmado de `Fecha de venta` en Mercado Libre oficial
+
+El XLSX oficial de ventas de Mercado Libre puede informar `Fecha de venta` con fecha textual en español, por ejemplo `20 de julio de 2026 20:29 hs.`. La normalización debe aceptar ese formato sin modificar el archivo recibido, de manera determinística y sin depender del locale del servidor.
+
+El parser conserva los formatos previamente admitidos: datetime de Excel, `YYYY-MM-DD HH:MM:SS`, `YYYY-MM-DD`, `DD/MM/YYYY HH:MM:SS`, `DD/MM/YYYY` e ISO compatible con `datetime.fromisoformat`. Además, para el formato textual español acepta día y hora de uno o dos dígitos, segundos opcionales, `hs` con punto final opcional, espacios iniciales/finales y mayúsculas/minúsculas. Los meses admitidos mediante mapa explícito son: enero, febrero, marzo, abril, mayo, junio, julio, agosto, septiembre, setiembre, octubre, noviembre y diciembre.
+
+La fecha normalizada se construye con la zona horaria operativa configurada (`America/Argentina/Cordoba` por defecto). Una fecha textual inválida debe generar `FECHA_INVALIDA` y rechazar únicamente la fila afectada; no debe convertirse a `None` ni reemplazarse por valores inventados.
+
 ### 32.3 Límites y privacidad de la explicación
 
 La capa explicativa no modifica fórmulas, estados, prioridades ni normalización. Trabaja sobre modelos normalizados inmutables y no sobre filas crudas ni DataFrames. No recalcula la utilidad de Mercado Libre: la presenta como valor informado por la fuente, no como ganancia contable, fiscal o definitiva.

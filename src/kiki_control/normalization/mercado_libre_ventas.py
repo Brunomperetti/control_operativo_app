@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -18,6 +19,28 @@ from kiki_control.normalization.values import es_vacio, normalizar_decimal, norm
 from kiki_control.validation.results import ProblemaValidacion
 
 ZONA_HORARIA_PREDETERMINADA = "America/Argentina/Cordoba"
+
+MESES_ES = {
+    "enero": 1,
+    "febrero": 2,
+    "marzo": 3,
+    "abril": 4,
+    "mayo": 5,
+    "junio": 6,
+    "julio": 7,
+    "agosto": 8,
+    "septiembre": 9,
+    "setiembre": 9,
+    "octubre": 10,
+    "noviembre": 11,
+    "diciembre": 12,
+}
+
+_FECHA_TEXTUAL_ES_RE = re.compile(
+    r"^\s*(?P<dia>\d{1,2})\s+de\s+(?P<mes>[a-záéíóúñ]+)\s+de\s+(?P<anio>\d{4})"
+    r"\s+(?P<hora>\d{1,2}):(?P<minuto>\d{2})(?::(?P<segundo>\d{2}))?\s+hs\.?\s*$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -209,11 +232,35 @@ def _fecha(v: object, campo: str, n: int, errores: list[ProblemaValidacion], zon
             return datetime.strptime(texto, fmt).replace(tzinfo=zona)
         except ValueError:
             pass
+    fecha_textual = _fecha_textual_es(texto, zona)
+    if fecha_textual is not None:
+        return fecha_textual
     try:
         dt = datetime.fromisoformat(texto)
         return dt.replace(tzinfo=zona) if dt.tzinfo is None else dt.astimezone(zona)
     except ValueError:
         errores.append(_problema("FECHA_INVALIDA", "Fecha inválida.", n, campo))
+        return None
+
+
+def _fecha_textual_es(texto: str, zona: ZoneInfo) -> datetime | None:
+    coincidencia = _FECHA_TEXTUAL_ES_RE.fullmatch(texto)
+    if coincidencia is None:
+        return None
+    mes = MESES_ES.get(coincidencia.group("mes").lower())
+    if mes is None:
+        return None
+    try:
+        return datetime(
+            int(coincidencia.group("anio")),
+            mes,
+            int(coincidencia.group("dia")),
+            int(coincidencia.group("hora")),
+            int(coincidencia.group("minuto")),
+            int(coincidencia.group("segundo") or 0),
+            tzinfo=zona,
+        )
+    except ValueError:
         return None
 
 
