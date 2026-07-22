@@ -214,3 +214,52 @@ def test_detalle_revision_obsoleto_se_limpia_al_cambiar_filtros_sin_borrar_repor
     estado["revision_detalle"] = "caso-vigente"
     limpiar_detalle_revision_si_obsoleto(estado, {"caso-vigente"})
     assert estado["revision_detalle"] == "caso-vigente"
+
+
+def test_limpieza_de_widgets_de_diagnosticos_consolidados():
+    claves_diagnostico = {
+        "buscar_grupo_excluido_puente",
+        "motivo_grupo_excluido_puente",
+        "motivo_grupos_revision",
+        "buscar_grupo_revision",
+    }
+    assert claves_diagnostico.issubset(SESSION_KEYS_TO_CLEAR)
+    assert claves_diagnostico.issubset(RESULT_KEYS_TO_CLEAR)
+    assert claves_diagnostico.isdisjoint(VIEW_FILTER_KEYS_TO_CLEAR)
+
+    estado = {clave: f"valor-anterior-{clave}" for clave in claves_diagnostico}
+    estado.update({
+        "zona_horaria": "America/Argentina/Cordoba",
+        "tolerancia_texto": "0,01",
+        "reporte_consolidado": "reporte-anterior",
+    })
+
+    limpiar_claves_conocidas(estado)
+
+    assert claves_diagnostico.isdisjoint(estado)
+    assert "reporte_consolidado" not in estado
+
+
+def test_invalidacion_elimina_widgets_de_diagnosticos_y_conserva_configuracion():
+    claves_diagnostico = {
+        "buscar_grupo_excluido_puente",
+        "motivo_grupo_excluido_puente",
+        "motivo_grupos_revision",
+        "buscar_grupo_revision",
+    }
+    estado = {clave: f"reporte-anterior-{clave}" for clave in claves_diagnostico}
+    estado.update({
+        "zona_horaria": "America/Argentina/Cordoba",
+        "tolerancia_texto": "0,01",
+        "reporte_consolidado": "reporte-anterior",
+        "firma_procesamiento": "firma-anterior",
+    })
+
+    invalidar_resultados_conocidos(estado)
+
+    assert claves_diagnostico.isdisjoint(estado)
+    assert not any("reporte-anterior" in str(valor) for valor in estado.values())
+    assert estado["zona_horaria"] == "America/Argentina/Cordoba"
+    assert estado["tolerancia_texto"] == "0,01"
+    assert "reporte_consolidado" not in estado
+    assert "firma_procesamiento" not in estado

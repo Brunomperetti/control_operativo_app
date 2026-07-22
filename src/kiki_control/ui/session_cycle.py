@@ -36,6 +36,10 @@ SESSION_KEYS_TO_CLEAR = (
     "revision_busqueda",
     "revision_detalle",
     "filtro_motivo_revision",
+    "buscar_grupo_excluido_puente",
+    "motivo_grupo_excluido_puente",
+    "motivo_grupos_revision",
+    "buscar_grupo_revision",
 )
 
 RESULT_KEYS_TO_CLEAR = (
@@ -60,6 +64,10 @@ RESULT_KEYS_TO_CLEAR = (
     "revision_busqueda",
     "revision_detalle",
     "filtro_motivo_revision",
+    "buscar_grupo_excluido_puente",
+    "motivo_grupo_excluido_puente",
+    "motivo_grupos_revision",
+    "buscar_grupo_revision",
 )
 
 VIEW_FILTER_KEYS_TO_CLEAR = (

@@ -49,11 +49,18 @@ from kiki_control.presentation.control_consolidado_view import (
     cobertura_tres_fuentes,
     detalle_control,
     explicacion_resultado,
+    filas_grupos_excluidos,
+    filas_grupos_involucrados,
+    filas_resumen_revisiones,
     filas_tabla_consolidada,
     filtrar_filas_consolidadas,
+    filtrar_grupos_excluidos,
+    filtrar_grupos_involucrados_por_motivo,
     etiqueta_selector_detalle,
     formato_importe,
     kpis_consolidados,
+    motivos_disponibles,
+    contar_mostrando,
     tabla_consolidada,
     trazabilidad_tecnica,
 )
@@ -510,12 +517,18 @@ def _mostrar_resultados() -> None:
         "MP − ML": formato_importe(diagnostico.puente.mp_menos_ml),
         "Identidad cierra": "Sí" if diagnostico.puente.identidad_cierra_exactamente else "No",
     }])
-    if diagnostico.puente.grupos_excluidos_universo_triple:
-        st.caption("Grupos excluidos del puente triple y aporte a la diferencia general ML–MP cuando ambos importes existen.")
-        st.table([{
-            "Grupo": g.grupo, "Motivo": g.motivo, "Neto ML": formato_importe(g.neto_ml), "Neto Eccomapp": formato_importe(g.neto_eccomapp),
-            "Neto aprobado MP": formato_importe(g.neto_aprobado_mp), "Aporte MP − ML": formato_importe(g.aporte_diferencia_ml_mp),
-        } for g in diagnostico.puente.grupos_excluidos_universo_triple])
+    grupos_excluidos = diagnostico.puente.grupos_excluidos_universo_triple
+    if grupos_excluidos:
+        total_excluidos = len(grupos_excluidos)
+        with st.expander(f"Ver {total_excluidos} grupos excluidos del puente triple", expanded=False):
+            st.caption("Grupos excluidos del puente triple y aporte a la diferencia general ML–MP cuando ambos importes existen.")
+            b1, b2 = st.columns([2, 3])
+            busqueda = b1.text_input("Buscar grupo excluido", key="buscar_grupo_excluido_puente")
+            motivos = motivos_disponibles(grupos_excluidos)
+            motivo = b2.selectbox("Filtrar por motivo de exclusión", options=("", *motivos), format_func=lambda x: "Todos los motivos" if x == "" else x, key="motivo_grupo_excluido_puente")
+            grupos_visibles = filtrar_grupos_excluidos(grupos_excluidos, busqueda, motivo)
+            st.caption(contar_mostrando(grupos_visibles, total_excluidos))
+            st.dataframe(filas_grupos_excluidos(grupos_visibles), hide_index=True, use_container_width=True, height=400)
     if not (diagnostico.particion.cierra_exactamente and diagnostico.diferencias.identidad_cierra_exactamente and diagnostico.puente.identidad_cierra_exactamente and diagnostico.utilidad.motivos_cierran_exactamente and diagnostico.utilidad.identidad_cierra_exactamente and diagnostico.temporal_mp_sin_venta.particion_cierra_exactamente and diagnostico.residual_ml.identidad_cierra_exactamente):
         st.error("Error de consistencia: al menos una identidad de diagnóstico no cierra exactamente. Revisar partición, diferencias, puente, utilidad o temporalidad antes de confiar en el bloque afectado.")
     st.subheader("Movimientos MP sin venta oficial: distribución temporal")
@@ -530,7 +543,16 @@ def _mostrar_resultados() -> None:
     ])
     st.subheader("Revisiones del control consolidado")
     st.caption(diagnostico.revisiones.aclaracion)
-    st.table([{"Motivo visible": r.motivo_visible, "Cantidad": r.cantidad, "Importe afectado": formato_importe(r.importe_afectado), "Acción recomendada": r.accion_recomendada, "Grupos involucrados": ", ".join(r.grupos_involucrados[:20])} for r in diagnostico.revisiones.revisiones_multietiqueta])
+    st.table(filas_resumen_revisiones(diagnostico.revisiones.revisiones_multietiqueta))
+    if diagnostico.revisiones.revisiones_multietiqueta:
+        with st.expander("Ver grupos involucrados en las revisiones", expanded=False):
+            motivos_revision = tuple(r.motivo_visible for r in diagnostico.revisiones.revisiones_multietiqueta)
+            motivo_revision = st.selectbox("Motivo de revisión", options=motivos_revision, key="motivo_grupos_revision")
+            busqueda_revision = st.text_input("Buscar grupo involucrado", key="buscar_grupo_revision")
+            grupos_revision = filtrar_grupos_involucrados_por_motivo(diagnostico.revisiones.revisiones_multietiqueta, motivo_revision, busqueda_revision)
+            total_motivo = next((r.cantidad for r in diagnostico.revisiones.revisiones_multietiqueta if r.motivo_visible == motivo_revision), 0)
+            st.caption(contar_mostrando(grupos_revision, total_motivo))
+            st.dataframe(filas_grupos_involucrados(grupos_revision), hide_index=True, use_container_width=True, height=400)
     for titulo, kpis in kpis_consolidados(reporte).items():
         st.subheader(titulo)
         cols = st.columns(len(kpis))
