@@ -1,4 +1,5 @@
 from dataclasses import asdict, fields
+from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 
@@ -175,6 +176,83 @@ def test_interpreta_reclamos_desde_tres_columnas_operativas():
     assert venta.reclamo_abierto is False
     assert venta.reclamo_cerrado is True
     assert venta.con_mediacion is False
+
+
+def test_normaliza_fecha_textual_espanol_confirmada_con_zona_operativa():
+    base = fila()
+    base["Fecha de venta"] = "20 de julio de 2026 20:29 hs."
+    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas([base]))
+
+    assert resultado.cantidad_normalizada == 1
+    assert resultado.cantidad_rechazada == 0
+    assert resultado.ventas[0].fecha_venta == datetime.fromisoformat("2026-07-20T20:29:00-03:00")
+    assert resultado.ventas[0].fecha_venta.tzinfo.key == "America/Argentina/Cordoba"
+
+def test_normaliza_fecha_textual_espanol_con_variantes_sinteticas():
+    casos = [
+        (" 20 de JULIO de 2026 8:29 hs ", "2026-07-20T08:29:00-03:00"),
+        ("20 de julio de 2026 20:29 hs", "2026-07-20T20:29:00-03:00"),
+        ("20 de julio de 2026 20:29:31 hs.", "2026-07-20T20:29:31-03:00"),
+        ("1 de septiembre de 2026 1:02 hs.", "2026-09-01T01:02:00-03:00"),
+        ("1 de setiembre de 2026 1:02 hs.", "2026-09-01T01:02:00-03:00"),
+    ]
+    filas = []
+    for indice, (fecha, _) in enumerate(casos, start=1):
+        filas.append(fila(id_venta=f"1000000000000000000{indice}", total=str(100 + indice)) | {"Fecha de venta": fecha})
+
+    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas(filas))
+
+    assert resultado.cantidad_normalizada == len(casos)
+    assert resultado.cantidad_rechazada == 0
+    assert [venta.fecha_venta for venta in resultado.ventas] == [datetime.fromisoformat(esperada) for _, esperada in casos]
+
+
+def test_conserva_formatos_numericos_e_iso_existentes_de_fecha_venta():
+    casos = [
+        ("2026-07-20 20:29:31", "2026-07-20T20:29:31-03:00"),
+        ("2026-07-20", "2026-07-20T00:00:00-03:00"),
+        ("20/07/2026 20:29:31", "2026-07-20T20:29:31-03:00"),
+        ("20/07/2026", "2026-07-20T00:00:00-03:00"),
+        ("2026-07-20T20:29:31-03:00", "2026-07-20T20:29:31-03:00"),
+        (datetime(2026, 7, 20, 20, 29, 31), "2026-07-20T20:29:31-03:00"),
+    ]
+    filas = []
+    for indice, (fecha, _) in enumerate(casos, start=1):
+        filas.append(fila(id_venta=f"2000000000000000000{indice}", total=str(200 + indice)) | {"Fecha de venta": fecha})
+
+    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas(filas))
+
+    assert resultado.cantidad_normalizada == len(casos)
+    assert resultado.cantidad_rechazada == 0
+    assert [venta.fecha_venta for venta in resultado.ventas] == [datetime.fromisoformat(esperada) for _, esperada in casos]
+
+
+def test_fecha_textual_espanol_invalida_genera_fecha_invalida_y_rechaza_solo_esa_fila():
+    invalida = fila(id_venta="30000000000000000001")
+    invalida["Fecha de venta"] = "31 de febrero de 2026 20:29 hs."
+    valida = fila(id_venta="30000000000000000002")
+    valida["Fecha de venta"] = "20 de julio de 2026 20:29 hs."
+
+    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas([invalida, valida]))
+
+    assert resultado.cantidad_normalizada == 1
+    assert resultado.cantidad_rechazada == 1
+    assert resultado.ventas[0].id_venta == "30000000000000000002"
+    assert {e.codigo for e in resultado.filas_rechazadas[0].errores} == {"FECHA_INVALIDA"}
+
+
+def test_xlsx_sintetico_con_fechas_textuales_termina_sin_rechazos():
+    contenido = xlsx_ventas([
+        fila(id_venta="40000000000000000001") | {"Fecha de venta": "20 de julio de 2026 20:29 hs."},
+        fila(id_venta="40000000000000000002") | {"Fecha de venta": "21 de agosto de 2026 9:05 hs"},
+        fila(id_venta="40000000000000000003") | {"Fecha de venta": "1 de setiembre de 2026 1:02:03 hs."},
+    ])
+
+    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", contenido)
+
+    assert resultado.cantidad_normalizada == 3
+    assert resultado.cantidad_rechazada == 0
+    assert not resultado.filas_rechazadas
 
 
 def test_importes_fechas_e_identificadores_no_vacios_invalidos_generan_validacion_sin_valor_crudo():
