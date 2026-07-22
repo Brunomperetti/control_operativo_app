@@ -1232,3 +1232,13 @@ El universo calculable de utilidad preliminar son resultados con `total_informad
 Las **revisiones consolidadas** pertenecen al cruce de tres fuentes y pueden tener múltiples etiquetas; sus conteos multietiqueta no deben sumarse para obtener el total. La auditoría histórica Eccomapp–Mercado Pago conserva su universo separado. Por eso contadores de ambos bloques, como 206 y 122 en validaciones manuales, no son comparables directamente.
 
 Los resultados `SOLO_MOVIMIENTO_FINANCIERO` se diagnostican por fecha MP normalizada contra el período de ventas ML: anteriores, dentro, posteriores o sin fecha disponible. No se recortan ni descartan movimientos automáticamente. Un movimiento fuera del período de ventas cargado no implica necesariamente una venta faltante.
+
+### Corrección de diagnóstico: cero, netos MP y temporalidad
+
+En diagnósticos consolidados, `Decimal("0")` es un importe válido y nunca debe tratarse como ausencia. La selección entre importes alternativos debe realizarse con comparaciones explícitas contra `None`; por ejemplo, para temporalidad MP se usa `neto_financiero_total_mp` si existe aunque sea cero, luego `neto_aprobado_mp` y solo finalmente cero explícito si ambos están ausentes.
+
+`neto_aprobado_mp` y `neto_financiero_total_mp` no son equivalentes. El primero representa pagos aprobados comparables; el segundo conserva el impacto financiero total de movimientos como devoluciones, reclamos, disputas, PAYOUT, movimientos de fondos u otros casos que pueden no tener pago aprobado comparable. Por eso la ausencia de `neto_aprobado_mp` no implica automáticamente datos críticos incompletos.
+
+Los datos críticos faltantes se limitan a: venta oficial con `Total (ARS)` ausente; Eccomapp con costo de producto ausente; y venta oficial con Mercado Pago que debería compararse contra un pago pero no tiene neto aprobado comparable. Devoluciones, reclamos, disputas y movimientos de fondos con neto financiero válido se revisan como casos financieros, no como faltantes críticos.
+
+La distribución temporal de movimientos MP sin venta oficial es una partición mutuamente excluyente: anteriores al período ML, dentro del período ML, posteriores al período ML, sin fecha y fechas mixtas. Si un grupo contiene movimientos en más de un período, se clasifica como fechas mixtas para no elegir silenciosamente una fecha. La suma de esas categorías debe coincidir exactamente con los resultados `SOLO_MOVIMIENTO_FINANCIERO`.

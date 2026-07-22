@@ -1,6 +1,6 @@
 """Diagnósticos puros y auditables para el control consolidado.
 
-No usa Streamlit ni pandas. Trabaja sobre modelos de dominio inmutables y Decimal.
+Capa sin dependencias de UI ni procesamiento tabular externo; trabaja sobre modelos de dominio inmutables y Decimal.
 """
 
 from __future__ import annotations
@@ -97,7 +97,10 @@ class DiagnosticoTemporalMp:
     dentro: ConteoImporte
     posteriores: ConteoImporte
     sin_fecha: ConteoImporte
-    aclaracion: str = "Un movimiento fuera del período de ventas cargado no implica necesariamente una venta faltante."
+    fechas_mixtas: ConteoImporte
+    total_solo_movimiento_financiero: int
+    particion_cierra_exactamente: bool
+    aclaracion: str = "Estar fuera del período de ventas cargado no demuestra que falte una venta. Puede corresponder a acreditaciones, devoluciones o movimientos originados en otro período y requiere revisar la cobertura de los archivos."
 
 
 @dataclass(frozen=True)
@@ -119,7 +122,43 @@ def _sum(valores: Iterable[Decimal | None]) -> Decimal:
 
 
 def _grupo(r: ResultadoControlConsolidado) -> str:
-    return r.id_grupo_canonico or ", ".join(r.ids_orden) or f"fila MP {','.join(map(str, r.filas_origen_mp))}" or r.clave_resultado
+    if r.id_grupo_canonico:
+        return r.id_grupo_canonico
+    if r.ids_orden:
+        return ", ".join(r.ids_orden)
+    if r.filas_origen_mp:
+        return f"fila MP {','.join(map(str, r.filas_origen_mp))}"
+    return r.clave_resultado
+
+
+def importe_mp_para_temporal(r: ResultadoControlConsolidado) -> Decimal:
+    if r.neto_financiero_total_mp is not None:
+        return r.neto_financiero_total_mp
+    if r.neto_aprobado_mp is not None:
+        return r.neto_aprobado_mp
+    return _ZERO
+
+
+def motivos_datos_criticos_faltantes(r: ResultadoControlConsolidado) -> tuple[str, ...]:
+    motivos: list[str] = []
+    if r.tiene_mercado_libre_oficial and r.total_informado_ml is None:
+        motivos.append("Total (ARS) ML ausente")
+    if r.tiene_eccomapp and r.costo_productos_eccomapp is None:
+        motivos.append("Costo de producto Eccomapp ausente")
+    mp_no_comparable_legitimo = bool(
+        r.neto_financiero_total_mp is not None
+        or r.indicadores_financieros.tiene_devolucion
+        or r.indicadores_financieros.tiene_reclamo
+        or r.indicadores_financieros.tiene_disputa
+        or (r.tipo_movimiento_financiero is not None and str(r.tipo_movimiento_financiero).endswith("MOVIMIENTO_DE_FONDOS"))
+    )
+    if r.tiene_mercado_libre_oficial and r.tiene_mercado_pago and r.neto_aprobado_mp is None and not mp_no_comparable_legitimo:
+        motivos.append("Sin neto aprobado MP comparable")
+    return tuple(motivos)
+
+
+def tiene_datos_criticos_faltantes(r: ResultadoControlConsolidado) -> bool:
+    return bool(motivos_datos_criticos_faltantes(r))
 
 
 def diagnosticar_particion(reporte: ReporteControlConsolidado) -> DiagnosticoParticionResultados:
@@ -138,8 +177,8 @@ def diagnosticar_diferencias(reporte: ReporteControlConsolidado) -> DiagnosticoD
     cierra = suma_dif == (suma_mp - suma_ml)
     return DiagnosticoDiferenciasFuentes(
         len(comparables), len(diferencias), len(comparables) - len(diferencias), reporte.total_resultados - len(comparables),
-        sum(1 for r in diferencias if r.diferencia_ml_mp and r.diferencia_ml_mp > 0),
-        sum(1 for r in diferencias if r.diferencia_ml_mp and r.diferencia_ml_mp < 0), suma_ml, suma_mp, suma_dif, cierra,
+        sum(1 for r in diferencias if r.diferencia_ml_mp is not None and r.diferencia_ml_mp > 0),
+        sum(1 for r in diferencias if r.diferencia_ml_mp is not None and r.diferencia_ml_mp < 0), suma_ml, suma_mp, suma_dif, cierra,
         None if cierra else "La suma de diferencias ML–MP no coincide exactamente con Neto MP comparable menos Neto ML comparable.",
     )
 
@@ -170,14 +209,14 @@ def diagnosticar_utilidad(reporte: ReporteControlConsolidado) -> DiagnosticoCobe
 
 def diagnosticar_revisiones(reporte: ReporteControlConsolidado) -> DiagnosticoRevisionesConsolidadas:
     reglas = (
-        ("Datos críticos incompletos", lambda r: any((r.tiene_mercado_libre_oficial and r.total_informado_ml is None, r.tiene_eccomapp and r.costo_productos_eccomapp is None, r.tiene_mercado_pago and r.neto_aprobado_mp is None)), "Completar campos críticos en la fuente correspondiente."),
+        ("Datos críticos incompletos", tiene_datos_criticos_faltantes, "Completar campos críticos en la fuente correspondiente."),
         ("Diferencia pendiente de clasificación contable", lambda r: r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia, "Revisar ML oficial, Eccomapp y MP sin asumir causa contable."),
         ("Fuente faltante", lambda r: not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago), "Confirmar si el archivo cargado cubre el universo esperado."),
         ("Revisión financiera", lambda r: r.estado == EstadoControlConsolidado.EN_REVISION_FINANCIERA or r.indicadores_financieros.tiene_devolucion or r.indicadores_financieros.tiene_reclamo or r.indicadores_financieros.tiene_disputa, "Revisar movimientos financieros asociados."),
     )
     items=[]
     for nombre, pred, accion in reglas:
-        rs=tuple(r for r in reporte.resultados if pred(r))
+        rs=tuple(r for r in reporte.resultados if r.requiere_revision and pred(r))
         if rs: items.append(DiagnosticoRevision(nombre, len(rs), _sum(r.neto_aprobado_mp for r in rs) if nombre != "Datos críticos incompletos" else None, accion, tuple(_grupo(r) for r in rs)))
     return DiagnosticoRevisionesConsolidadas(reporte.total_requieren_revision, tuple(items), "Conteos multietiqueta: no deben sumarse para obtener el total. Revisiones consolidadas: tres fuentes. Revisiones históricas: Eccomapp–Mercado Pago. Los contadores 206 y 122 pertenecen a universos diferentes y no son comparables directamente.")
 
@@ -189,13 +228,28 @@ def _as_date(v: date | datetime | None) -> date | None:
 
 def diagnosticar_temporal_mp_sin_venta(reporte: ReporteControlConsolidado, inicio_ml: date | datetime | None = None, fin_ml: date | datetime | None = None, fechas_mp_por_fila: Mapping[int, date | datetime | None] | None = None) -> DiagnosticoTemporalMp:
     inicio = _as_date(inicio_ml); fin = _as_date(fin_ml); fechas = fechas_mp_por_fila or {}
-    buckets = {"anteriores": [0,_ZERO], "dentro": [0,_ZERO], "posteriores": [0,_ZERO], "sin_fecha": [0,_ZERO]}
+    buckets = {"anteriores": [0,_ZERO], "dentro": [0,_ZERO], "posteriores": [0,_ZERO], "sin_fecha": [0,_ZERO], "fechas_mixtas": [0,_ZERO]}
+    total = 0
     for r in reporte.resultados:
         if r.estado != EstadoControlConsolidado.SOLO_MOVIMIENTO_FINANCIERO: continue
-        fecha = next((_as_date(fechas.get(n)) for n in r.filas_origen_mp if fechas.get(n) is not None), None)
-        key = "sin_fecha" if fecha is None or inicio is None or fin is None else ("anteriores" if fecha < inicio else "posteriores" if fecha > fin else "dentro")
-        buckets[key][0] += 1; buckets[key][1] += r.neto_financiero_total_mp or r.neto_aprobado_mp or _ZERO
-    return DiagnosticoTemporalMp(*(ConteoImporte(v[0], v[1]) for v in buckets.values()))
+        total += 1
+        categorias = set()
+        for fila in r.filas_origen_mp:
+            fecha = _as_date(fechas.get(fila)) if fila in fechas else None
+            if fecha is None or inicio is None or fin is None:
+                categorias.add("sin_fecha")
+            elif fecha < inicio:
+                categorias.add("anteriores")
+            elif fecha > fin:
+                categorias.add("posteriores")
+            else:
+                categorias.add("dentro")
+        if not categorias:
+            categorias.add("sin_fecha")
+        key = next(iter(categorias)) if len(categorias) == 1 else "fechas_mixtas"
+        buckets[key][0] += 1; buckets[key][1] += importe_mp_para_temporal(r)
+    conteos = tuple(ConteoImporte(v[0], v[1]) for v in buckets.values())
+    return DiagnosticoTemporalMp(*conteos, total, sum(c.cantidad for c in conteos) == total)
 
 
 def diagnosticar_control_consolidado(reporte: ReporteControlConsolidado, inicio_ml: date | datetime | None = None, fin_ml: date | datetime | None = None, fechas_mp_por_fila: Mapping[int, date | datetime | None] | None = None) -> DiagnosticoControlConsolidado:

@@ -401,6 +401,25 @@ def _column_config_control_consolidado() -> dict[str, Any]:
         "Qué revisar": st.column_config.TextColumn("Qué revisar", help="Acción recomendada para interpretar el caso sin asumir causas contables no evidenciadas."),
     }
 
+
+def _periodo_ventas_ml_normalizadas() -> tuple[Any, Any]:
+    normalizacion = st.session_state.get("normalizacion", {})
+    ventas = tuple(getattr(normalizacion.get("Ventas oficiales ML"), "ventas", ()))
+    fechas = [v.fecha_venta for v in ventas if getattr(v, "fecha_venta", None) is not None]
+    if not fechas:
+        return None, None
+    return min(fechas), max(fechas)
+
+
+def _fechas_mp_por_fila_normalizadas() -> dict[int, Any]:
+    normalizacion = st.session_state.get("normalizacion", {})
+    movimientos = tuple(getattr(normalizacion.get("Mercado Pago"), "movimientos", ()))
+    return {m.numero_fila_origen: m.fecha_origen_local for m in movimientos if getattr(m, "numero_fila_origen", None) is not None}
+
+
+def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
+    return {"Categoría temporal": nombre, "Cantidad": item.cantidad, "Importe financiero": item.importe}
+
 def _mostrar_resultados() -> None:
     reporte = st.session_state["reporte_consolidado"]
     with st.expander("Cómo se calcula el control consolidado", expanded=True):
@@ -426,7 +445,8 @@ def _mostrar_resultados() -> None:
 
     st.header("Resumen ejecutivo consolidado")
     st.info(conclusion_ejecutiva_consolidada(reporte))
-    diagnostico = diagnosticar_control_consolidado(reporte)
+    inicio_ml, fin_ml = _periodo_ventas_ml_normalizadas()
+    diagnostico = diagnosticar_control_consolidado(reporte, inicio_ml, fin_ml, _fechas_mp_por_fila_normalizadas())
     if not diagnostico.particion.cierra_exactamente or not diagnostico.diferencias.identidad_cierra_exactamente:
         st.error("Error de consistencia en diagnósticos: no se presentan KPIs como confiables hasta revisar la partición o la identidad de diferencias.")
     st.subheader("Puente de importes entre fuentes")
@@ -442,6 +462,17 @@ def _mostrar_resultados() -> None:
         "MP − ML": diagnostico.puente.mp_menos_ml,
         "Identidad cierra": "Sí" if diagnostico.puente.identidad_cierra_exactamente else "No",
     }])
+    if not (diagnostico.particion.cierra_exactamente and diagnostico.diferencias.identidad_cierra_exactamente and diagnostico.puente.identidad_cierra_exactamente and diagnostico.utilidad.motivos_cierran_exactamente and diagnostico.utilidad.identidad_cierra_exactamente and diagnostico.temporal_mp_sin_venta.particion_cierra_exactamente):
+        st.error("Error de consistencia: al menos una identidad de diagnóstico no cierra exactamente. Revisar partición, diferencias, puente, utilidad o temporalidad antes de confiar en el bloque afectado.")
+    st.subheader("Movimientos MP sin venta oficial: distribución temporal")
+    st.caption(diagnostico.temporal_mp_sin_venta.aclaracion)
+    st.table([
+        _fila_temporal("Anteriores al período ML", diagnostico.temporal_mp_sin_venta.anteriores),
+        _fila_temporal("Dentro del período ML", diagnostico.temporal_mp_sin_venta.dentro),
+        _fila_temporal("Posteriores al período ML", diagnostico.temporal_mp_sin_venta.posteriores),
+        _fila_temporal("Sin fecha", diagnostico.temporal_mp_sin_venta.sin_fecha),
+        _fila_temporal("Fechas mixtas", diagnostico.temporal_mp_sin_venta.fechas_mixtas),
+    ])
     st.subheader("Revisiones del control consolidado")
     st.caption(diagnostico.revisiones.aclaracion)
     st.table([{"Motivo visible": r.motivo_visible, "Cantidad": r.cantidad, "Importe afectado": r.importe_afectado, "Acción recomendada": r.accion_recomendada, "Grupos involucrados": ", ".join(r.grupos_involucrados[:20])} for r in diagnostico.revisiones.revisiones_multietiqueta])

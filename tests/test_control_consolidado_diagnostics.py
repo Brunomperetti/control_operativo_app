@@ -4,15 +4,16 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from kiki_control.domain.control_consolidado import EstadoControlConsolidado as E, IndicadoresFinancieros, ReporteControlConsolidado, ResultadoControlConsolidado
+from kiki_control.domain.control_consolidado import EstadoControlConsolidado as E, IndicadoresFinancieros, ReporteControlConsolidado, ResultadoControlConsolidado, TipoMovimientoFinanciero
 from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
 from kiki_control.presentation.control_consolidado_view import etiqueta_selector_detalle, filas_tabla_consolidada, estado_visible
 
 IND = IndicadoresFinancieros(False, False, False, False, False, False, False, False)
 D = Decimal
 
-def r(clave, estado=E.COMPLETA, ml=D('100'), mp=D('100'), costo=D('40'), dif=D('0'), venta_ml=D('120'), venta_ec=D('120'), neto_ec=D('100'), tiene_ml=True, tiene_ec=True, tiene_mp=True, filas_mp=(1,), revision=False):
-    return ResultadoControlConsolidado(clave, clave if not clave.startswith('fin:') else None, (clave,) if not clave.startswith('fin:') else (), tiene_ml, tiene_ec, tiene_mp, None, venta_ml if tiene_ml else None, None, None, None, None, None, ml, venta_ec if tiene_ec else None, costo if tiene_ec else None, None, neto_ec if tiene_ec else None, None, mp if tiene_mp else None, mp if tiene_mp else None, None, None, None, None, (venta_ml-venta_ec) if venta_ml is not None and venta_ec is not None else None, (ml-neto_ec) if ml is not None and neto_ec is not None else None, dif, (ml-costo) if ml is not None and costo is not None else None, D('0.01'), estado, revision or state_needs_review(estado), (), (), IND, 'v', (), (), (), (), (), filas_mp, (), (clave,))
+def r(clave, estado=E.COMPLETA, ml=D('100'), mp=D('100'), costo=D('40'), dif=D('0'), venta_ml=D('120'), venta_ec=D('120'), neto_ec=D('100'), tiene_ml=True, tiene_ec=True, tiene_mp=True, filas_mp=(1,), revision=False, neto_fin='DEFAULT', ind=IND, tipo=None):
+    neto_fin_valor = mp if neto_fin == 'DEFAULT' else neto_fin
+    return ResultadoControlConsolidado(clave, clave if not clave.startswith('fin:') else None, (clave,) if not clave.startswith('fin:') else (), tiene_ml, tiene_ec, tiene_mp, tipo, venta_ml if tiene_ml else None, None, None, None, None, None, ml, venta_ec if tiene_ec else None, costo if tiene_ec else None, None, neto_ec if tiene_ec else None, None, mp if tiene_mp else None, neto_fin_valor if tiene_mp else None, None, None, None, None, (venta_ml-venta_ec) if venta_ml is not None and venta_ec is not None else None, (ml-neto_ec) if ml is not None and neto_ec is not None else None, dif, (ml-costo) if ml is not None and costo is not None else None, D('0.01'), estado, revision or state_needs_review(estado), (), (), ind, 'v', (), (), (), (), (), filas_mp, (), (clave,))
 
 def state_needs_review(e):
     return e != E.COMPLETA
@@ -64,3 +65,54 @@ def test_decimal_sin_float_pii_y_modelo_inmutable():
     item = r('immutable')
     with pytest.raises(FrozenInstanceError):
         item.diferencia_ml_mp = D('1')
+
+
+def test_temporal_conserva_decimal_cero_y_distingue_none():
+    reporte = rep([
+        r('fin:cero:hash:fila:1', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('99'), neto_fin=D('0'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(1,)),
+        r('fin:none:hash:fila:2', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('3'), neto_fin=None, costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(2,)),
+    ])
+    temporal = diagnosticar_control_consolidado(reporte, date(2026, 7, 1), date(2026, 7, 31), {1: date(2026,7,10), 2: date(2026,7,10)}).temporal_mp_sin_venta
+    assert temporal.dentro.cantidad == 2
+    assert temporal.dentro.importe == D('3')
+    assert temporal.particion_cierra_exactamente
+
+
+def test_mp_no_comparable_legitimo_no_es_dato_critico_y_venta_sin_neto_si_lo_es():
+    devolucion = IndicadoresFinancieros(False, True, False, False, False, False, False, False)
+    reclamo = IndicadoresFinancieros(False, False, True, True, False, False, False, False)
+    casos = [
+        r('dev', mp=None, neto_fin=D('-10'), ind=devolucion, revision=True),
+        r('rec', mp=None, neto_fin=D('-20'), ind=reclamo, revision=True),
+        r('payout', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=None, neto_fin=D('0'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, tipo=TipoMovimientoFinanciero.MOVIMIENTO_DE_FONDOS),
+        r('venta-sin-neto', mp=None, neto_fin=None, revision=True),
+    ]
+    filas = filas_tabla_consolidada(casos)
+    assert not filas[0].tiene_datos_faltantes
+    assert not filas[1].tiene_datos_faltantes
+    assert filas[2].motivo_principal == 'Fuente faltante'
+    assert filas[3].motivo_principal == 'Sin neto aprobado MP comparable'
+
+
+def test_revisiones_multietiqueta_solo_requiere_revision_y_temporal_mixta_cierra():
+    reporte = rep([
+        r('diff-no-revision', E.COMPLETA, mp=D('120'), dif=D('20'), revision=False),
+        r('diff-revision', E.CON_DIFERENCIA, mp=D('130'), dif=D('30'), revision=True),
+        r('fin:mix:hash:fila:8', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('0'), neto_fin=D('0'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(8,9)),
+        r('fin:sinfecha:hash:fila:10', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=None, neto_fin=None, costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(10,)),
+    ])
+    diag = diagnosticar_control_consolidado(reporte, date(2026,7,10), date(2026,7,20), {8: date(2026,7,1), 9: date(2026,7,30)})
+    dif_rev = [x for x in diag.revisiones.revisiones_multietiqueta if x.motivo_visible == 'Diferencia pendiente de clasificación contable'][0]
+    assert dif_rev.cantidad == 1
+    assert diag.temporal_mp_sin_venta.fechas_mixtas.cantidad == 1
+    assert diag.temporal_mp_sin_venta.fechas_mixtas.importe == D('0')
+    assert diag.temporal_mp_sin_venta.sin_fecha.cantidad == 1
+    assert diag.temporal_mp_sin_venta.particion_cierra_exactamente
+
+
+def test_modulo_puro_sin_streamlit_dataframe_float_ni_pii():
+    source = open('src/kiki_control/presentation/control_consolidado_diagnostics.py', encoding='utf-8').read().lower()
+    assert 'streamlit' not in source
+    assert 'dataframe' not in source
+    assert 'float(' not in source
+    assert 'comprador' not in source and 'documento' not in source and 'email' not in source

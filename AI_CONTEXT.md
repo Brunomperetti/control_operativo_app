@@ -288,3 +288,11 @@ Identidades obligatorias con `Decimal`:
 - `utilidad_preliminar = neto_ml_universo_utilidad - costo_productos_universo_utilidad`.
 
 No reconstruir `Total (ARS)` de Mercado Libre ni atribuir diferencias a retenciones, impuestos o errores sin evidencia. Usar la etiqueta prudente **Diferencia pendiente de clasificación contable**.
+
+### Reglas adicionales para diagnóstico consolidado
+
+- `Decimal("0")` no equivale a ausencia; no seleccionar importes con `or` cuando cero sea válido.
+- `neto_aprobado_mp` sirve para comparaciones de pago aprobado; `neto_financiero_total_mp` sirve para impacto financiero total y puede existir en devoluciones, reclamos, disputas, PAYOUT o movimientos de fondos sin neto aprobado comparable.
+- Centralizar datos críticos faltantes en la función pura de diagnóstico: `Total (ARS)` ML ausente, costo Eccomapp ausente o venta con MP que debería compararse pero no tiene neto aprobado comparable.
+- Las revisiones consolidadas multietiqueta deben partir solo de resultados donde `requiere_revision == True`.
+- La temporalidad de movimientos solo MP debe cerrar exactamente y contemplar fechas mixtas cuando un grupo cruza categorías temporales.

@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Iterable, Any
 
 from kiki_control.domain.control_consolidado import EstadoControlConsolidado, ReporteControlConsolidado, ResultadoControlConsolidado
-from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
+from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado, motivos_datos_criticos_faltantes, tiene_datos_criticos_faltantes
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ def estado_visible(estado: EstadoControlConsolidado | str) -> str:
 
 def etiqueta_selector_detalle(f: FilaControlConsolidado) -> str:
     grupo = f.grupo_orden
-    if grupo.startswith("fin:") or ":hash:" in grupo or grupo == f.clave:
+    if grupo.startswith("fin:") or ":hash:" in grupo or f.clave.startswith("fin:") or ":hash:" in f.clave or grupo == f.clave:
         return f"Movimiento MP sin orden — fila {grupo_mp_visible_desde_clave(f.clave)}"
     return f"Orden {grupo} — {f.estado}"
 
@@ -78,8 +78,9 @@ def grupo_mp_visible_desde_clave(clave: str) -> str:
     return next((g for g in (m.groups() if m else ()) if g), "sin identificar")
 
 def motivo_principal_visible(r: ResultadoControlConsolidado) -> str:
-    if any((r.tiene_mercado_libre_oficial and r.total_informado_ml is None, r.tiene_eccomapp and r.costo_productos_eccomapp is None, r.tiene_mercado_pago and r.neto_aprobado_mp is None)):
-        return "Datos críticos incompletos"
+    motivos_criticos = motivos_datos_criticos_faltantes(r)
+    if motivos_criticos:
+        return "; ".join(motivos_criticos)
     if r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia:
         return "Diferencia pendiente de clasificación contable"
     if not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago):
@@ -90,8 +91,8 @@ def motivo_principal_visible(r: ResultadoControlConsolidado) -> str:
 
 def que_revisar_visible(r: ResultadoControlConsolidado) -> str:
     motivo = motivo_principal_visible(r)
-    if motivo == "Datos críticos incompletos":
-        return "Completar Total (ARS), costo Eccomapp o neto aprobado MP según corresponda."
+    if "Total (ARS)" in motivo or "Costo de producto" in motivo or "Sin neto aprobado" in motivo:
+        return "Completar o revisar el dato crítico indicado sin mezclarlo con devoluciones, reclamos o movimientos de fondos."
     if motivo == "Diferencia pendiente de clasificación contable":
         return "Comparar Neto oficial ML, neto Eccomapp y neto aprobado MP sin asumir causa."
     if motivo == "Fuente faltante":
@@ -197,11 +198,21 @@ def advertir_periodos_distintos(cobertura: tuple[CoberturaFuente, ...]) -> bool:
     return len(rangos) > 1
 
 
+def grupo_visible(r: ResultadoControlConsolidado) -> str:
+    if r.id_grupo_canonico:
+        return r.id_grupo_canonico
+    if r.ids_orden:
+        return ", ".join(r.ids_orden)
+    if r.filas_origen_mp:
+        return f"fila MP {', '.join(str(n) for n in r.filas_origen_mp)}"
+    return r.clave_resultado
+
+
 def filas_tabla_consolidada(resultados: Iterable[ResultadoControlConsolidado]) -> list[FilaControlConsolidado]:
     filas=[]
     for r in resultados:
         faltan = not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago)
-        filas.append(FilaControlConsolidado(r.clave_resultado, r.id_grupo_canonico or ", ".join(r.ids_orden) or r.clave_resultado, estado_visible(r.estado), r.estado.value, fuentes_disponibles(r), formato_importe(r.monto_venta_ml), formato_importe(r.cargo_venta_impuestos_ml), formato_importe(r.costo_envio_ml), formato_importe(r.total_informado_ml), formato_importe(r.costo_productos_eccomapp), formato_importe(r.neto_aprobado_mp), formato_importe(r.neto_financiero_total_mp), formato_importe(r.diferencia_ml_mp), formato_importe(r.utilidad_preliminar_control), "Sí" if r.requiere_revision else "No", r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia, faltan or motivo_principal_visible(r) == "Datos críticos incompletos", motivo_principal_visible(r), que_revisar_visible(r)))
+        filas.append(FilaControlConsolidado(r.clave_resultado, grupo_visible(r), estado_visible(r.estado), r.estado.value, fuentes_disponibles(r), formato_importe(r.monto_venta_ml), formato_importe(r.cargo_venta_impuestos_ml), formato_importe(r.costo_envio_ml), formato_importe(r.total_informado_ml), formato_importe(r.costo_productos_eccomapp), formato_importe(r.neto_aprobado_mp), formato_importe(r.neto_financiero_total_mp), formato_importe(r.diferencia_ml_mp), formato_importe(r.utilidad_preliminar_control), "Sí" if r.requiere_revision else "No", r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia, faltan or tiene_datos_criticos_faltantes(r), motivo_principal_visible(r), que_revisar_visible(r)))
     return filas
 
 
@@ -224,7 +235,7 @@ def tabla_consolidada(filas):
 
 def detalle_control(r: ResultadoControlConsolidado) -> dict[str, str]:
     return {
-        "Grupo": r.id_grupo_canonico or "No informado",
+        "Grupo": grupo_visible(r),
         "Órdenes": ", ".join(r.ids_orden) or "No informado",
         "Estado": estado_visible(r.estado),
         "Fuentes presentes": fuentes_disponibles(r),
