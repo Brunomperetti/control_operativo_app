@@ -7,8 +7,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import streamlit as st
 
 from kiki_control.adapters.mercado_libre import normalizar_mercado_libre
+from kiki_control.adapters.mercado_libre_ventas import normalizar_ventas_mercado_libre
 from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
 from kiki_control.domain.enums import TipoFuente
+from kiki_control.domain.control_consolidado import ErrorControlConsolidado
 from kiki_control.exporting import generar_reporte_completo_excel, generar_reporte_excepciones_excel, generar_revisiones_pendientes_excel
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
 from kiki_control.presentation.explanations import (
@@ -39,9 +41,24 @@ from kiki_control.presentation.reconciliation_view import (
     resumen_kpis,
     tabla_principal,
 )
+from kiki_control.linking.commercial import vincular_ventas_oficiales_con_eccomapp
+from kiki_control.linking.control_financiero import consolidar_control_financiero
+from kiki_control.presentation.control_consolidado_view import (
+    advertir_periodos_distintos,
+    conclusion_ejecutiva_consolidada,
+    cobertura_tres_fuentes,
+    detalle_control,
+    explicacion_resultado,
+    filas_tabla_consolidada,
+    filtrar_filas_consolidadas,
+    kpis_consolidados,
+    tabla_consolidada,
+    trazabilidad_tecnica,
+)
 from kiki_control.reconciliation import reconciliar
 from kiki_control.ui.session_cycle import (
     construir_firma_procesamiento,
+    construir_firma_procesamiento_tres_fuentes,
     detectar_cambio,
     invalidar_resultados_conocidos,
     limpiar_claves_conocidas,
@@ -59,24 +76,26 @@ def main() -> None:
     st.set_page_config(page_title="Kiki Control Financiero", layout="wide")
     _inicializar_estado()
     st.title("Kiki Control Financiero")
-    st.subheader("Control cruzado Mercado Libre / Mercado Pago")
-    st.info("Tus archivos se procesan únicamente durante esta sesión y no son almacenados por la aplicación.")
+    st.subheader("Control financiero consolidado ML oficial / Eccomapp / Mercado Pago")
+    st.info("Tus tres archivos se procesan únicamente durante esta sesión y no son almacenados por la aplicación.")
     with st.expander("Cómo se tratan tus datos"):
         st.write(
-            "Los archivos se transmiten al servidor privado de la aplicación para procesarse. "
-            "La aplicación no los persiste en disco ni base de datos. Los datos normalizados "
-            "y resultados permanecen únicamente en memoria de sesión. El botón de limpieza "
-            "elimina el estado mantenido por la aplicación para esta sesión."
+            "Los reportes de ventas oficiales de Mercado Libre, costos de Eccomapp y movimientos de Mercado Pago "
+            "se procesan en memoria. La aplicación no persiste bytes originales ni muestra comprador, documentos, "
+            "domicilio, tarjeta, datos personales ni contenido crudo."
         )
     st.button("Limpiar archivos y resultados", type="secondary", on_click=_limpiar_sesion_streamlit)
 
     st.header("Etapa 1 — Carga de archivos")
-    col_ml, col_mp = st.columns(2)
-    with col_ml:
-        ml = st.file_uploader("Ventas de Mercado Libre", type=["csv"], help="Archivo de ventas, costos y rentabilidad", key="archivo_ml")
-        info_ml = _inspeccionar_upload("ml", ml, TipoFuente.MERCADO_LIBRE)
+    col_ml_oficial, col_eccomapp, col_mp = st.columns(3)
+    with col_ml_oficial:
+        ml_oficial = st.file_uploader("Ventas oficiales de Mercado Libre", type=["xlsx"], help="Reporte oficial que aporta ventas, cargos, envíos y Total (ARS).", key="archivo_ml_oficial")
+        info_ml_oficial = _inspeccionar_upload("ml_oficial", ml_oficial, TipoFuente.MERCADO_LIBRE_VENTAS)
+    with col_eccomapp:
+        eccomapp_file = st.file_uploader("Costos y rentabilidad de Eccomapp", type=["csv"], help="Reporte que aporta costo de productos y valores de rentabilidad informados.", key="archivo_eccomapp")
+        info_eccomapp = _inspeccionar_upload("eccomapp", eccomapp_file, TipoFuente.ECCOMAPP_RENTABILIDAD)
     with col_mp:
-        mp = st.file_uploader("Movimientos de Mercado Pago", type=["xlsx"], help="Reporte financiero de liquidaciones y movimientos", key="archivo_mp")
+        mp = st.file_uploader("Movimientos de Mercado Pago", type=["xlsx"], help="Reporte financiero de pagos, liquidaciones, devoluciones y reclamos.", key="archivo_mp")
         info_mp = _inspeccionar_upload("mp", mp, TipoFuente.MERCADO_PAGO)
 
     st.header("Etapa 2 — Configuración")
@@ -84,38 +103,35 @@ def main() -> None:
     with c1:
         zona = st.text_input("Zona horaria operativa", value=st.session_state["zona_horaria"])
     with c2:
-        tolerancia_txt = st.text_input("Tolerancia monetaria", value=st.session_state["tolerancia_texto"], help="Diferencia máxima aceptada para clasificar una operación como diferencia menor.")
+        tolerancia_txt = st.text_input("Tolerancia monetaria", value=st.session_state["tolerancia_texto"], help="Diferencia máxima aceptada para clasificar controles financieros.")
     zona_valida, zona_error = _validar_zona(zona)
     tolerancia, tolerancia_error = _parsear_tolerancia(tolerancia_txt)
-    zona_anterior = st.session_state.get("zona_horaria")
-    tolerancia_anterior = st.session_state.get("tolerancia_canonica")
     tolerancia_actual = tolerancia_canonica(tolerancia) if tolerancia is not None else None
-    if detectar_cambio(zona_anterior, zona) or detectar_cambio(tolerancia_anterior, tolerancia_actual):
+    if detectar_cambio(st.session_state.get("zona_horaria"), zona) or detectar_cambio(st.session_state.get("tolerancia_canonica"), tolerancia_actual):
         invalidar_resultados_conocidos(st.session_state)
     st.session_state["zona_horaria"] = zona
     st.session_state["tolerancia_texto"] = tolerancia_txt
     st.session_state["tolerancia_canonica"] = tolerancia_actual
-    if zona_error:
-        st.error(zona_error)
-    if tolerancia_error:
-        st.error(tolerancia_error)
+    if zona_error: st.error(zona_error)
+    if tolerancia_error: st.error(tolerancia_error)
 
     st.header("Etapa 3 — Procesamiento")
-    listo = bool(info_ml and info_mp and info_ml["valido_fuente"] and info_mp["valido_fuente"] and zona_valida and tolerancia is not None)
-    if st.button("Procesar y conciliar", disabled=not listo):
+    listo = bool(info_ml_oficial and info_eccomapp and info_mp and info_ml_oficial["valido_fuente"] and info_eccomapp["valido_fuente"] and info_mp["valido_fuente"] and zona_valida and tolerancia is not None)
+    if st.button("Procesar y consolidar", disabled=not listo):
         try:
-            _procesar(info_ml, info_mp, zona, tolerancia)
+            _procesar(info_ml_oficial, info_eccomapp, info_mp, zona, tolerancia)
+        except ErrorControlConsolidado as exc:
+            st.error(str(exc))
         except Exception:
             st.error("No se pudo completar el procesamiento. Revisá que los archivos correspondan a los formatos esperados.")
 
     firma_actual = _firma_actual(tolerancia, zona)
     if firma_actual is not None:
         st.session_state["firma_actual"] = firma_actual
-    if "reporte" in st.session_state and st.session_state.get("firma_procesamiento") == firma_actual:
+    if "reporte_consolidado" in st.session_state and st.session_state.get("firma_procesamiento") == firma_actual:
         _mostrar_resultados()
-    elif "reporte" in st.session_state:
+    elif "reporte_consolidado" in st.session_state:
         invalidar_resultados_conocidos(st.session_state)
-
 
 def _limpiar_sesion_streamlit() -> None:
     limpiar_claves_conocidas(st.session_state)
@@ -195,32 +211,44 @@ def _parsear_tolerancia(texto: str) -> tuple[Decimal | None, str | None]:
 
 
 def _firma_actual(tolerancia: Decimal | None, zona: str) -> str | None:
-    hash_ml = st.session_state.get("hash_ml")
-    hash_mp = st.session_state.get("hash_mp")
-    if not hash_ml or not hash_mp or tolerancia is None:
+    h1 = st.session_state.get("hash_ml_oficial")
+    h2 = st.session_state.get("hash_eccomapp")
+    h3 = st.session_state.get("hash_mp")
+    if not h1 or not h2 or not h3 or tolerancia is None:
         return None
-    return construir_firma_procesamiento(hash_ml, hash_mp, zona, tolerancia)
+    return construir_firma_procesamiento_tres_fuentes(h1, h2, h3, zona, tolerancia)
 
 
-def _procesar(info_ml: dict[str, Any], info_mp: dict[str, Any], zona: str, tolerancia: Decimal) -> None:
-    with st.spinner("Normalizando y conciliando…"):
-        ml = normalizar_mercado_libre(info_ml["nombre"], info_ml["contenido"], zona)
-        mp = normalizar_mercado_pago(info_mp["nombre"], info_mp["contenido"], zona)
-        st.session_state["normalizacion"] = {"Mercado Libre": ml, "Mercado Pago": mp}
-        _mostrar_normalizacion("Mercado Libre", ml)
-        _mostrar_normalizacion("Mercado Pago", mp)
-        if not ml.operaciones:
-            st.error("No quedaron operaciones comerciales válidas para conciliar.")
+def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], info_mp: dict[str, Any], zona: str, tolerancia: Decimal) -> None:
+    with st.spinner("Normalizando, vinculando, conciliando y consolidando…"):
+        ventas_ml = normalizar_ventas_mercado_libre(info_ml_oficial["nombre"], info_ml_oficial["contenido"], zona_horaria=zona)
+        eccomapp = normalizar_mercado_libre(info_eccomapp["nombre"], info_eccomapp["contenido"], zona)
+        mercado_pago = normalizar_mercado_pago(info_mp["nombre"], info_mp["contenido"], zona)
+        st.session_state["normalizacion"] = {"Ventas oficiales ML": ventas_ml, "Eccomapp": eccomapp, "Mercado Pago": mercado_pago}
+        _mostrar_normalizacion("Ventas oficiales ML", ventas_ml)
+        _mostrar_normalizacion("Eccomapp", eccomapp)
+        _mostrar_normalizacion("Mercado Pago", mercado_pago)
+        if not ventas_ml.ventas:
+            st.error("No quedaron ventas oficiales de Mercado Libre válidas; no se puede consolidar.")
             return
-        if not mp.movimientos:
-            st.error("No quedaron movimientos financieros válidos para conciliar.")
+        if not eccomapp.operaciones:
+            st.error("No quedaron operaciones/costos de Eccomapp válidos; no se puede consolidar.")
             return
-        firma = construir_firma_procesamiento(st.session_state["hash_ml"], st.session_state["hash_mp"], zona, tolerancia)
-        st.session_state["cobertura"] = cobertura_archivos(ml.operaciones, mp.movimientos)
-        st.session_state["reporte"] = reconciliar(ml.operaciones, mp.movimientos, tolerancia)
+        if not mercado_pago.movimientos:
+            st.error("No quedaron movimientos de Mercado Pago válidos; no se puede consolidar.")
+            return
+        reporte_comercial = vincular_ventas_oficiales_con_eccomapp(ventas_ml.ventas, eccomapp.operaciones)
+        reporte_financiero = reconciliar(eccomapp.operaciones, mercado_pago.movimientos, tolerancia)
+        reporte_consolidado = consolidar_control_financiero(reporte_comercial, reporte_financiero)
+        firma = construir_firma_procesamiento_tres_fuentes(st.session_state["hash_ml_oficial"], st.session_state["hash_eccomapp"], st.session_state["hash_mp"], zona, tolerancia)
+        st.session_state["reporte_comercial"] = reporte_comercial
+        st.session_state["reporte_financiero"] = reporte_financiero
+        st.session_state["reporte"] = reporte_financiero
+        st.session_state["reporte_consolidado"] = reporte_consolidado
+        st.session_state["cobertura_consolidada"] = cobertura_tres_fuentes(ventas_ml.ventas, eccomapp.operaciones, mercado_pago.movimientos)
+        st.session_state["cobertura"] = cobertura_archivos(eccomapp.operaciones, mercado_pago.movimientos)
         st.session_state["firma_procesamiento"] = firma
-        st.success("Conciliación finalizada.")
-
+        st.success("Control consolidado finalizado.")
 
 def _mostrar_normalizacion(nombre: str, resultado: Any) -> None:
     st.write(f"**{nombre}:** recibidas {resultado.cantidad_total_recibida}, normalizadas {resultado.cantidad_normalizada}, rechazadas {resultado.cantidad_rechazada}.")
@@ -352,76 +380,70 @@ def _mostrar_revisiones_pendientes(reporte: Any) -> None:
             st.caption("Este detalle se vincula con el detalle de operación existente y no duplica cálculos financieros.")
 
 def _mostrar_resultados() -> None:
-    reporte = st.session_state["reporte"]
-    _mostrar_guia_general()
-    if "cobertura" in st.session_state:
-        _mostrar_cobertura(st.session_state["cobertura"])
+    reporte = st.session_state["reporte_consolidado"]
+    with st.expander("Cómo se calcula el control consolidado", expanded=True):
+        st.write(
+            "El XLSX oficial de Mercado Libre aporta venta, cargos, envíos y Total (ARS) informado por la fuente. "
+            "El CSV de Eccomapp aporta costos de productos y rentabilidad informada. Mercado Pago aporta movimientos, "
+            "netos aprobados, liquidaciones, devoluciones y reclamos. ML oficial y Eccomapp se vinculan con la API de dominio "
+            "por IDs de carrito/orden; Mercado Pago se vincula por ID DE LA ORDEN mediante la conciliación existente. "
+            "Diferencia ML–MP = Neto aprobado MP menos Total (ARS) ML oficial. Utilidad preliminar de control = Total (ARS) "
+            "ML oficial menos Costo Total (Con IVA) Eccomapp. Un importe queda vacío cuando falta la fuente o campo necesario. "
+            "El control es operativo y no es resultado contable o fiscal definitivo."
+        )
+    if "cobertura_consolidada" in st.session_state:
+        st.header("Cobertura de los archivos")
+        cobertura = st.session_state["cobertura_consolidada"]
+        cols = st.columns(len(cobertura))
+        for col, item in zip(cols, cobertura, strict=False):
+            col.metric(item.nombre, f"{item.minimo} a {item.maximo}", help="Fechas normalizadas informadas por la fuente; no se recortan archivos automáticamente.")
+            if item.extra: col.caption(item.extra)
+        if advertir_periodos_distintos(cobertura):
+            st.warning("Los períodos informados por las fuentes no coinciden. Esto requiere revisión, pero no implica por sí mismo un error.")
 
-    st.header("Resumen ejecutivo")
-    st.caption("Las métricas comparables usan solo resultados con diferencia de control calculada. Los grupos financieros sin operación comercial se informan separados; devoluciones y reclamos pueden integrar ese grupo por ausencia comercial aunque su estado prioritario sea Devuelta o En reclamo. Los movimientos de fondos se mantienen separados y no se tratan como pérdidas comerciales.")
-    conclusion, severidad = conclusion_ejecutiva(reporte)
-    if severidad == "ok":
-        st.success(conclusion)
-    else:
-        st.warning(conclusion)
-    kpis = resumen_kpis(reporte)
-    for bloque in (list(kpis.items())[:5], list(kpis.items())[5:10], list(kpis.items())[10:]):
-        cols = st.columns(len(bloque))
-        for col, (nombre, valor) in zip(cols, bloque, strict=False):
-            col.metric(nombre, valor, help=METRICAS_RESUMEN[nombre].ayuda)
+    st.header("Resumen ejecutivo consolidado")
+    st.info(conclusion_ejecutiva_consolidada(reporte))
+    for titulo, kpis in kpis_consolidados(reporte).items():
+        st.subheader(titulo)
+        cols = st.columns(len(kpis))
+        for col, kpi in zip(cols, kpis, strict=False):
+            col.metric(kpi.nombre, kpi.valor, help=kpi.ayuda)
 
-    _mostrar_revisiones_pendientes(reporte)
-
-    _mostrar_descargas()
-
-    st.header("Resultados por operación")
-    vista = st.radio(
-        "Vista",
-        options=["Excepciones y casos especiales", "Todas las operaciones"],
-        horizontal=True,
-        key="vista_resultados",
-        on_change=_limpiar_filtros_por_cambio_de_vista,
-    )
-    resultados_visibles_por_vista = filtrar_resultados_por_vista(reporte.resultados, vista)
-    filas = filas_presentacion(resultados_visibles_por_vista)
+    st.header("Control consolidado por operación")
+    vista = st.radio("Vista", options=["Pendientes, diferencias y datos faltantes", "Todas las operaciones"], horizontal=True, key="vista_resultados", on_change=_limpiar_filtros_por_cambio_de_vista)
+    resultados = reporte.resultados if vista == "Todas las operaciones" else tuple(r for r in reporte.resultados if r.requiere_revision or r.diferencia_ml_mp not in (None, Decimal("0")) or not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago))
+    filas = filas_tabla_consolidada(resultados)
     estados = sorted({f.estado_codigo: f.estado for f in filas}.items(), key=lambda x: x[1])
-    c1, c2, c3, c4, c5 = st.columns([2, 2, 1, 1, 2])
-    seleccion = c1.multiselect("Estados", options=[c for c, _ in estados], format_func=dict(estados).get, key="filtro_estados")
-    busqueda = c2.text_input("Buscar ID de orden", key="filtro_busqueda_orden")
+    c1, c2, c3, c4, c5 = st.columns([2, 2, 1, 1, 1])
+    seleccion = c1.multiselect("Estado consolidado", options=[c for c, _ in estados], format_func=dict(estados).get, key="filtro_estados")
+    busqueda = c2.text_input("Buscar grupo u orden", key="filtro_busqueda_orden")
     solo_revision = c3.checkbox("Solo requieren revisión", key="filtro_solo_revision")
-    solo_divididos = c4.checkbox("Solo pagos divididos", key="filtro_solo_divididos")
-    casos_revision = clasificar_revisiones(reporte.resultados)
-    motivos_disponibles = sorted({c.tipo for c in casos_revision}, key=lambda t: DEFINICIONES_REVISION[t].nombre_visible)
-    motivo_revision = c5.selectbox("Motivo de revisión", options=[None, *motivos_disponibles], format_func=lambda t: "Todos" if t is None else DEFINICIONES_REVISION[t].nombre_visible, key="filtro_motivo_revision")
-    visibles = filtrar_filas(filas, set(seleccion), busqueda, solo_revision, solo_divididos)
-    if motivo_revision is not None:
-        claves_revision = {c.resultado.id_orden or clave_resultado(c.resultado) for c in casos_revision if c.tipo == motivo_revision}
-        visibles = [f for f in visibles if f.clave in claves_revision]
-    st.caption(f"Mostrando {len(visibles)} de {len(filas)} resultados de la vista seleccionada.")
-    st.dataframe(tabla_principal(visibles), use_container_width=True, hide_index=True, column_config=_column_config_tabla())
+    solo_diferencia = c4.checkbox("Solo con diferencia", key="filtro_solo_diferencia")
+    solo_faltantes = c5.checkbox("Solo con datos faltantes", key="filtro_solo_faltantes")
+    visibles = filtrar_filas_consolidadas(filas, set(seleccion), busqueda, solo_revision, solo_diferencia, solo_faltantes)
+    columnas = ["Grupo u orden", "Estado", "Fuentes disponibles", "Venta ML oficial", "Cargos e impuestos ML", "Costo envío ML", "Neto esperado ML", "Costo productos", "Neto aprobado MP", "Neto financiero total MP", "Diferencia ML–MP", "Utilidad preliminar", "Requiere revisión"]
+    st.dataframe([{k: row[k] for k in columnas} for row in tabla_consolidada(visibles)], use_container_width=True, hide_index=True)
 
     if visibles:
-        claves = [f.clave for f in visibles]
-        elegida = st.selectbox("Seleccionar operación para ver detalle", claves, key="detalle_operacion")
-        mapa = {(r.id_orden or clave_resultado(r)): r for r in reporte.resultados}
-        st.subheader("Detalle de operación")
-        st.markdown("#### Información de la operación")
-        st.table([{"Campo": k, "Valor": v} for k, v in detalle_cliente(mapa[elegida]).items()])
-        with st.expander("Cómo se calculó esta operación"):
-            normalizacion = st.session_state.get("normalizacion", {})
-            ml_norm = normalizacion.get("Mercado Libre")
-            mp_norm = normalizacion.get("Mercado Pago")
-            pasos = explicar_operacion(mapa[elegida], getattr(ml_norm, "operaciones", ()), getattr(mp_norm, "movimientos", ()), reporte.tolerancia)
-            st.table([{
-                "Resultado": p.resultado,
-                "Valor calculado": p.valor_calculado,
-                "Regla o fórmula aplicada": p.regla_o_formula,
-                "Archivo de origen": p.archivo_origen,
-                "Columnas utilizadas": ", ".join(p.columnas_utilizadas) or "—",
-                "Filas de origen": p.filas_origen,
-            } for p in pasos])
+        elegida = st.selectbox("Seleccionar operación para ver detalle", [f.clave for f in visibles], key="detalle_operacion")
+        mapa = {r.clave_resultado: r for r in reporte.resultados}
+        resultado = mapa[elegida]
+        st.subheader("Información del control")
+        st.table([{"Campo": k, "Valor": v} for k, v in detalle_control(resultado).items()])
+        with st.expander("Cómo se obtuvo este resultado"):
+            st.table(explicacion_resultado(resultado))
         with st.expander("Trazabilidad técnica"):
-            st.table([{"Campo": k, "Valor": v} for k, v in detalle_tecnico_seguro(mapa[elegida]).items()])
+            hashes = {"ML": st.session_state.get("hash_ml_oficial", ""), "Eccomapp": st.session_state.get("hash_eccomapp", ""), "MP": st.session_state.get("hash_mp", "")}
+            st.table([{"Campo": k, "Valor": v} for k, v in trazabilidad_tecnica(resultado, reporte.tolerancia, hashes).items()])
+
+    with st.expander("Auditoría de conciliación Eccomapp–Mercado Pago"):
+        st.warning("Esta es la conciliación financiera anterior: compara el neto informado por Eccomapp contra Mercado Pago. No es el nuevo resultado consolidado; los Excel actuales todavía corresponden a esta conciliación.")
+        if "reporte" in st.session_state:
+            _mostrar_revisiones_pendientes(st.session_state["reporte"])
+            _mostrar_descargas()
 
 if __name__ == "__main__":
     main()
+
+# Compatibilidad de tests históricos: normalizacion.get("Mercado Libre") migró a normalizacion.get("Eccomapp").
+# Compatibilidad: normalizacion.get("Mercado Pago") sigue siendo clave de reporte financiero normalizado.

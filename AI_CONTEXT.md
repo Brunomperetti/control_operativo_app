@@ -259,3 +259,13 @@ No asumir que la existencia de un `ResultadoConciliacion` implica presencia de M
 Para unir Mercado Pago con grupos comerciales, usar `ResultadoVinculacionComercial.ids_orden` cuando existan. Si el resultado comercial es `SOLO_MERCADO_LIBRE` y contiene exactamente una venta oficial no ambigua, se puede usar `venta.id_venta` como candidato de ID Order para vincular MP aunque falte Eccomapp. No hacer esto para `AMBIGUA` o `DUPLICADA`, ni agregar cabeceras de carrito como ID Order cuando existen órdenes internas.
 
 La compatibilidad de hashes Eccomapp entre reporte comercial y reporte financiero es igualdad exacta de conjuntos. Ambos vacíos es válido si no existe Eccomapp; subconjuntos, diferencias o vacío contra no vacío son errores de dominio.
+
+## Actualización: Streamlit consolida tres fuentes
+
+La interfaz Streamlit ahora carga tres archivos separados: ventas oficiales de Mercado Libre (`archivo_ml_oficial`), costos/rentabilidad de Eccomapp (`archivo_eccomapp`) y movimientos de Mercado Pago (`archivo_mp`). Cada carga se inspecciona en memoria y debe coincidir con su `TipoFuente` esperado. No se deben guardar bytes originales en sesión después del procesamiento.
+
+El procesamiento obligatorio en UI reutiliza exclusivamente estas APIs: `normalizar_ventas_mercado_libre`, `normalizar_mercado_libre` para Eccomapp, `normalizar_mercado_pago`, `vincular_ventas_oficiales_con_eccomapp`, `reconciliar` y `consolidar_control_financiero`. Streamlit no debe reconstruir reglas financieras ni incorporar fórmulas críticas; las transformaciones de presentación viven en `src/kiki_control/presentation/control_consolidado_view.py` y son puras.
+
+La vista muestra cobertura temporal de ML oficial, Eccomapp, origen MP y liquidaciones MP; resumen ejecutivo; KPIs con universos comparables; tabla “Control consolidado por operación”; detalle seguro; explicación prudente; y trazabilidad técnica limitada. La utilidad se denomina siempre “utilidad preliminar de control” y no debe presentarse como ganancia definitiva, resultado contable ni fiscal.
+
+La auditoría financiera anterior Eccomapp–Mercado Pago permanece en un expander secundario con sus descargas Excel existentes. Todavía no existe exportación Excel del resultado consolidado.
