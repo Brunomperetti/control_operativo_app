@@ -188,9 +188,13 @@ def _mostrar_problemas(titulo: str, problemas: tuple[Any, ...], render) -> None:
         resumen[p.codigo] = resumen.get(p.codigo, 0) + 1
     resumenes = []
     for codigo, cantidad in resumen.items():
-        detalles = tuple(p.detalle for p in problemas if p.codigo == codigo and getattr(p, "detalle", None))
-        detalle = f" — {detalles[0]}" if len(set(detalles)) == 1 else ""
-        resumenes.append(f"{codigo} ({cantidad}){detalle}")
+        problemas_codigo = tuple(p for p in problemas if p.codigo == codigo)
+        detalles = tuple(p.detalle for p in problemas_codigo if getattr(p, "detalle", None))
+        detalle = f" {detalles[0]}." if len(set(detalles)) == 1 else ""
+        if codigo == "COSTO_ENVIO_VACIO_INTERPRETADO_CERO" and problemas_codigo:
+            resumenes.append(f"Costo de envío vacío interpretado como $0 según regla confirmada.{detalle}")
+        else:
+            resumenes.append(f"{codigo} ({cantidad})" + (f" — {detalles[0]}" if len(set(detalles)) == 1 else ""))
     render(f"{titulo}: " + ", ".join(resumenes))
     with st.expander(f"Ver detalle de {titulo.lower()}"):
         for p in problemas[:20]:
@@ -304,9 +308,9 @@ def _mostrar_cobertura(cobertura: Any) -> None:
         st.info(cobertura.advertencia_origenes + " La aplicación no recorta automáticamente el XLSX.")
 
 
-def _nombre_exportacion(prefijo: str) -> str:
-    reporte = st.session_state["reporte"]
-    fecha = reporte.fecha_procesamiento_utc.strftime("%Y%m%d_%H%M%S")
+def _nombre_exportacion(prefijo: str, reporte: Any | None = None) -> str:
+    reporte_fecha = reporte if reporte is not None and hasattr(reporte, "fecha_procesamiento_utc") else st.session_state["reporte"]
+    fecha = reporte_fecha.fecha_procesamiento_utc.strftime("%Y%m%d_%H%M%S")
     return f"{prefijo}_{fecha}.xlsx"
 
 
@@ -455,9 +459,9 @@ def _mostrar_resultados() -> None:
             st.warning("Los períodos de origen de ML oficial, Eccomapp y Mercado Pago no coinciden. Esto requiere revisión, pero no implica por sí mismo un error.")
 
     st.header("Resumen ejecutivo consolidado")
-    st.info(conclusion_ejecutiva_consolidada(reporte))
     inicio_ml, fin_ml = _periodo_ventas_ml_normalizadas()
     diagnostico = diagnosticar_control_consolidado(reporte, inicio_ml, fin_ml, _fechas_mp_por_fila_normalizadas())
+    st.info(conclusion_ejecutiva_consolidada(reporte, diagnostico))
     if not diagnostico.particion.cierra_exactamente or not diagnostico.diferencias.identidad_cierra_exactamente:
         st.error("Error de consistencia en diagnósticos: no se presentan KPIs como confiables hasta revisar la partición o la identidad de diferencias.")
     st.subheader("Cobertura monetaria entre fuentes")
@@ -563,9 +567,9 @@ def _mostrar_resultados() -> None:
     st.header("Descargas consolidadas")
     mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     d1, d2, d3 = st.columns(3)
-    d1.download_button("Reporte consolidado de tres fuentes", data=generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico), file_name=_nombre_descarga("reporte_consolidado_tres_fuentes"), mime=mime)
-    d2.download_button("Excepciones del control consolidado", data=generar_excepciones_consolidadas_excel(reporte), file_name=_nombre_descarga("excepciones_control_consolidado"), mime=mime)
-    d3.download_button("Revisiones consolidadas", data=generar_revisiones_consolidadas_excel(reporte), file_name=_nombre_descarga("revisiones_consolidadas"), mime=mime)
+    d1.download_button("Reporte consolidado de tres fuentes", data=generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico), file_name=_nombre_exportacion("reporte_consolidado_tres_fuentes"), mime=mime)
+    d2.download_button("Excepciones del control consolidado", data=generar_excepciones_consolidadas_excel(reporte), file_name=_nombre_exportacion("excepciones_control_consolidado"), mime=mime)
+    d3.download_button("Revisiones consolidadas", data=generar_revisiones_consolidadas_excel(reporte), file_name=_nombre_exportacion("revisiones_consolidadas"), mime=mime)
 
     with st.expander("Auditoría histórica Eccomapp–Mercado Pago (Auditoría de conciliación Eccomapp–Mercado Pago)"):
         st.warning("Esta es la conciliación financiera anterior: compara el neto informado por Eccomapp contra Mercado Pago. No es el nuevo resultado consolidado; sus descargas se mantienen separadas dentro de esta auditoría histórica.")
