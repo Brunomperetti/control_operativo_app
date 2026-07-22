@@ -8,6 +8,7 @@ from typing import Iterable, Any
 
 from kiki_control.domain.control_consolidado import EstadoControlConsolidado, ReporteControlConsolidado, ResultadoControlConsolidado
 from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado, motivos_datos_criticos_faltantes, tiene_datos_criticos_faltantes
+from kiki_control.presentation.formatters import formato_pesos_argentino
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,8 @@ class FilaControlConsolidado:
     tiene_datos_faltantes: bool
     motivo_principal: str = ""
     que_revisar: str = ""
+    ids_orden: tuple[str, ...] = ()
+    filas_origen_mp: tuple[int, ...] = ()
 
 
 
@@ -67,10 +70,10 @@ def estado_visible(estado: EstadoControlConsolidado | str) -> str:
         return str(estado).replace("_", " ").capitalize()
 
 def etiqueta_selector_detalle(f: FilaControlConsolidado) -> str:
-    grupo = f.grupo_orden
-    if grupo.startswith("fin:") or ":hash:" in grupo or f.clave.startswith("fin:") or ":hash:" in f.clave or grupo == f.clave:
-        return f"Movimiento MP sin orden — fila {grupo_mp_visible_desde_clave(f.clave)}"
-    return f"Orden {grupo} — {f.estado}"
+    if f.ids_orden:
+        return f"Orden {', '.join(f.ids_orden)} — {f.estado}"
+    fila = f.filas_origen_mp[0] if f.filas_origen_mp else grupo_mp_visible_desde_clave(f.clave)
+    return f"Movimiento MP sin orden — fila {fila}"
 
 def grupo_mp_visible_desde_clave(clave: str) -> str:
     import re
@@ -104,7 +107,14 @@ def que_revisar_visible(r: ResultadoControlConsolidado) -> str:
 def formato_importe(valor: Decimal | None) -> str:
     if valor is None:
         return "No calculado"
-    return f"$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return formato_pesos_argentino(valor).replace("-$ ", "$ -")
+
+def formato_fecha(valor: Any) -> str:
+    if valor is None:
+        return "Sin fecha"
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%d/%m/%Y")
+    return str(valor)
 
 
 def _sumar(valores: Iterable[Decimal | None]) -> Decimal:
@@ -177,7 +187,7 @@ def cobertura_tres_fuentes(ventas_ml: Iterable[Any], operaciones: Iterable[Any],
     def rango(objs, attr):
         fechas = [getattr(o, attr) for o in objs if getattr(o, attr, None) is not None]
         if not fechas: return ("Sin fechas", "Sin fechas")
-        return (min(fechas).date().isoformat(), max(fechas).date().isoformat())
+        return (formato_fecha(min(fechas).date()), formato_fecha(max(fechas).date()))
     movs = tuple(movimientos)
     sin_liq = sum(1 for m in movs if getattr(m, "fecha_liquidacion_local", None) is None)
     return (
@@ -212,7 +222,29 @@ def filas_tabla_consolidada(resultados: Iterable[ResultadoControlConsolidado]) -
     filas=[]
     for r in resultados:
         faltan = not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago)
-        filas.append(FilaControlConsolidado(r.clave_resultado, grupo_visible(r), estado_visible(r.estado), r.estado.value, fuentes_disponibles(r), formato_importe(r.monto_venta_ml), formato_importe(r.cargo_venta_impuestos_ml), formato_importe(r.costo_envio_ml), formato_importe(r.total_informado_ml), formato_importe(r.costo_productos_eccomapp), formato_importe(r.neto_aprobado_mp), formato_importe(r.neto_financiero_total_mp), formato_importe(r.diferencia_ml_mp), formato_importe(r.utilidad_preliminar_control), "Sí" if r.requiere_revision else "No", r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia, faltan or tiene_datos_criticos_faltantes(r), motivo_principal_visible(r), que_revisar_visible(r)))
+        filas.append(FilaControlConsolidado(
+            r.clave_resultado,
+            grupo_visible(r),
+            estado_visible(r.estado),
+            r.estado.value,
+            fuentes_disponibles(r),
+            formato_importe(r.monto_venta_ml),
+            formato_importe(r.cargo_venta_impuestos_ml),
+            formato_importe(r.costo_envio_ml),
+            formato_importe(r.total_informado_ml),
+            formato_importe(r.costo_productos_eccomapp),
+            formato_importe(r.neto_aprobado_mp),
+            formato_importe(r.neto_financiero_total_mp),
+            formato_importe(r.diferencia_ml_mp),
+            formato_importe(r.utilidad_preliminar_control),
+            "Sí" if r.requiere_revision else "No",
+            r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia,
+            faltan or tiene_datos_criticos_faltantes(r),
+            motivo_principal_visible(r),
+            que_revisar_visible(r),
+            r.ids_orden,
+            r.filas_origen_mp,
+        ))
     return filas
 
 
