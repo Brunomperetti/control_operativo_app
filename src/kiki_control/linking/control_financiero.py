@@ -276,4 +276,5 @@ def consolidar_control_financiero(reporte_comercial: ReporteVinculacionComercial
         suma_total_informado_ml=sum((r.total_informado_ml or _ZERO for r in resultados_t), _ZERO),
         suma_neto_aprobado_mp=sum((r.neto_aprobado_mp or _ZERO for r in resultados_t), _ZERO),
         suma_costo_productos_eccomapp=sum((r.costo_productos_eccomapp or _ZERO for r in resultados_t), _ZERO),
+        total_total_ml_ausente=cuenta(EstadoControlConsolidado.TOTAL_ML_AUSENTE),
     )

@@ -430,3 +430,27 @@ def test_excel_consolidado_exporta_costo_productos_eccomapp_numero_vacio_y_forma
     assert ws.cell(2, col_id).data_type == 's'
     assert not str(ws.cell(4, col_id).value).startswith('=')
     assert reporte == antes
+
+def test_total_ml_ausente_aparece_en_conclusion_kpis_y_excel():
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from tests.test_control_consolidado_diagnostics import r, rep, D, E
+    from kiki_control.exporting import generar_reporte_consolidado_excel
+    from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
+    from kiki_control.presentation.control_consolidado_view import alcance_completo_consolidado, conclusion_ejecutiva_consolidada, kpis_consolidados
+
+    reporte = rep([
+        r('ok', E.COMPLETA, ml=D('100'), mp=D('100'), costo=D('40'), dif=D('0')),
+        r('sin-total', E.TOTAL_ML_AUSENTE, ml=None, mp=D('80'), costo=D('30'), dif=None),
+        r('revision', E.EN_REVISION_FINANCIERA, ml=D('50'), mp=D('50'), costo=D('20'), dif=D('0')),
+    ])
+    assert reporte.total_total_ml_ausente == 1
+    assert sum(diagnosticar_control_consolidado(reporte).particion.por_estado_principal.values()) == reporte.total_resultados
+    assert '1 venta oficial sin Total (ARS)' in conclusion_ejecutiva_consolidada(reporte)
+    assert '1 venta oficial sin Total (ARS)' in alcance_completo_consolidado(reporte)
+    bloque_d = {k.nombre: k.valor for k in kpis_consolidados(reporte)['Bloque D — Calidad y pendientes']}
+    assert bloque_d['Venta oficial sin Total (ARS)'] == '1'
+    assert 'Total (ARS) válido' in next(k.ayuda for k in kpis_consolidados(reporte)['Bloque C — Costos y utilidad'] if k.nombre == 'Cobertura de utilidad')
+    wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(reporte)))
+    resumen = {row[0].value: row[1].value for row in wb['Resumen'].iter_rows(min_row=2, max_col=2)}
+    assert resumen['Venta oficial sin Total (ARS)'] == 1

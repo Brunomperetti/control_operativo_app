@@ -123,3 +123,4 @@ class ReporteControlConsolidado:
     suma_total_informado_ml: Decimal
     suma_neto_aprobado_mp: Decimal
     suma_costo_productos_eccomapp: Decimal
+    total_total_ml_ausente: int = 0

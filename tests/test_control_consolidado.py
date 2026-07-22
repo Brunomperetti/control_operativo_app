@@ -298,3 +298,29 @@ def test_particion_primaria_incluye_total_ml_ausente_sin_doble_conteo():
     assert conteos[EstadoControlConsolidado.TOTAL_ML_AUSENTE] == 1
     assert conteos[EstadoControlConsolidado.SIN_COSTO_PRODUCTO] == 1
     assert all(sum(1 for e in estados if r.estado == e) == 1 for r in rep.resultados)
+
+def test_contador_total_ml_ausente_y_suma_de_estados_cierra():
+    rep = reporte(
+        [venta("OK"), venta("NO-TOTAL", fila=2, total=None), venta("NO-COST", fila=3)],
+        [op("OK", fila=1), op("NO-TOTAL", fila=2, costo=D("10"))],
+        [fin("OK", fila=1), fin("NO-TOTAL", fila=2), fin("NO-COST", fila=3)],
+    )
+    assert rep.total_total_ml_ausente == 1
+    suma_estados = sum(
+        getattr(rep, attr)
+        for attr in (
+            "total_completa",
+            "total_con_diferencia",
+            "total_sin_movimiento_financiero",
+            "total_solo_movimiento_financiero",
+            "total_sin_venta_oficial",
+            "total_total_ml_ausente",
+            "total_sin_costo_producto",
+            "total_en_revision_financiera",
+            "total_duplicada_o_ambigua",
+        )
+    )
+    assert suma_estados == rep.total_resultados
+    sin_total = next(r for r in rep.resultados if r.estado == EstadoControlConsolidado.TOTAL_ML_AUSENTE)
+    assert sin_total.diferencia_ml_mp is None
+    assert sin_total.utilidad_preliminar_control is None
