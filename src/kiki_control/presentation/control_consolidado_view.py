@@ -76,6 +76,7 @@ _ESTADOS_VISIBLES = {
     EstadoControlConsolidado.COMPLETA: "Completo",
     EstadoControlConsolidado.CON_DIFERENCIA: "Con diferencia",
     EstadoControlConsolidado.SIN_VENTA_OFICIAL: "Sin venta oficial",
+    EstadoControlConsolidado.TOTAL_ML_AUSENTE: "Venta oficial sin Total (ARS)",
     EstadoControlConsolidado.SIN_COSTO_PRODUCTO: "Sin costo de producto",
     EstadoControlConsolidado.SIN_MOVIMIENTO_FINANCIERO: "Sin movimiento de Mercado Pago",
     EstadoControlConsolidado.SOLO_MOVIMIENTO_FINANCIERO: "Solo movimiento de Mercado Pago",

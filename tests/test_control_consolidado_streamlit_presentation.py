@@ -402,3 +402,31 @@ def test_conclusion_breve_requerida_y_decimal_sin_float():
     assert texto == "609 de 611 grupos comparables coinciden dentro de la tolerancia. 2 presentan diferencias por un total de $ 24.044,34."
     source = open("src/kiki_control/presentation/control_consolidado_view.py", encoding="utf-8").read()
     assert "float(" not in source
+
+def test_excel_consolidado_exporta_costo_productos_eccomapp_numero_vacio_y_formato():
+    from copy import deepcopy
+    from io import BytesIO
+    from decimal import Decimal
+    from openpyxl import load_workbook
+    from tests.test_control_consolidado_diagnostics import r, rep, D, E
+    from kiki_control.exporting import generar_reporte_consolidado_excel
+
+    reporte = rep([
+        r('12345678901234567890', E.COMPLETA, ml=D('100'), mp=D('100'), costo=D('40'), dif=D('0')),
+        r('faltante', E.TOTAL_ML_AUSENTE, ml=None, mp=D('60'), costo=None, dif=None),
+        r('=formula', E.COMPLETA, ml=D('20'), mp=D('20'), costo=D('5'), dif=D('0')),
+    ])
+    antes = deepcopy(reporte)
+    wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(reporte)))
+    ws = wb['Control por operación']
+    headers = [c.value for c in ws[1]]
+    assert 'Costo de productos Eccomapp' in headers
+    col_costo = headers.index('Costo de productos Eccomapp') + 1
+    col_id = headers.index('Grupo u orden') + 1
+    assert ws.cell(2, col_costo).value == Decimal('40')
+    assert ws.cell(2, col_costo).data_type == 'n'
+    assert '$' in ws.cell(2, col_costo).number_format
+    assert ws.cell(3, col_costo).value is None
+    assert ws.cell(2, col_id).data_type == 's'
+    assert not str(ws.cell(4, col_id).value).startswith('=')
+    assert reporte == antes

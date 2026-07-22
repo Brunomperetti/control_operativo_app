@@ -273,3 +273,28 @@ def test_hashes_eccomapp_subconjunto_incompleto_es_invalido():
 def test_hashes_incompatibles_generan_error_de_dominio():
     with pytest.raises(ErrorControlConsolidado, match="hashes comerciales"):
         reporte([venta("O1")], [op("O1")], [fin("O1", comercial_hashes=("otro-hash",))])
+
+def test_venta_oficial_sin_total_ml_conserva_fuentes_y_requiere_revision():
+    r = unico(reporte([venta("O-TOTAL", total=None)], [op("O-TOTAL", costo=D("35"), neto=D("65"))], [fin("O-TOTAL", neto=D("65"))]))
+    assert r.estado == EstadoControlConsolidado.TOTAL_ML_AUSENTE
+    assert r.requiere_revision is True
+    assert r.diferencia_ml_mp is None
+    assert r.utilidad_preliminar_control is None
+    assert r.costo_productos_eccomapp == D("35")
+    assert r.neto_aprobado_mp == D("65")
+    assert "TOTAL_ML_AUSENTE" in r.motivos
+    assert any("falta el importe Total (ARS)" in e for e in r.explicaciones)
+
+
+def test_particion_primaria_incluye_total_ml_ausente_sin_doble_conteo():
+    rep = reporte(
+        [venta("OK"), venta("NO-TOTAL", fila=2, total=None), venta("NO-COST", fila=3)],
+        [op("OK", fila=1), op("NO-TOTAL", fila=2, costo=D("10"))],
+        [fin("OK", fila=1), fin("NO-TOTAL", fila=2), fin("NO-COST", fila=3)],
+    )
+    estados = tuple(EstadoControlConsolidado)
+    conteos = {e: sum(1 for r in rep.resultados if r.estado == e) for e in estados}
+    assert sum(conteos.values()) == rep.total_resultados == len(rep.resultados)
+    assert conteos[EstadoControlConsolidado.TOTAL_ML_AUSENTE] == 1
+    assert conteos[EstadoControlConsolidado.SIN_COSTO_PRODUCTO] == 1
+    assert all(sum(1 for e in estados if r.estado == e) == 1 for r in rep.resultados)
