@@ -22,6 +22,7 @@ class EstadoControlConsolidado(StrEnum):
     DUPLICADA_O_AMBIGUA = "DUPLICADA_O_AMBIGUA"
     SOLO_MOVIMIENTO_FINANCIERO = "SOLO_MOVIMIENTO_FINANCIERO"
     SIN_VENTA_OFICIAL = "SIN_VENTA_OFICIAL"
+    TOTAL_ML_AUSENTE = "TOTAL_ML_AUSENTE"
     SIN_COSTO_PRODUCTO = "SIN_COSTO_PRODUCTO"
     SIN_MOVIMIENTO_FINANCIERO = "SIN_MOVIMIENTO_FINANCIERO"
     EN_REVISION_FINANCIERA = "EN_REVISION_FINANCIERA"
@@ -122,3 +123,4 @@ class ReporteControlConsolidado:
     suma_total_informado_ml: Decimal
     suma_neto_aprobado_mp: Decimal
     suma_costo_productos_eccomapp: Decimal
+    total_total_ml_ausente: int = 0

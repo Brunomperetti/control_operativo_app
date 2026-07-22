@@ -260,6 +260,7 @@ def diagnosticar_revisiones(reporte: ReporteControlConsolidado) -> DiagnosticoRe
     reglas = (
         ("Datos críticos incompletos", tiene_datos_criticos_faltantes, "Completar campos críticos en la fuente correspondiente."),
         ("Diferencia pendiente de clasificación contable", lambda r: r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia, "Revisar ML oficial, Eccomapp y MP sin asumir causa contable."),
+        ("Venta oficial sin Total (ARS)", lambda r: r.tiene_mercado_libre_oficial and r.total_informado_ml is None, "Completar o revisar la columna Total (ARS) de Mercado Libre oficial antes del control monetario."),
         ("Fuente faltante", lambda r: not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago), "Confirmar si el archivo cargado cubre el universo esperado."),
         ("Revisión financiera", lambda r: r.estado == EstadoControlConsolidado.EN_REVISION_FINANCIERA or r.indicadores_financieros.tiene_devolucion or r.indicadores_financieros.tiene_reclamo or r.indicadores_financieros.tiene_disputa, "Revisar movimientos financieros asociados."),
     )

@@ -19,7 +19,7 @@ def state_needs_review(e):
     return e != E.COMPLETA
 
 def rep(resultados):
-    return ReporteControlConsolidado(tuple(resultados), 'v', D('0.01'), 0, 0, len(resultados), sum(x.requiere_revision for x in resultados), sum(x.estado==E.COMPLETA for x in resultados), sum(x.estado==E.CON_DIFERENCIA for x in resultados), sum(x.estado==E.SIN_MOVIMIENTO_FINANCIERO for x in resultados), sum(x.estado==E.SOLO_MOVIMIENTO_FINANCIERO for x in resultados), sum(x.estado==E.SIN_VENTA_OFICIAL for x in resultados), sum(x.estado==E.SIN_COSTO_PRODUCTO for x in resultados), sum(x.estado==E.EN_REVISION_FINANCIERA for x in resultados), sum(x.estado==E.DUPLICADA_O_AMBIGUA for x in resultados), D('0'), D('0'), D('0'))
+    return ReporteControlConsolidado(tuple(resultados), 'v', D('0.01'), 0, 0, len(resultados), sum(x.requiere_revision for x in resultados), sum(x.estado==E.COMPLETA for x in resultados), sum(x.estado==E.CON_DIFERENCIA for x in resultados), sum(x.estado==E.SIN_MOVIMIENTO_FINANCIERO for x in resultados), sum(x.estado==E.SOLO_MOVIMIENTO_FINANCIERO for x in resultados), sum(x.estado==E.SIN_VENTA_OFICIAL for x in resultados), sum(x.estado==E.SIN_COSTO_PRODUCTO for x in resultados), sum(x.estado==E.EN_REVISION_FINANCIERA for x in resultados), sum(x.estado==E.DUPLICADA_O_AMBIGUA for x in resultados), D('0'), D('0'), D('0'), sum(x.estado==E.TOTAL_ML_AUSENTE for x in resultados))
 
 def test_diferencia_real_no_depende_del_estado_principal_y_signos_tolerancia():
     reporte = rep([r('sin-costo', E.SIN_COSTO_PRODUCTO, mp=D('110'), costo=None, dif=D('10')), r('neg', E.CON_DIFERENCIA, mp=D('80'), dif=D('-20')), r('tol', E.COMPLETA, mp=D('100.005'), dif=D('0.005'))])

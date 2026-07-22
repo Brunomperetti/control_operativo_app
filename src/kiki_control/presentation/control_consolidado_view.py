@@ -76,6 +76,7 @@ _ESTADOS_VISIBLES = {
     EstadoControlConsolidado.COMPLETA: "Completo",
     EstadoControlConsolidado.CON_DIFERENCIA: "Con diferencia",
     EstadoControlConsolidado.SIN_VENTA_OFICIAL: "Sin venta oficial",
+    EstadoControlConsolidado.TOTAL_ML_AUSENTE: "Venta oficial sin Total (ARS)",
     EstadoControlConsolidado.SIN_COSTO_PRODUCTO: "Sin costo de producto",
     EstadoControlConsolidado.SIN_MOVIMIENTO_FINANCIERO: "Sin movimiento de Mercado Pago",
     EstadoControlConsolidado.SOLO_MOVIMIENTO_FINANCIERO: "Solo movimiento de Mercado Pago",
@@ -160,9 +161,15 @@ def conclusion_ejecutiva_consolidada(reporte: ReporteControlConsolidado, diagnos
     """Conclusión principal breve, sin recalcular valores del dominio."""
     diag = diagnostico or diagnosticar_control_consolidado(reporte)
     diferencias = diag.diferencias
+    extra_total_ml = (
+        f" {reporte.total_total_ml_ausente} venta oficial sin Total (ARS) requiere revisión monetaria."
+        if reporte.total_total_ml_ausente
+        else ""
+    )
     return (
         f"{diferencias.coincidencias_dentro_tolerancia} de {diferencias.comparables_totales} grupos comparables coinciden dentro de la tolerancia. "
         f"{diferencias.con_diferencia_ml_mp} presentan diferencias por un total de {formato_importe(diferencias.suma_diferencia_ml_mp)}."
+        f"{extra_total_ml}"
     )
 
 
@@ -171,6 +178,7 @@ def textos_secundarios_conclusion(reporte: ReporteControlConsolidado) -> tuple[s
     return (
         f"{reporte.total_resultados} grupos consolidados.",
         f"{reporte.total_requieren_revision} requieren revisión.",
+        f"{reporte.total_total_ml_ausente} con venta oficial sin Total (ARS).",
         f"Utilidad preliminar calculable para {calculables} de {reporte.total_resultados} grupos.",
         "El resultado es operativo y no contable o fiscal definitivo.",
     )
@@ -182,8 +190,9 @@ def alcance_completo_consolidado(reporte: ReporteControlConsolidado, diagnostico
     return (
         f"Se consolidaron {reporte.total_resultados} grupos. Estados principales: {reporte.total_completa} completos, "
         f"{reporte.total_con_diferencia} con estado principal con diferencia, {reporte.total_sin_venta_oficial} sin venta oficial, "
-        f"{reporte.total_sin_costo_producto} sin costo de producto, {reporte.total_sin_movimiento_financiero} sin movimiento MP, "
-        f"{reporte.total_solo_movimiento_financiero} solo movimientos financieros y {reporte.total_duplicada_o_ambigua} duplicados o ambiguos. "
+        f"{reporte.total_total_ml_ausente} venta oficial sin Total (ARS), {reporte.total_sin_costo_producto} sin costo de producto, "
+        f"{reporte.total_sin_movimiento_financiero} sin movimiento MP, {reporte.total_solo_movimiento_financiero} solo movimientos financieros, "
+        f"{reporte.total_en_revision_financiera} en revisión financiera y {reporte.total_duplicada_o_ambigua} duplicados o ambiguos. "
         f"En el universo ML–MP existen {diferencias.comparables_totales} grupos comparables: {diferencias.coincidencias_dentro_tolerancia} coinciden dentro de tolerancia y "
         f"{diferencias.con_diferencia_ml_mp} presentan diferencias por {formato_importe(diferencias.suma_diferencia_ml_mp)}. "
         "Los estados de cobertura y fuentes faltantes se informan por separado, sin sumar contadores de universos diferentes ni atribuir causas contables a la diferencia. "
@@ -213,11 +222,12 @@ def kpis_consolidados(reporte: ReporteControlConsolidado) -> dict[str, list[Kpi]
         "Bloque C — Costos y utilidad": [
             Kpi("Costo de productos Eccomapp", formato_importe(_sumar(r.costo_productos_eccomapp for r in resultados)), "Fuente: Eccomapp. Campo: costo_productos_eccomapp. Columna: Costo Total (Con IVA) ($). Universo: resultados con Eccomapp." + ayuda_limite),
             Kpi("Utilidad preliminar calculable", formato_importe(_sumar(r.utilidad_preliminar_control for r in utilidad_calc)), "Fórmula: Total (ARS) ML oficial menos Costo Total (Con IVA) Eccomapp, solo donde ambos existen." + ayuda_limite),
-            Kpi("Cobertura de utilidad", f"{len(utilidad_calc)} de {len(resultados)}", "Universo: grupos consolidados. Requiere venta oficial ML y costo de producto Eccomapp." + ayuda_limite),
+            Kpi("Cobertura de utilidad", f"{len(utilidad_calc)} de {len(resultados)}", "Universo: grupos consolidados. Requiere Total (ARS) válido de ML oficial y Costo Total (Con IVA) ($) de Eccomapp; la sola presencia de ambas fuentes no alcanza." + ayuda_limite),
         ],
         "Bloque D — Calidad y pendientes": [
             Kpi("Resultados completos", str(reporte.total_completa), "Resultados con fuentes y comparaciones suficientes según el dominio."),
             Kpi("Requieren revisión", str(reporte.total_requieren_revision), "Resultados marcados por el dominio como requiere_revision."),
+            Kpi("Venta oficial sin Total (ARS)", str(reporte.total_total_ml_ausente), "Resultados con venta oficial ML presente pero sin Total (ARS), por lo que no se calculan diferencia ML–MP ni utilidad preliminar."),
             Kpi("Sin costo", str(reporte.total_sin_costo_producto), "Resultados sin costo de producto Eccomapp encontrado."),
             Kpi("Sin MP", str(reporte.total_sin_movimiento_financiero), "Resultados sin movimiento Mercado Pago encontrado."),
             Kpi("Sin venta oficial", str(reporte.total_sin_venta_oficial), "Resultados sin venta oficial ML encontrada."),

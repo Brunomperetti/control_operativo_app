@@ -22,6 +22,7 @@ _PRIORIDAD = (
     EstadoControlConsolidado.DUPLICADA_O_AMBIGUA,
     EstadoControlConsolidado.SOLO_MOVIMIENTO_FINANCIERO,
     EstadoControlConsolidado.SIN_VENTA_OFICIAL,
+    EstadoControlConsolidado.TOTAL_ML_AUSENTE,
     EstadoControlConsolidado.SIN_COSTO_PRODUCTO,
     EstadoControlConsolidado.SIN_MOVIMIENTO_FINANCIERO,
     EstadoControlConsolidado.EN_REVISION_FINANCIERA,
@@ -156,6 +157,10 @@ def _resultado_desde(
         motivos.append("SIN_GRUPO_COMERCIAL")
     if comercial and not (comercial.venta_principal_ml or comercial.ventas_detalle_ml):
         candidatos.add(EstadoControlConsolidado.SIN_VENTA_OFICIAL)
+    if comercial and (comercial.venta_principal_ml or comercial.ventas_detalle_ml) and total_ml is None:
+        candidatos.add(EstadoControlConsolidado.TOTAL_ML_AUSENTE)
+        motivos.append("TOTAL_ML_AUSENTE")
+        explicaciones.append("Existe venta oficial de Mercado Libre, pero falta el importe Total (ARS) necesario para el control monetario.")
     if comercial and costo_prod is None:
         candidatos.add(EstadoControlConsolidado.SIN_COSTO_PRODUCTO)
     if comercial and not tiene_mp:
@@ -271,4 +276,5 @@ def consolidar_control_financiero(reporte_comercial: ReporteVinculacionComercial
         suma_total_informado_ml=sum((r.total_informado_ml or _ZERO for r in resultados_t), _ZERO),
         suma_neto_aprobado_mp=sum((r.neto_aprobado_mp or _ZERO for r in resultados_t), _ZERO),
         suma_costo_productos_eccomapp=sum((r.costo_productos_eccomapp or _ZERO for r in resultados_t), _ZERO),
+        total_total_ml_ausente=cuenta(EstadoControlConsolidado.TOTAL_ML_AUSENTE),
     )

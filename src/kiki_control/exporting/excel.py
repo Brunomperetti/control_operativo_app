@@ -263,7 +263,7 @@ TIPO_CONSOLIDADO_TRES_FUENTES = "Reporte consolidado de tres fuentes"
 TIPO_EXCEPCIONES_CONSOLIDADAS = "Excepciones del control consolidado"
 TIPO_REVISIONES_CONSOLIDADAS = "Revisiones consolidadas"
 COLUMNAS_CONTROL_CONSOLIDADO = (
-    "Grupo u orden", "Estado", "Neto ML", "Neto Eccomapp", "Neto aprobado MP", "Neto financiero total MP",
+    "Grupo u orden", "Estado", "Neto ML", "Costo de productos Eccomapp", "Neto Eccomapp", "Neto aprobado MP", "Neto financiero total MP",
     "Eccomapp − ML", "MP − Eccomapp", "MP − ML", "Utilidad preliminar", "Motivo principal", "Filas ML", "Filas Eccomapp", "Filas MP",
 )
 
@@ -299,11 +299,12 @@ def generar_revisiones_consolidadas_excel(reporte: ReporteControlConsolidado) ->
 
 def _escribir_resumen_consolidado(ws: Worksheet, reporte: ReporteControlConsolidado, tipo: str) -> None:
     ws.append(["Campo", "Valor"])
-    for fila in (("Nombre", "Kiki Control Financiero"), ("Tipo de reporte", tipo), ("Versión de regla", reporte.version_regla), ("Tolerancia", _decimal_o_vacio(reporte.tolerancia)), ("Total grupos", reporte.total_resultados), ("Aclaración", "Control operativo preliminar; no es resultado contable ni fiscal definitivo.")):
+    diag = diagnosticar_control_consolidado(reporte)
+    for fila in (("Nombre", "Kiki Control Financiero"), ("Tipo de reporte", tipo), ("Versión de regla", reporte.version_regla), ("Tolerancia", _decimal_o_vacio(reporte.tolerancia)), ("Total grupos", reporte.total_resultados), ("Venta oficial sin Total (ARS)", reporte.total_total_ml_ausente), ("Costo total Eccomapp", _decimal_o_vacio(diag.utilidad.costo_productos_universo_utilidad + diag.utilidad.costo_eccomapp_fuera_universo_calculable)), ("Costo utilizado en utilidad", _decimal_o_vacio(diag.utilidad.costo_productos_universo_utilidad)), ("Costo excluido", _decimal_o_vacio(diag.utilidad.costo_eccomapp_fuera_universo_calculable)), ("Grupos calculables", diag.utilidad.grupos_calculables), ("Grupos excluidos", diag.utilidad.grupos_excluidos), ("Fórmula utilidad preliminar", "utilidad_preliminar = neto_ml_universo_calculable - costo_eccomapp_universo_calculable"), ("Motivos de exclusión", "; ".join(f"{k}: {v}" for k, v in diag.utilidad.motivos_exclusion.items() if v)), ("Aclaración", "Control operativo preliminar; no es resultado contable ni fiscal definitivo.")):
         ws.append(list(fila))
     _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2}, freeze=False)
     for row in ws.iter_rows(min_row=2):
-        if row[0].value == "Tolerancia" and row[1].value != "": row[1].number_format = _FORMATO_MONEDA_ARS
+        if row[0].value in {"Tolerancia", "Costo total Eccomapp", "Costo utilizado en utilidad", "Costo excluido"} and row[1].value != "": row[1].number_format = _FORMATO_MONEDA_ARS
 
 
 def _escribir_cobertura_consolidada(ws: Worksheet, diag: Any) -> None:
@@ -349,8 +350,8 @@ def _escribir_puente_consolidado(ws: Worksheet, diag: Any) -> None:
 def _escribir_control_consolidado(ws: Worksheet, resultados: Iterable[ResultadoControlConsolidado]) -> None:
     ws.append(list(COLUMNAS_CONTROL_CONSOLIDADO))
     for r in resultados:
-        ws.append([_texto_seguro(r.id_grupo_canonico or ", ".join(r.ids_orden) or f"fila MP {', '.join(map(str, r.filas_origen_mp))}"), _texto_seguro(r.estado.value), _decimal_o_vacio(r.total_informado_ml), _decimal_o_vacio(r.neto_mp_eccomapp_informado), _decimal_o_vacio(r.neto_aprobado_mp), _decimal_o_vacio(r.neto_financiero_total_mp), _decimal_o_vacio(r.diferencia_neto_ml_eccomapp), _decimal_o_vacio((r.neto_aprobado_mp - r.neto_mp_eccomapp_informado) if r.neto_aprobado_mp is not None and r.neto_mp_eccomapp_informado is not None else None), _decimal_o_vacio(r.diferencia_ml_mp), _decimal_o_vacio(r.utilidad_preliminar_control), _texto_seguro("; ".join(r.motivos)), _texto_seguro(", ".join(map(str, r.filas_origen_ml))), _texto_seguro(", ".join(map(str, r.filas_origen_eccomapp))), _texto_seguro(", ".join(map(str, r.filas_origen_mp)))])
-    _formatear_tabla(ws, moneda_columnas={3,4,5,6,7,8,9,10}, wrap_columnas={11}, freeze=True)
+        ws.append([_texto_seguro(r.id_grupo_canonico or ", ".join(r.ids_orden) or f"fila MP {', '.join(map(str, r.filas_origen_mp))}"), _texto_seguro(r.estado.value), _decimal_o_vacio(r.total_informado_ml), _decimal_o_vacio(r.costo_productos_eccomapp), _decimal_o_vacio(r.neto_mp_eccomapp_informado), _decimal_o_vacio(r.neto_aprobado_mp), _decimal_o_vacio(r.neto_financiero_total_mp), _decimal_o_vacio(r.diferencia_neto_ml_eccomapp), _decimal_o_vacio((r.neto_aprobado_mp - r.neto_mp_eccomapp_informado) if r.neto_aprobado_mp is not None and r.neto_mp_eccomapp_informado is not None else None), _decimal_o_vacio(r.diferencia_ml_mp), _decimal_o_vacio(r.utilidad_preliminar_control), _texto_seguro("; ".join(r.motivos)), _texto_seguro(", ".join(map(str, r.filas_origen_ml))), _texto_seguro(", ".join(map(str, r.filas_origen_eccomapp))), _texto_seguro(", ".join(map(str, r.filas_origen_mp)))])
+    _formatear_tabla(ws, moneda_columnas={3,4,5,6,7,8,9,10,11}, wrap_columnas={12}, freeze=True)
 
 
 def _escribir_temporal_consolidado(ws: Worksheet, diag: Any) -> None:
@@ -370,7 +371,10 @@ def _escribir_revisiones_consolidadas(ws: Worksheet, diag: Any) -> None:
 def _escribir_diccionario_consolidado(ws: Worksheet) -> None:
     ws.append(["Cálculo", "Fórmula", "Universo", "Columnas utilizadas"])
     filas = [
-        ("Utilidad preliminar", "Total (ARS) ML - Costo Total (Con IVA) Eccomapp", "universo calculable de utilidad", "Total (ARS); Costo Total (Con IVA) ($)"),
+        ("Costo de productos Eccomapp", "Suma de Costo Total (Con IVA) ($)", "grupos con Eccomapp informado", "Eccomapp: Costo Total (Con IVA) ($)"),
+        ("Costo Eccomapp utilizado en utilidad", "Suma de costo_productos_eccomapp dentro del universo calculable", "grupos con Total (ARS) ML y costo Eccomapp presentes", "ML: Total (ARS); Eccomapp: Costo Total (Con IVA) ($)"),
+        ("Costo Eccomapp excluido", "costo_total_eccomapp - costo_eccomapp_universo_calculable", "grupos Eccomapp fuera del universo calculable", "Eccomapp: Costo Total (Con IVA) ($); motivos de exclusión"),
+        ("Utilidad preliminar", "Total (ARS) ML - Costo Total (Con IVA) Eccomapp", "universo calculable de utilidad", "ML: Total (ARS); Eccomapp: Costo Total (Con IVA) ($)"),
         ("Otros conceptos y ajustes ML no desagregados en este resumen", "Total (ARS) - (Ingresos por productos (ARS) + Cargo por venta e impuestos (ARS) + Costos de envío (ARS))", "universo ML oficial con los cuatro importes presentes", "Total (ARS); Ingresos por productos (ARS); Cargo por venta e impuestos (ARS); Costos de envío (ARS)"),
         ("MP − ML", "Neto aprobado MP - Neto ML", "universo ML–Eccomapp–MP para puente triple", "Total (ARS); neto Eccomapp; movimientos aprobados MP"),
     ]
