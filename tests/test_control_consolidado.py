@@ -47,8 +47,46 @@ def op(id_orden: str, carrito: str | None = None, fila: int = 1, venta_monto: De
     )
 
 
-def fin(id_orden: str | None, fila: int = 1, neto: Decimal | None = D("80"), estado=EstadoConciliacion.CONCILIADA, revision=False, motivos=(MotivoConciliacion.COINCIDENCIA_NETA_EXACTA,), comercial_hashes=("hash-ec",), payout=False, **flags):
-    return ResultadoConciliacion(id_orden, tuple(comercial_hashes), ("hash-mp",), (), (fila,), NOW, "ML_MP_ID_ORDER_NETO_V1", EstadoConciliacion.MOVIMIENTO_DE_FONDOS if payout else estado, motivos, ("explicación sintética",), revision, flags.get("pago_dividido", False), 0, 1, 1 if neto is not None else 0, None, neto, None, D("4") if flags.get("pago_envio", False) else D("0"), D("-5") if flags.get("devolucion", False) else D("0"), D("-6") if flags.get("reclamo", False) or flags.get("disputa", False) else D("0"), D("0"), neto or D("0"), None, D("0.50"), flags.get("devolucion", False), flags.get("reclamo", False), flags.get("disputa", False), flags.get("pago_envio", False), flags.get("desconocido", False), flags.get("pendiente", False), flags.get("duplicados", False))
+def fin(
+    id_orden: str | None,
+    fila: int = 1,
+    neto: Decimal | None = D("80"),
+    estado=EstadoConciliacion.CONCILIADA,
+    revision=False,
+    motivos=(MotivoConciliacion.COINCIDENCIA_NETA_EXACTA,),
+    comercial_hashes=("hash-ec",),
+    payout=False,
+    cantidad_movimientos: int = 1,
+    hashes_financieros=("hash-mp",),
+    filas_financieras: tuple[int, ...] | None = None,
+    **flags,
+):
+    filas = tuple(filas_financieras if filas_financieras is not None else ((fila,) if cantidad_movimientos > 0 else ()))
+    return ResultadoConciliacion(
+        id_orden, tuple(comercial_hashes), tuple(hashes_financieros if cantidad_movimientos > 0 else ()), (), filas,
+        NOW, "ML_MP_ID_ORDER_NETO_V1", EstadoConciliacion.MOVIMIENTO_DE_FONDOS if payout else estado,
+        motivos, ("explicación sintética",), revision, flags.get("pago_dividido", False), 0, cantidad_movimientos,
+        1 if neto is not None and cantidad_movimientos > 0 else 0, None, neto, None,
+        D("4") if flags.get("pago_envio", False) else D("0"),
+        D("-5") if flags.get("devolucion", False) else D("0"),
+        D("-6") if flags.get("reclamo", False) or flags.get("disputa", False) else D("0"),
+        D("0"), neto or D("0"), None, D("0.50"), flags.get("devolucion", False),
+        flags.get("reclamo", False), flags.get("disputa", False), flags.get("pago_envio", False),
+        flags.get("desconocido", False), flags.get("pendiente", False), flags.get("duplicados", False),
+    )
+
+
+def fin_sin_movimiento(id_orden: str, fila_comercial_hashes=("hash-ec",)):
+    return fin(
+        id_orden,
+        neto=None,
+        estado=EstadoConciliacion.OPERACION_SIN_MOVIMIENTO_FINANCIERO,
+        revision=True,
+        motivos=(MotivoConciliacion.SIN_MOVIMIENTO_FINANCIERO,),
+        comercial_hashes=fila_comercial_hashes,
+        cantidad_movimientos=0,
+        hashes_financieros=(),
+    )
 
 
 def reporte(ventas, ops, fins, tolerancia=D("0.50")):
@@ -107,7 +145,7 @@ def test_solo_ml_sin_eccomapp_utilidad_none_y_sin_costo():
 
 
 def test_eccomapp_sin_venta_oficial_y_grupo_sin_mp():
-    r = unico(reporte([], [op("O1")], []))
+    r = unico(reporte([], [op("O1")], [fin_sin_movimiento("O1")]))
     assert r.estado == EstadoControlConsolidado.SIN_VENTA_OFICIAL
     assert r.tiene_eccomapp and not r.tiene_mercado_libre_oficial and not r.tiene_mercado_pago
 
@@ -169,6 +207,67 @@ def test_sin_pii_en_modelos_repr_asdict_errores_y_explicaciones():
     texto = (repr(r) + repr(asdict(r)) + " ".join(r.explicaciones)).lower()
     for pii in ("comprador", "dni", "domicilio", "documento", "dirección"):
         assert pii not in texto
+
+
+def test_resultado_conciliacion_sin_movimiento_no_equivale_a_mercado_pago():
+    rep = reporte([venta("O1")], [op("O1")], [fin_sin_movimiento("O1")])
+    r = unico(rep)
+    assert r.tiene_mercado_libre_oficial
+    assert r.tiene_eccomapp
+    assert not r.tiene_mercado_pago
+    assert r.estado == EstadoControlConsolidado.SIN_MOVIMIENTO_FINANCIERO
+    assert r.neto_aprobado_mp is None
+    assert r.neto_financiero_total_mp is None
+    assert r.impacto_pagos_envio_mp is None
+    assert r.impacto_devoluciones_mp is None
+    assert r.impacto_reclamos_disputas_mp is None
+    assert r.impacto_otros_mp is None
+    assert r.requiere_revision
+    assert sum(len(res.claves_resultados_financieros) for res in rep.resultados) == 1
+
+
+def test_movimiento_real_mp_con_neto_cero_no_es_ausencia():
+    r = unico(reporte([venta("O1")], [op("O1")], [fin("O1", neto=D("0"))]))
+    assert r.tiene_mercado_pago
+    assert r.neto_aprobado_mp == D("0")
+    assert r.neto_financiero_total_mp == D("0")
+    assert r.estado == EstadoControlConsolidado.CON_DIFERENCIA
+
+
+def test_solo_mercado_libre_se_vincula_con_mp_por_id_order_sin_eccomapp():
+    rep = reporte([venta("O1")], [], [fin("O1", neto=D("79"), comercial_hashes=(), estado=EstadoConciliacion.MOVIMIENTO_SIN_OPERACION_COMERCIAL, motivos=(MotivoConciliacion.SIN_OPERACION_COMERCIAL,))])
+    r = unico(rep)
+    assert r.tiene_mercado_libre_oficial
+    assert not r.tiene_eccomapp
+    assert r.tiene_mercado_pago
+    assert r.neto_aprobado_mp == D("79")
+    assert r.diferencia_ml_mp == D("-1")
+    assert r.costo_productos_eccomapp is None
+    assert r.utilidad_preliminar_control is None
+    assert r.estado == EstadoControlConsolidado.SIN_COSTO_PRODUCTO
+    assert r.requiere_revision
+    assert rep.total_resultados == 1
+    assert sum(len(res.claves_resultados_comerciales) for res in rep.resultados) == 1
+    assert sum(len(res.claves_resultados_financieros) for res in rep.resultados) == 1
+
+
+def test_solo_mercado_libre_duplicada_no_fuerza_vinculo_mp():
+    rep = reporte([venta("O1", 1), venta("O1", 2)], [], [fin("O1", comercial_hashes=())])
+    assert rep.total_resultados == 2
+    assert any(r.estado == EstadoControlConsolidado.DUPLICADA_O_AMBIGUA and r.tiene_mercado_libre_oficial for r in rep.resultados)
+    mp = next(r for r in rep.resultados if r.tiene_mercado_pago)
+    assert mp.claves_resultados_comerciales == ()
+    assert mp.estado == EstadoControlConsolidado.DUPLICADA_O_AMBIGUA
+
+
+def test_hashes_eccomapp_igualdad_exacta_es_valida():
+    r = unico(reporte([venta("O1")], [op("O1")], [fin("O1", comercial_hashes=("hash-ec",))]))
+    assert r.estado == EstadoControlConsolidado.COMPLETA
+
+
+def test_hashes_eccomapp_subconjunto_incompleto_es_invalido():
+    with pytest.raises(ErrorControlConsolidado, match="coincidir exactamente"):
+        reporte([venta("O1")], [op("O1"), op("O2", fila=2)], [fin("O1", comercial_hashes=())])
 
 
 def test_hashes_incompatibles_generan_error_de_dominio():

@@ -43,6 +43,19 @@ def _ordenes(r: ResultadoVinculacionComercial) -> tuple[str, ...]:
     return tuple(sorted({oid.strip() for oid in r.ids_orden if oid and oid.strip()}))
 
 
+def _ordenes_para_mercado_pago(r: ResultadoVinculacionComercial) -> tuple[str, ...]:
+    ids = _ordenes(r)
+    if ids:
+        return ids
+    if r.estado == EstadoVinculacionComercial.SOLO_MERCADO_LIBRE and r.venta_principal_ml is None and len(r.ventas_detalle_ml) == 1:
+        return (str(r.ventas_detalle_ml[0].id_venta).strip(),)
+    return ()
+
+
+def _tiene_movimiento_mercado_pago(resultado: ResultadoConciliacion) -> bool:
+    return resultado.cantidad_movimientos_financieros > 0
+
+
 def _monetaria_ml(r: ResultadoVinculacionComercial) -> VentaOficialMercadoLibre | None:
     if r.estado in {EstadoVinculacionComercial.AMBIGUA, EstadoVinculacionComercial.DUPLICADA}:
         return None
@@ -55,15 +68,16 @@ def _monetaria_ml(r: ResultadoVinculacionComercial) -> VentaOficialMercadoLibre 
 
 
 def _indicadores(financieros: tuple[ResultadoConciliacion, ...]) -> IndicadoresFinancieros:
+    financieros_reales = tuple(f for f in financieros if _tiene_movimiento_mercado_pago(f))
     return IndicadoresFinancieros(
-        tiene_liquidacion_pendiente=any(f.tiene_liquidacion_pendiente for f in financieros),
-        tiene_devolucion=any(f.tiene_devolucion for f in financieros),
-        tiene_reclamo=any(f.tiene_reclamo for f in financieros),
-        tiene_disputa=any(f.tiene_disputa for f in financieros),
-        tiene_pago_dividido=any(f.es_pago_dividido for f in financieros),
-        tiene_movimiento_desconocido=any(f.tiene_movimiento_desconocido for f in financieros),
-        tiene_duplicados=any(f.tiene_duplicados for f in financieros),
-        tiene_pago_envio=any(f.tiene_pago_envio for f in financieros),
+        tiene_liquidacion_pendiente=any(f.tiene_liquidacion_pendiente for f in financieros_reales),
+        tiene_devolucion=any(f.tiene_devolucion for f in financieros_reales),
+        tiene_reclamo=any(f.tiene_reclamo for f in financieros_reales),
+        tiene_disputa=any(f.tiene_disputa for f in financieros_reales),
+        tiene_pago_dividido=any(f.es_pago_dividido for f in financieros_reales),
+        tiene_movimiento_desconocido=any(f.tiene_movimiento_desconocido for f in financieros_reales),
+        tiene_duplicados=any(f.tiene_duplicados for f in financieros_reales),
+        tiene_pago_envio=any(f.tiene_pago_envio for f in financieros_reales),
     )
 
 
@@ -83,9 +97,9 @@ def _fin_key(f: ResultadoConciliacion) -> str:
 def _validar_hashes(reporte_comercial: ReporteVinculacionComercial, reporte_financiero: ReporteConciliacion) -> None:
     hashes_ec = set(reporte_comercial.hashes_importacion_eccomapp)
     usados = {h for f in reporte_financiero.resultados for h in f.hashes_importacion_comercial}
-    if usados and not usados.issubset(hashes_ec):
+    if usados != hashes_ec:
         raise ErrorControlConsolidado(
-            "Los hashes comerciales del reporte de conciliación no coinciden con los hashes Eccomapp del reporte comercial; "
+            "Los hashes comerciales del reporte de conciliación deben coincidir exactamente con los hashes Eccomapp del reporte comercial; "
             "se cancela el cruce consolidado para evitar una unión silenciosa entre reportes incompatibles."
         )
 
@@ -99,7 +113,9 @@ def _resultado_desde(
 ) -> ResultadoControlConsolidado:
     venta = _monetaria_ml(comercial) if comercial else None
     ops = comercial.operaciones_eccomapp if comercial else ()
-    ids_orden = _ordenes(comercial) if comercial else tuple(sorted({f.id_orden for f in financieros if f.id_orden}))
+    ids_orden = _ordenes_para_mercado_pago(comercial) if comercial else tuple(sorted({f.id_orden for f in financieros if f.id_orden}))
+    financieros_reales = tuple(f for f in financieros if _tiene_movimiento_mercado_pago(f))
+    tiene_mp = bool(financieros_reales)
     ml_vals = {
         "monto_venta_ml": venta.ingresos_productos if venta else None,
         "cargo_venta_impuestos_ml": venta.cargo_venta_impuestos if venta else None,
@@ -114,12 +130,12 @@ def _resultado_desde(
     costo_env_ec = _sumar(op.costo_envio_vendedor for op in ops)
     neto_ec = _sumar(op.monto_neto_mercado_pago_informado for op in ops)
     utilidad_ec = _sumar(op.utilidad_neta_informada for op in ops)
-    neto_mp = _sumar(f.neto_pagos_aprobados for f in financieros)
-    neto_fin = _sumar(f.neto_financiero_total for f in financieros)
-    imp_env = _sumar(f.impacto_pagos_envio for f in financieros)
-    imp_dev = _sumar(f.impacto_devoluciones for f in financieros)
-    imp_rec = _sumar(f.impacto_reclamos_disputas for f in financieros)
-    imp_otros = _sumar(f.impacto_otros for f in financieros)
+    neto_mp = _sumar(f.neto_pagos_aprobados for f in financieros_reales)
+    neto_fin = _sumar(f.neto_financiero_total for f in financieros_reales)
+    imp_env = _sumar(f.impacto_pagos_envio for f in financieros_reales)
+    imp_dev = _sumar(f.impacto_devoluciones for f in financieros_reales)
+    imp_rec = _sumar(f.impacto_reclamos_disputas for f in financieros_reales)
+    imp_otros = _sumar(f.impacto_otros for f in financieros_reales)
     total_ml = ml_vals["total_informado_ml"]
     dif_venta = ml_vals["monto_venta_ml"] - monto_ec if ml_vals["monto_venta_ml"] is not None and monto_ec is not None else None
     dif_neto_ec = total_ml - neto_ec if total_ml is not None and neto_ec is not None else None
@@ -142,10 +158,10 @@ def _resultado_desde(
         candidatos.add(EstadoControlConsolidado.SIN_VENTA_OFICIAL)
     if comercial and costo_prod is None:
         candidatos.add(EstadoControlConsolidado.SIN_COSTO_PRODUCTO)
-    if comercial and not financieros:
+    if comercial and not tiene_mp:
         candidatos.add(EstadoControlConsolidado.SIN_MOVIMIENTO_FINANCIERO)
     ind = _indicadores(financieros)
-    if financieros and (any(f.requiere_revision for f in financieros) or any((f.estado in {EstadoConciliacion.DEVUELTA, EstadoConciliacion.EN_RECLAMO, EstadoConciliacion.EN_REVISION, EstadoConciliacion.DUPLICADA, EstadoConciliacion.PENDIENTE_ACREDITACION}) for f in financieros)):
+    if financieros_reales and (any(f.requiere_revision for f in financieros_reales) or any((f.estado in {EstadoConciliacion.DEVUELTA, EstadoConciliacion.EN_RECLAMO, EstadoConciliacion.EN_REVISION, EstadoConciliacion.DUPLICADA, EstadoConciliacion.PENDIENTE_ACREDITACION}) for f in financieros_reales)):
         candidatos.add(EstadoControlConsolidado.EN_REVISION_FINANCIERA)
     if dif_ml_mp is not None and abs(dif_ml_mp) > tolerancia:
         candidatos.add(EstadoControlConsolidado.CON_DIFERENCIA)
@@ -153,7 +169,7 @@ def _resultado_desde(
     estado = _estado(candidatos)
     tipo = None
     if comercial is None and financieros:
-        tipo = TipoMovimientoFinanciero.MOVIMIENTO_DE_FONDOS if all(f.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS for f in financieros) else TipoMovimientoFinanciero.ORDEN_FINANCIERA
+        tipo = TipoMovimientoFinanciero.MOVIMIENTO_DE_FONDOS if financieros_reales and all(f.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS for f in financieros_reales) else TipoMovimientoFinanciero.ORDEN_FINANCIERA
     requiere_revision = bool((comercial.requiere_revision if comercial else False) or any(f.requiere_revision for f in financieros) or estado != EstadoControlConsolidado.COMPLETA)
     return ResultadoControlConsolidado(
         clave_resultado=(comercial.clave_resultado if comercial else "+".join(_fin_key(f) for f in financieros)),
@@ -161,7 +177,7 @@ def _resultado_desde(
         ids_orden=ids_orden,
         tiene_mercado_libre_oficial=bool(comercial and (comercial.venta_principal_ml or comercial.ventas_detalle_ml)),
         tiene_eccomapp=bool(ops),
-        tiene_mercado_pago=bool(financieros),
+        tiene_mercado_pago=tiene_mp,
         tipo_movimiento_financiero=tipo,
         **ml_vals,
         monto_venta_eccomapp_informado=monto_ec,
@@ -188,10 +204,10 @@ def _resultado_desde(
         version_regla=VERSION_REGLA_CONTROL_CONSOLIDADO,
         hashes_importacion_ml=tuple(sorted(comercial.hashes_importacion_ml if comercial else ())),
         hashes_importacion_eccomapp=tuple(sorted(comercial.hashes_importacion_eccomapp if comercial else ())),
-        hashes_importacion_mp=tuple(sorted({h for f in financieros for h in f.hashes_importacion_financiera})),
+        hashes_importacion_mp=tuple(sorted({h for f in financieros_reales for h in f.hashes_importacion_financiera})),
         filas_origen_ml=tuple(sorted(comercial.filas_origen_ml if comercial else ())),
         filas_origen_eccomapp=tuple(sorted(comercial.filas_origen_eccomapp if comercial else ())),
-        filas_origen_mp=tuple(sorted({n for f in financieros for n in f.numeros_fila_financiera})),
+        filas_origen_mp=tuple(sorted({n for f in financieros_reales for n in f.numeros_fila_financiera})),
         claves_resultados_comerciales=tuple([comercial.clave_resultado] if comercial else ()),
         claves_resultados_financieros=tuple(_fin_key(f) for f in financieros),
     )
@@ -214,7 +230,7 @@ def consolidar_control_financiero(reporte_comercial: ReporteVinculacionComercial
     comerciales_por_orden: dict[str, list[ResultadoVinculacionComercial]] = defaultdict(list)
     ordenes_comerciales_ambiguas: set[str] = set()
     for r in comerciales:
-        for oid in _ordenes(r):
+        for oid in _ordenes_para_mercado_pago(r):
             comerciales_por_orden[oid].append(r)
         if r.estado in {EstadoVinculacionComercial.AMBIGUA, EstadoVinculacionComercial.DUPLICADA}:
             for v in ((r.venta_principal_ml,) if r.venta_principal_ml else ()) + r.ventas_detalle_ml:

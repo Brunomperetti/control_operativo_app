@@ -251,3 +251,11 @@ Fórmulas permitidas con `Decimal`: diferencia de venta ML vs Eccomapp, diferenc
 Estados consolidados por prioridad: `DUPLICADA_O_AMBIGUA`, `SOLO_MOVIMIENTO_FINANCIERO`, `SIN_VENTA_OFICIAL`, `SIN_COSTO_PRODUCTO`, `SIN_MOVIMIENTO_FINANCIERO`, `EN_REVISION_FINANCIERA`, `CON_DIFERENCIA`, `COMPLETA`. Un resultado completo puede requerir revisión por SKU, devolución, reclamo, duplicado, liquidación pendiente u otra condición heredada.
 
 El reporte consolidado valida compatibilidad de hashes Eccomapp con hashes comerciales del reporte financiero y garantiza partición exacta: cada resultado comercial y cada resultado financiero de entrada aparece exactamente una vez. Esta etapa no modifica Streamlit, carga visual de tres archivos, presentación, exportaciones Excel, normalizadores, persistencia ni el motor histórico de conciliación.
+
+### Corrección: ResultadoConciliacion y presencia real de Mercado Pago
+
+No asumir que la existencia de un `ResultadoConciliacion` implica presencia de Mercado Pago. La evidencia de movimiento financiero real es `cantidad_movimientos_financieros > 0`. Un resultado `OPERACION_SIN_MOVIMIENTO_FINANCIERO` debe conservarse en la partición, pero no aporta importes MP, impactos ni indicadores, y `tiene_mercado_pago` debe ser `False`. Un movimiento real con neto cero sí es Mercado Pago presente y debe conservar `Decimal("0")`.
+
+Para unir Mercado Pago con grupos comerciales, usar `ResultadoVinculacionComercial.ids_orden` cuando existan. Si el resultado comercial es `SOLO_MERCADO_LIBRE` y contiene exactamente una venta oficial no ambigua, se puede usar `venta.id_venta` como candidato de ID Order para vincular MP aunque falte Eccomapp. No hacer esto para `AMBIGUA` o `DUPLICADA`, ni agregar cabeceras de carrito como ID Order cuando existen órdenes internas.
+
+La compatibilidad de hashes Eccomapp entre reporte comercial y reporte financiero es igualdad exacta de conjuntos. Ambos vacíos es válido si no existe Eccomapp; subconjuntos, diferencias o vacío contra no vacío son errores de dominio.

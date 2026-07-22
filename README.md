@@ -325,3 +325,11 @@ Todas las fórmulas usan `Decimal`, solo se calculan cuando existen ambos operan
 La unión con Mercado Pago es solo por `id_orden`; no se usan fecha, importe, SKU, producto ni aproximaciones. Los movimientos sin orden, los financieros sin grupo comercial y los PAYOUT quedan como resultados financieros independientes. La prioridad de estados es: `DUPLICADA_O_AMBIGUA`, `SOLO_MOVIMIENTO_FINANCIERO`, `SIN_VENTA_OFICIAL`, `SIN_COSTO_PRODUCTO`, `SIN_MOVIMIENTO_FINANCIERO`, `EN_REVISION_FINANCIERA`, `CON_DIFERENCIA`, `COMPLETA`.
 
 El reporte valida hashes compatibles entre Eccomapp y conciliación financiera, y garantiza partición exacta: cada resultado comercial y cada resultado financiero de entrada aparece exactamente una vez.
+
+### Presencia real de Mercado Pago
+
+Un `ResultadoConciliacion` puede representar una operación comercial sin movimientos financieros. Por eso `tiene_mercado_pago` se determina con `cantidad_movimientos_financieros > 0`, no por la existencia del resultado ni por el importe. Si todos los resultados asociados tienen cero movimientos, se conservan para partición y trazabilidad, pero los importes e impactos MP quedan en `None` y el estado esperado es `SIN_MOVIMIENTO_FINANCIERO`, salvo prioridades superiores.
+
+Un movimiento real con neto cero sí cuenta como Mercado Pago presente y conserva `Decimal("0")`. Además, una venta `SOLO_MERCADO_LIBRE` con un `id_orden` coincidente puede vincularse con MP aunque falte Eccomapp: se puede comparar ML contra MP, pero el costo de productos y la utilidad preliminar quedan en `None`, por lo que el estado es `SIN_COSTO_PRODUCTO` con revisión.
+
+Los hashes Eccomapp del reporte comercial y del reporte financiero deben coincidir exactamente como conjuntos; cualquier diferencia o subconjunto incompleto cancela el consolidado con un error de dominio en español.
