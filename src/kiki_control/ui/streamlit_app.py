@@ -51,10 +51,12 @@ from kiki_control.presentation.control_consolidado_view import (
     explicacion_resultado,
     filas_tabla_consolidada,
     filtrar_filas_consolidadas,
+    etiqueta_selector_detalle,
     kpis_consolidados,
     tabla_consolidada,
     trazabilidad_tecnica,
 )
+from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
 from kiki_control.reconciliation import reconciliar
 from kiki_control.ui.session_cycle import (
     construir_firma_procesamiento,
@@ -395,6 +397,8 @@ def _column_config_control_consolidado() -> dict[str, Any]:
         "Diferencia ML–MP": st.column_config.TextColumn("Diferencia ML–MP", help="Diferencia calculada por el dominio entre neto aprobado MP y Total (ARS) de ML oficial. Universo: grupos con ambos datos."),
         "Utilidad preliminar": st.column_config.TextColumn("Utilidad preliminar", help="Utilidad preliminar de control calculada por el dominio desde Total (ARS) ML oficial y Costo Total (Con IVA) ($) Eccomapp. No es resultado contable o fiscal definitivo."),
         "Requiere revisión": st.column_config.TextColumn("Requiere revisión", help="Indicador prudente definido por el dominio cuando hay diferencias, fuentes faltantes o ambigüedad."),
+        "Motivo principal": st.column_config.TextColumn("Motivo principal", help="Motivo visible de revisión; los motivos internos quedan en trazabilidad técnica."),
+        "Qué revisar": st.column_config.TextColumn("Qué revisar", help="Acción recomendada para interpretar el caso sin asumir causas contables no evidenciadas."),
     }
 
 def _mostrar_resultados() -> None:
@@ -422,6 +426,25 @@ def _mostrar_resultados() -> None:
 
     st.header("Resumen ejecutivo consolidado")
     st.info(conclusion_ejecutiva_consolidada(reporte))
+    diagnostico = diagnosticar_control_consolidado(reporte)
+    if not diagnostico.particion.cierra_exactamente or not diagnostico.diferencias.identidad_cierra_exactamente:
+        st.error("Error de consistencia en diagnósticos: no se presentan KPIs como confiables hasta revisar la partición o la identidad de diferencias.")
+    st.subheader("Puente de importes entre fuentes")
+    st.caption("Universos explícitos: venta comercial usa grupos con venta ML y venta Eccomapp; neto esperado usa grupos con Total (ARS), neto Eccomapp y neto MP. Diferencia pendiente de clasificación contable.")
+    st.table([{
+        "Universo venta comercial": diagnostico.puente.universo_venta_comercial,
+        "Venta oficial ML": diagnostico.puente.venta_oficial_ml,
+        "Venta informada Eccomapp": diagnostico.puente.venta_informada_eccomapp,
+        "ML oficial − Eccomapp": diagnostico.puente.diferencia_ml_oficial_eccomapp,
+        "Universo neto esperado": diagnostico.puente.universo_neto_esperado,
+        "Eccomapp − ML": diagnostico.puente.eccomapp_menos_ml,
+        "MP − Eccomapp": diagnostico.puente.mp_menos_eccomapp,
+        "MP − ML": diagnostico.puente.mp_menos_ml,
+        "Identidad cierra": "Sí" if diagnostico.puente.identidad_cierra_exactamente else "No",
+    }])
+    st.subheader("Revisiones del control consolidado")
+    st.caption(diagnostico.revisiones.aclaracion)
+    st.table([{"Motivo visible": r.motivo_visible, "Cantidad": r.cantidad, "Importe afectado": r.importe_afectado, "Acción recomendada": r.accion_recomendada, "Grupos involucrados": ", ".join(r.grupos_involucrados[:20])} for r in diagnostico.revisiones.revisiones_multietiqueta])
     for titulo, kpis in kpis_consolidados(reporte).items():
         st.subheader(titulo)
         cols = st.columns(len(kpis))
@@ -440,11 +463,11 @@ def _mostrar_resultados() -> None:
     solo_diferencia = c4.checkbox("Solo con diferencia", key="filtro_solo_diferencia")
     solo_faltantes = c5.checkbox("Solo con datos faltantes", key="filtro_solo_faltantes")
     visibles = filtrar_filas_consolidadas(filas, set(seleccion), busqueda, solo_revision, solo_diferencia, solo_faltantes)
-    columnas = ["Grupo u orden", "Estado", "Fuentes disponibles", "Venta ML oficial", "Cargos e impuestos ML", "Costo envío ML", "Neto esperado ML", "Costo productos", "Neto aprobado MP", "Neto financiero total MP", "Diferencia ML–MP", "Utilidad preliminar", "Requiere revisión"]
+    columnas = ["Grupo u orden", "Estado", "Fuentes disponibles", "Venta ML oficial", "Cargos e impuestos ML", "Costo envío ML", "Neto esperado ML", "Costo productos", "Neto aprobado MP", "Neto financiero total MP", "Diferencia ML–MP", "Utilidad preliminar", "Requiere revisión", "Motivo principal", "Qué revisar"]
     st.dataframe([{k: row[k] for k in columnas} for row in tabla_consolidada(visibles)], use_container_width=True, hide_index=True, column_config=_column_config_control_consolidado())
 
     if visibles:
-        elegida = st.selectbox("Seleccionar operación para ver detalle", [f.clave for f in visibles], key="detalle_operacion")
+        elegida = st.selectbox("Seleccionar operación para ver detalle", [f.clave for f in visibles], key="detalle_operacion", format_func={f.clave: etiqueta_selector_detalle(f) for f in visibles}.get)
         mapa = {r.clave_resultado: r for r in reporte.resultados}
         resultado = mapa[elegida]
         st.subheader("Información del control")

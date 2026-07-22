@@ -1190,3 +1190,45 @@ La conciliación financiera histórica Eccomapp–Mercado Pago se conserva en un
 El ciclo de sesión usa una firma determinista compuesta por los hashes truncables de las tres fuentes, zona horaria y tolerancia. Cualquier cambio o retiro de archivo, zona horaria o tolerancia invalida normalizaciones, cobertura, reportes comercial/financiero/consolidado, filtros, detalles y firma procesada. La aplicación nunca debe mostrar un resultado consolidado si la firma procesada no coincide con los tres archivos y configuración actuales.
 
 La privacidad sigue siendo obligatoria: los archivos no se persisten, los bytes originales no se guardan en `st.session_state`, y la comunicación usa lenguaje prudente como “informado por la fuente”, “no encontrado en el archivo cargado”, “requiere revisión” y “no es resultado contable o fiscal definitivo”.
+
+## Diagnóstico auditable del control consolidado
+
+El control consolidado mantiene separadas las decisiones de dominio y los diagnósticos de presentación. La capa pura `control_consolidado_diagnostics` no usa Streamlit ni DataFrames, recibe modelos consolidados inmutables y produce dataclasses inmutables con importes `Decimal`.
+
+### Partición primaria
+
+La partición primaria de resultados debe cerrar exactamente y ser mutuamente excluyente:
+
+`total_resultados = completos + con diferencia como estado principal + sin venta oficial + sin costo producto + sin movimiento financiero + solo movimiento financiero + en revisión financiera + duplicados o ambiguos`.
+
+El estado principal no reemplaza los indicadores. Un grupo puede tener estado principal `SIN_COSTO_PRODUCTO` y, a la vez, tener diferencia monetaria ML–MP; esa diferencia integra el indicador real de diferencias aunque no sea el estado principal.
+
+### Indicador real de diferencias ML–MP
+
+El KPI oficial para diferencias monetarias comparables es **Grupos comparables con diferencia ML–MP**. Su universo son los resultados donde `total_informado_ml` y `neto_aprobado_mp` existen; cuenta diferencias cuando `abs(diferencia_ml_mp) > tolerancia`. También se informan comparables totales, coincidencias dentro de tolerancia, no comparables y diferencias positivas/negativas.
+
+La identidad obligatoria es:
+
+`suma_diferencia_ml_mp = suma_neto_mp_comparable - suma_neto_ml_comparable`.
+
+Si no cierra exactamente con `Decimal`, la presentación debe advertir error de consistencia y no tratar el KPI como confiable.
+
+### Puente de importes entre fuentes
+
+La sección **Puente de importes entre fuentes** muestra universos explícitos y no mezcla poblaciones diferentes:
+
+- Venta comercial: `monto_venta_ml`, `monto_venta_eccomapp_informado` y `monto_venta_ml - monto_venta_eccomapp_informado`.
+- Neto esperado: `total_informado_ml`, `neto_mp_eccomapp_informado` y `neto_aprobado_mp`.
+- Puente financiero: `Eccomapp − ML`, `MP − Eccomapp` y `MP − ML`.
+
+La identidad auditada es `MP − ML = (MP − Eccomapp) + (Eccomapp − ML)`. Toda diferencia se describe como **Diferencia pendiente de clasificación contable** hasta que exista evidencia; no se reconstruye ni reemplaza `Total (ARS)` de Mercado Libre.
+
+### Cobertura de utilidad
+
+El universo calculable de utilidad preliminar son resultados con `total_informado_ml` y `costo_productos_eccomapp`. La identidad auditada es `utilidad_preliminar = neto_ml_universo_utilidad - costo_productos_universo_utilidad`. Los excluidos se clasifican en motivos primarios mutuamente excluyentes: sin venta oficial; con venta oficial pero sin `Total (ARS)`; sin Eccomapp; con Eccomapp pero sin costo de producto; faltan ambas entradas; otro caso no clasificado. Un grupo con fuentes presentes pero un importe crítico ausente debe mostrarse como **Datos críticos incompletos** sin cambiar su estado de dominio.
+
+### Revisiones y temporalidad MP
+
+Las **revisiones consolidadas** pertenecen al cruce de tres fuentes y pueden tener múltiples etiquetas; sus conteos multietiqueta no deben sumarse para obtener el total. La auditoría histórica Eccomapp–Mercado Pago conserva su universo separado. Por eso contadores de ambos bloques, como 206 y 122 en validaciones manuales, no son comparables directamente.
+
+Los resultados `SOLO_MOVIMIENTO_FINANCIERO` se diagnostican por fecha MP normalizada contra el período de ventas ML: anteriores, dentro, posteriores o sin fecha disponible. No se recortan ni descartan movimientos automáticamente. Un movimiento fuera del período de ventas cargado no implica necesariamente una venta faltante.

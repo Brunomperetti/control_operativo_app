@@ -269,3 +269,22 @@ El procesamiento obligatorio en UI reutiliza exclusivamente estas APIs: `normali
 La vista muestra cobertura temporal de ML oficial, Eccomapp, origen MP y liquidaciones MP; resumen ejecutivo; KPIs con universos comparables; tabla “Control consolidado por operación”; detalle seguro; explicación prudente; y trazabilidad técnica limitada. La utilidad se denomina siempre “utilidad preliminar de control” y no debe presentarse como ganancia definitiva, resultado contable ni fiscal.
 
 La auditoría financiera anterior Eccomapp–Mercado Pago permanece en un expander secundario con sus descargas Excel existentes. Todavía no existe exportación Excel del resultado consolidado.
+
+## Diagnóstico del control consolidado
+
+La capa oficial para explicar el control consolidado es `src/kiki_control/presentation/control_consolidado_diagnostics.py`. Es pura: no usa Streamlit, pandas ni archivos reales; trabaja con dataclasses inmutables y `Decimal`.
+
+Al modificar el control consolidado, preservar estas separaciones:
+
+- Estado principal: partición mutuamente excluyente que debe cerrar exactamente con `total_resultados`.
+- Indicadores: diferencia monetaria real, revisión requerida y datos críticos faltantes pueden coexistir con cualquier estado principal.
+- Universos: comparables ML–MP, puente de venta comercial, puente de netos y utilidad calculable son poblaciones distintas y no deben mezclarse.
+- Auditorías: revisiones consolidadas de tres fuentes y auditoría histórica Eccomapp–MP son universos distintos; sus contadores no se comparan directamente.
+
+Identidades obligatorias con `Decimal`:
+
+- `suma_diferencia_ml_mp = suma_neto_mp_comparable - suma_neto_ml_comparable`.
+- `MP − ML = (MP − Eccomapp) + (Eccomapp − ML)`.
+- `utilidad_preliminar = neto_ml_universo_utilidad - costo_productos_universo_utilidad`.
+
+No reconstruir `Total (ARS)` de Mercado Libre ni atribuir diferencias a retenciones, impuestos o errores sin evidencia. Usar la etiqueta prudente **Diferencia pendiente de clasificación contable**.
