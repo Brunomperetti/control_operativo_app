@@ -1107,3 +1107,64 @@ La validación secundaria de SKU compara los conjuntos de SKU no vacíos de toda
 Una venta `SOLO_MERCADO_LIBRE` activa, entregada o con importe comercial distinto de cero requiere revisión porque puede faltar su contraparte de costos en Eccomapp. Una venta claramente cancelada, devuelta o reembolsada y con total comercial cero puede permanecer sin revisión manual, siempre conservando trazabilidad y explicación prudente.
 
 Los resultados deben ser inmutables y auditables, conservar hashes de importación, filas de origen, operaciones involucradas, ventas principales o de detalle, métodos aplicados, motivos y explicaciones prudentes sin datos personales. El reporte debe formar una partición exacta de las entradas: cada venta oficial `(hash_importacion, fila_origen)` y cada operación Eccomapp `(hash_importacion, numero_fila_origen)` aparece exactamente una vez, incluso ante duplicados, ambigüedades o grupos conflictivos. No deben incorporarse archivos reales ni datos reales al repositorio para probar esta lógica.
+
+## 36. Motor consolidado de control financiero de tres fuentes
+
+Se incorpora el primer motor puro, inmutable y auditable para consolidar el control financiero entre tres fuentes diferenciadas: el reporte oficial de ventas de Mercado Libre (`VentaOficialMercadoLibre`), Eccomapp (`OperacionComercial`) y Mercado Pago (`ResultadoConciliacion` dentro de `ReporteConciliacion`). La API pública es `consolidar_control_financiero(reporte_comercial, reporte_financiero)` y devuelve un `ReporteControlConsolidado`.
+
+La jerarquía de fuentes queda definida así:
+
+| Concepto | Fuente primaria | Campo interno | Columna externa |
+|---|---|---|---|
+| Monto de venta | Mercado Libre oficial | `VentaOficialMercadoLibre.ingresos_productos` | `Ingresos por productos (ARS)` |
+| Comisión e impuestos ML | Mercado Libre oficial | `VentaOficialMercadoLibre.cargo_venta_impuestos` | `Cargo por venta e impuestos (ARS)` |
+| Ingresos por envío | Mercado Libre oficial | `VentaOficialMercadoLibre.ingresos_envio` | `Ingresos por envío (ARS)` |
+| Costo de envío seller ML | Mercado Libre oficial | `VentaOficialMercadoLibre.costos_envio` | `Costos de envío (ARS)` |
+| Descuentos y bonificaciones | Mercado Libre oficial | `VentaOficialMercadoLibre.descuentos_bonificaciones` | `Descuentos y bonificaciones` |
+| Anulaciones y reembolsos | Mercado Libre oficial | `VentaOficialMercadoLibre.anulaciones_reembolsos` | `Anulaciones y reembolsos (ARS)` |
+| Neto esperado/informado ML | Mercado Libre oficial | `VentaOficialMercadoLibre.total_informado_ml` | `Total (ARS)` |
+| Costo de productos | Eccomapp | suma de `OperacionComercial.costo_total_con_iva` | fuente Eccomapp normalizada |
+| Neto aprobado MP | Mercado Pago | suma de `ResultadoConciliacion.neto_pagos_aprobados` | fuente Mercado Pago normalizada |
+| Neto financiero total MP | Mercado Pago | suma de `ResultadoConciliacion.neto_financiero_total` | fuente Mercado Pago normalizada |
+
+El `Total (ARS)` oficial de Mercado Libre se conserva como valor informado por la fuente. No se reconstruye sumando componentes, no se reemplaza con valores de Eccomapp y no se lo denomina acreditado cuando Mercado Pago conserva liquidación pendiente. Las filas de detalle de Mercado Libre se mantienen para identidad, SKU y trazabilidad, pero para importes se utiliza `venta_principal_ml` en grupos vinculados; en `SOLO_MERCADO_LIBRE` se usa la única venta solo si el resultado contiene exactamente una venta. Ante ambigüedad, duplicados o múltiples principales no se elige automáticamente una venta monetaria y los importes no unívocos quedan en `None` con revisión.
+
+Eccomapp aporta el costo de productos y conserva separadamente, solo como diagnóstico informado, las sumas de `monto_venta`, `costo_envio_vendedor`, `monto_neto_mercado_pago_informado` y `utilidad_neta_informada`. Estos valores no reemplazan los importes oficiales de Mercado Libre.
+
+Mercado Pago aporta importes financieros por unión estricta de `id_orden`: neto aprobado MP, neto financiero total MP, pagos de envío, devoluciones, reclamos y disputas, otros movimientos, e indicadores de liquidación pendiente, devolución, reclamo, disputa, pago dividido, movimiento desconocido y duplicados. Los PAYOUT sin orden se conservan como `MOVIMIENTO_DE_FONDOS` y nunca se tratan como pérdida de una venta.
+
+Las únicas fórmulas nuevas permitidas en esta etapa usan `Decimal` y son:
+
+- `diferencia_venta_ml_eccomapp = monto_venta_ml - monto_venta_eccomapp_informado`, solo cuando ambos importes existen.
+- `diferencia_neto_ml_eccomapp = total_informado_ml - neto_mp_eccomapp_informado`, solo cuando ambos importes existen.
+- `diferencia_ml_mp = neto_aprobado_mp - total_informado_ml`, usando la tolerancia de `ReporteConciliacion`; signo positivo significa que MP informa más neto que ML y signo negativo que informa menos.
+- `utilidad_preliminar_control = total_informado_ml - costo_productos_eccomapp`, solo cuando ambos importes existen.
+
+La utilidad preliminar de control es una métrica prudente de control operativo. No es utilidad contable, ganancia definitiva ni resultado fiscal. No se calculan IVA, IIBB, retenciones, percepciones ni fórmulas fiscales propias.
+
+Los estados consolidados son estables y se resuelven con prioridad determinista:
+
+1. `DUPLICADA_O_AMBIGUA`
+2. `SOLO_MOVIMIENTO_FINANCIERO`
+3. `SIN_VENTA_OFICIAL`
+4. `SIN_COSTO_PRODUCTO`
+5. `SIN_MOVIMIENTO_FINANCIERO`
+6. `EN_REVISION_FINANCIERA`
+7. `CON_DIFERENCIA`
+8. `COMPLETA`
+
+La unión con Mercado Pago se realiza únicamente por `id_orden`. Un grupo comercial puede consumir varios resultados financieros, uno por orden. Cada `ResultadoConciliacion` aparece exactamente una vez en el reporte consolidado; si un `ID Order` aparece en más de un resultado comercial, no se asigna automáticamente y queda como movimiento financiero ambiguo en revisión. Los movimientos sin orden y los financieros sin grupo comercial se conservan como `SOLO_MOVIMIENTO_FINANCIERO`; los grupos comerciales sin Mercado Pago quedan como `SIN_MOVIMIENTO_FINANCIERO` salvo que un estado de mayor prioridad aplique.
+
+Antes de cruzar, el motor valida que los hashes Eccomapp usados por la vinculación comercial sean compatibles con los hashes comerciales del reporte de conciliación. Ante incompatibilidad devuelve un error de dominio comprensible en español y no produce un cruce silencioso.
+
+El reporte consolidado debe formar una partición exacta: cada `ResultadoVinculacionComercial` de entrada se utiliza exactamente una vez y cada `ResultadoConciliacion` de entrada se utiliza exactamente una vez. La implementación incluye una validación interna explícita y totales agregados reconciliados con los resultados. Esta etapa no lee archivos, no usa DataFrames, no depende de pandas, openpyxl, Streamlit ni modifica UI, presentación, exportaciones, persistencia, normalizadores o reglas fiscales.
+
+### 36.1 Correcciones de presencia financiera y cruces sin Eccomapp
+
+Un `ResultadoConciliacion` existente no equivale automáticamente a presencia de Mercado Pago. El reporte de conciliación también puede contener resultados comerciales sin movimientos financieros reales, por ejemplo `EstadoConciliacion.OPERACION_SIN_MOVIMIENTO_FINANCIERO`, `cantidad_movimientos_financieros == 0`, `hashes_importacion_financiera == ()` y `numeros_fila_financiera == ()`.
+
+La presencia financiera consolidada se determina por evidencia estructural de movimientos: `ResultadoConciliacion.cantidad_movimientos_financieros > 0`. No se usan importes para determinar presencia, porque un movimiento real de Mercado Pago puede tener neto cero. Si un resultado de conciliación asociado no contiene movimientos financieros reales, se conserva en la partición y trazabilidad, pero `tiene_mercado_pago` queda en `False`, los importes e impactos MP quedan en `None` y el estado consolidado es `SIN_MOVIMIENTO_FINANCIERO`, salvo que una prioridad superior aplique. Los indicadores financieros se agregan únicamente desde resultados que contienen movimientos reales.
+
+Una venta oficial `SOLO_MERCADO_LIBRE` puede vincularse con Mercado Pago por `id_orden` cuando falta Eccomapp. En ese caso el resultado consolidado conserva Mercado Libre oficial y Mercado Pago, permite comparar `total_informado_ml` contra `neto_aprobado_mp`, deja `costo_productos_eccomapp` y `utilidad_preliminar_control` en `None`, y queda como `SIN_COSTO_PRODUCTO` con revisión. Esta regla no habilita asignación automática en resultados `AMBIGUA` o `DUPLICADA`, ni agrega cabeceras de carrito como ID Order cuando ya existen órdenes internas.
+
+La compatibilidad de hashes Eccomapp entre `ReporteVinculacionComercial` y `ReporteConciliacion` debe ser exacta. Son válidos únicamente los casos donde ambos conjuntos son iguales o ambos están vacíos cuando no existe Eccomapp. Hashes diferentes, subconjuntos incompletos o un conjunto vacío contra otro no vacío deben producir `ErrorControlConsolidado` en español antes de cualquier cruce.
