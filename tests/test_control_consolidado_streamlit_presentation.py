@@ -74,3 +74,141 @@ def test_kpis_comparables_utilidad_parcial_y_mp_sin_ml():
     assert b["Neto MP sin venta oficial asociada"] == "$ 30,00"
     assert b["Utilidad preliminar calculable"] == "$ 60,00"
     assert b["Cobertura de utilidad"] == "1 de 3 grupos con los datos necesarios"
+
+
+def test_integral_tres_fuentes_sintetico_en_memoria_presentacion_y_cobertura():
+    from csv import DictWriter
+    from io import StringIO
+
+    from kiki_control.adapters.mercado_libre import normalizar_mercado_libre
+    from kiki_control.adapters.mercado_libre_ventas import normalizar_ventas_mercado_libre
+    from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
+    from kiki_control.linking.commercial import vincular_ventas_oficiales_con_eccomapp
+    from kiki_control.linking.control_financiero import consolidar_control_financiero
+    from kiki_control.presentation.control_consolidado_view import (
+        advertir_periodos_distintos,
+        cobertura_tres_fuentes,
+        detalle_control,
+        explicacion_resultado,
+        filas_tabla_consolidada,
+        tabla_consolidada,
+    )
+    from kiki_control.reconciliation import reconciliar
+    from tests.test_mercado_libre_ventas_normalization import PII_SENTINELS, fila as fila_ml_oficial, xlsx_ventas
+    from tests.test_mercado_pago_normalization import fila as fila_mp, xlsx as xlsx_mp
+    from tests.test_streamlit_integration import ML_COLS
+
+    id_orden = "10000000000000000001"
+    venta = fila_ml_oficial(id_venta=id_orden, total="120.00")
+    venta["Ingresos por productos (ARS)"] = "150.00"
+    venta["Cargo por venta e impuestos (ARS)"] = "-20.00"
+    venta["Costos de envío (ARS)"] = "-10.00"
+    ventas_ml = normalizar_ventas_mercado_libre("ventas_oficiales.xlsx", xlsx_ventas([venta]))
+
+    salida = StringIO()
+    writer = DictWriter(salida, fieldnames=ML_COLS)
+    writer.writeheader()
+    writer.writerow(
+        {
+            "Fecha de venta": "2026-07-01",
+            "Hora": "10:00:00",
+            "Producto": "Producto sintético sin datos reales",
+            "Sku": "SKU-SINTETICO-0001",
+            "ID Order": id_orden,
+            "Cantidad": "1",
+            "Monto de venta ($)": "150,00",
+            "Costo Total (Con IVA) ($)": "70,00",
+            "Comisión MeLi  ($)": "20,00",
+            "Costo de envío (Seller) ($)": "10,00",
+            "Monto neto (en MP) ($)": "115,00",
+            "Utilidades netas ($)": "45,00",
+            "Parámetros cálculo": "Costo inc. alíc.: Sí | Precio inc. alíc.: Sí | IIBB: 0 (0%)",
+        }
+    )
+    eccomapp = normalizar_mercado_libre("eccomapp.csv", salida.getvalue().encode("utf-8"))
+
+    mercado_pago = normalizar_mercado_pago(
+        "mercado_pago.xlsx",
+        xlsx_mp(
+            [
+                fila_mp(
+                    **{
+                        "ID DE OPERACIÓN EN MERCADO PAGO": "mp-sintetico-1",
+                        "ID DE LA ORDEN": id_orden,
+                        "FECHA DE ORIGEN": "2026-07-01T13:00:00.000-03:00",
+                        "FECHA DE APROBACIÓN": "2026-07-01T13:01:00.000-03:00",
+                        "FECHA DE LIQUIDACIÓN DEL DINERO": "2026-07-10T13:00:00.000-03:00",
+                        "VALOR DE LA COMPRA": "150.00",
+                        "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO": "118.00",
+                        "MONTO NETO DE LA OPERACIÓN": "118.00",
+                        "COMISIONES + IVA": "-20.00",
+                        "COSTO DE ENVÍO": "-10.00",
+                    }
+                )
+            ]
+        ),
+    )
+
+    assert ventas_ml.cantidad_normalizada == eccomapp.cantidad_normalizada == mercado_pago.cantidad_normalizada == 1
+    reporte_comercial = vincular_ventas_oficiales_con_eccomapp(ventas_ml.ventas, eccomapp.operaciones)
+    reporte_financiero = reconciliar(eccomapp.operaciones, mercado_pago.movimientos, Decimal("0.01"))
+    consolidado = consolidar_control_financiero(reporte_comercial, reporte_financiero)
+    resultado = consolidado.resultados[0]
+
+    assert resultado.monto_venta_ml == Decimal("150.00")
+    assert resultado.total_informado_ml == Decimal("120.00")
+    assert resultado.cargo_venta_impuestos_ml == Decimal("-20.00")
+    assert resultado.costo_envio_ml == Decimal("-10.00")
+    assert resultado.costo_productos_eccomapp == Decimal("70.00")
+    assert resultado.neto_aprobado_mp == Decimal("118.00")
+    assert resultado.diferencia_ml_mp == Decimal("-2.00")
+    assert resultado.utilidad_preliminar_control == Decimal("50.00")
+
+    detalle = detalle_control(resultado)
+    assert detalle["Venta ML oficial"] == "$ 150,00"
+    assert detalle["Neto esperado ML"] == "$ 120,00"
+    assert detalle["Cargos e impuestos ML"] == "$ -20,00"
+    assert detalle["Costo de envío ML"] == "$ -10,00"
+    assert detalle["Costo productos"] == "$ 70,00"
+    assert detalle["Neto aprobado MP"] == "$ 118,00"
+    assert detalle["Neto financiero total MP"] == "$ 118,00"
+    assert detalle["Diferencia ML–MP"] == "$ -2,00"
+    assert detalle["Utilidad preliminar"] == "$ 50,00"
+
+    explicaciones = {fila["Concepto"]: fila for fila in explicacion_resultado(resultado)}
+    assert explicaciones["Venta ML oficial"]["Columna utilizada"] == "Ingresos por productos (ARS)"
+    assert explicaciones["Cargos e impuestos ML"]["Columna utilizada"] == "Cargo por venta e impuestos (ARS)"
+    assert explicaciones["Costo de envío ML"]["Columna utilizada"] == "Costos de envío (ARS)"
+    assert explicaciones["Neto esperado ML"]["Columna utilizada"] == "Total (ARS)"
+    assert explicaciones["Costo de productos"]["Columna utilizada"] == "Costo Total (Con IVA) ($)"
+    assert explicaciones["Neto aprobado MP"]["Columna utilizada"] == "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO"
+    assert explicaciones["Diferencia ML–MP"]["Regla aplicada"] == "neto_aprobado_mp - total_informado_ml"
+    assert explicaciones["Utilidad preliminar"]["Regla aplicada"] == "total_informado_ml - costo_productos_eccomapp"
+
+    cobertura = cobertura_tres_fuentes(ventas_ml.ventas, eccomapp.operaciones, mercado_pago.movimientos)
+    assert not advertir_periodos_distintos(cobertura)
+    assert next(c for c in cobertura if c.nombre == "Liquidaciones MP").minimo == "2026-07-10"
+
+    filas = filas_tabla_consolidada(consolidado.resultados)
+    tabla = tabla_consolidada(filas)
+    texto_presentacion = repr(detalle) + repr(explicaciones) + repr(tabla)
+    for pii in PII_SENTINELS:
+        assert pii not in texto_presentacion
+    assert "float(" not in open("src/kiki_control/presentation/control_consolidado_view.py", encoding="utf-8").read()
+
+
+def test_ayudas_y_column_config_declaran_columnas_externas_exactas():
+    source = open("src/kiki_control/presentation/control_consolidado_view.py", encoding="utf-8").read()
+    assert "Campo interno: costo_envio_ml. Columna utilizada: Costos de envío (ARS)." in source
+    assert "Columnas externas: Ingresos por envío (ARS)" not in source
+    ui = open("src/kiki_control/ui/streamlit_app.py", encoding="utf-8").read()
+    for expected in (
+        "Ingresos por productos (ARS)",
+        "Cargo por venta e impuestos (ARS)",
+        "Costos de envío (ARS)",
+        "Total (ARS)",
+        "Costo Total (Con IVA) ($)",
+        "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO",
+    ):
+        assert expected in ui
+    assert "column_config=_column_config_control_consolidado()" in ui

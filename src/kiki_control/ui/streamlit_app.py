@@ -379,6 +379,24 @@ def _mostrar_revisiones_pendientes(reporte: Any) -> None:
             st.write(f"**Filas de origen:** ML {', '.join(map(str, caso.filas_ml)) or '—'} · MP {', '.join(map(str, caso.filas_mp)) or '—'}")
             st.caption("Este detalle se vincula con el detalle de operación existente y no duplica cálculos financieros.")
 
+
+def _column_config_control_consolidado() -> dict[str, Any]:
+    return {
+        "Grupo u orden": st.column_config.TextColumn("Grupo u orden", help="Identificador operativo del grupo u orden. No incluye datos del comprador ni contenido crudo."),
+        "Estado": st.column_config.TextColumn("Estado", help="Estado consolidado definido por el motor de dominio para este grupo."),
+        "Fuentes disponibles": st.column_config.TextColumn("Fuentes disponibles", help="Indica si el grupo tiene datos de ML oficial, Eccomapp y/o Mercado Pago."),
+        "Venta ML oficial": st.column_config.TextColumn("Venta ML oficial", help="Importe de venta informado por el archivo oficial de Mercado Libre. Columna: Ingresos por productos (ARS). Universo: grupos con venta oficial."),
+        "Cargos e impuestos ML": st.column_config.TextColumn("Cargos e impuestos ML", help="Cargos e impuestos informados por el archivo oficial de Mercado Libre. Columna: Cargo por venta e impuestos (ARS). Universo: grupos con venta oficial."),
+        "Costo envío ML": st.column_config.TextColumn("Costo envío ML", help="Costo de envío informado por el archivo oficial de Mercado Libre. Columna: Costos de envío (ARS). Universo: grupos con venta oficial."),
+        "Neto esperado ML": st.column_config.TextColumn("Neto esperado ML", help="Total informado directamente por Mercado Libre oficial. Columna: Total (ARS). No se reconstruye en Streamlit. Universo: grupos con venta oficial."),
+        "Costo productos": st.column_config.TextColumn("Costo productos", help="Costo de productos informado por Eccomapp. Columna: Costo Total (Con IVA) ($). Universo: grupos con Eccomapp."),
+        "Neto aprobado MP": st.column_config.TextColumn("Neto aprobado MP", help="Neto aprobado proveniente de Mercado Pago. Columna: MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO. Agrupado por el motor. Universo: grupos con movimientos MP aprobados."),
+        "Neto financiero total MP": st.column_config.TextColumn("Neto financiero total MP", help="Total financiero agrupado por el motor desde Mercado Pago. Columna principal: MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO. Universo: grupos con movimientos MP."),
+        "Diferencia ML–MP": st.column_config.TextColumn("Diferencia ML–MP", help="Diferencia calculada por el dominio entre neto aprobado MP y Total (ARS) de ML oficial. Universo: grupos con ambos datos."),
+        "Utilidad preliminar": st.column_config.TextColumn("Utilidad preliminar", help="Utilidad preliminar de control calculada por el dominio desde Total (ARS) ML oficial y Costo Total (Con IVA) ($) Eccomapp. No es resultado contable o fiscal definitivo."),
+        "Requiere revisión": st.column_config.TextColumn("Requiere revisión", help="Indicador prudente definido por el dominio cuando hay diferencias, fuentes faltantes o ambigüedad."),
+    }
+
 def _mostrar_resultados() -> None:
     reporte = st.session_state["reporte_consolidado"]
     with st.expander("Cómo se calcula el control consolidado", expanded=True):
@@ -398,8 +416,9 @@ def _mostrar_resultados() -> None:
         for col, item in zip(cols, cobertura, strict=False):
             col.metric(item.nombre, f"{item.minimo} a {item.maximo}", help="Fechas normalizadas informadas por la fuente; no se recortan archivos automáticamente.")
             if item.extra: col.caption(item.extra)
+        st.caption("Las liquidaciones de Mercado Pago pueden extenderse fuera del período de venta; se muestran como cobertura financiera y no disparan por sí solas la advertencia de períodos de origen.")
         if advertir_periodos_distintos(cobertura):
-            st.warning("Los períodos informados por las fuentes no coinciden. Esto requiere revisión, pero no implica por sí mismo un error.")
+            st.warning("Los períodos de origen de ML oficial, Eccomapp y Mercado Pago no coinciden. Esto requiere revisión, pero no implica por sí mismo un error.")
 
     st.header("Resumen ejecutivo consolidado")
     st.info(conclusion_ejecutiva_consolidada(reporte))
@@ -422,7 +441,7 @@ def _mostrar_resultados() -> None:
     solo_faltantes = c5.checkbox("Solo con datos faltantes", key="filtro_solo_faltantes")
     visibles = filtrar_filas_consolidadas(filas, set(seleccion), busqueda, solo_revision, solo_diferencia, solo_faltantes)
     columnas = ["Grupo u orden", "Estado", "Fuentes disponibles", "Venta ML oficial", "Cargos e impuestos ML", "Costo envío ML", "Neto esperado ML", "Costo productos", "Neto aprobado MP", "Neto financiero total MP", "Diferencia ML–MP", "Utilidad preliminar", "Requiere revisión"]
-    st.dataframe([{k: row[k] for k in columnas} for row in tabla_consolidada(visibles)], use_container_width=True, hide_index=True)
+    st.dataframe([{k: row[k] for k in columnas} for row in tabla_consolidada(visibles)], use_container_width=True, hide_index=True, column_config=_column_config_control_consolidado())
 
     if visibles:
         elegida = st.selectbox("Seleccionar operación para ver detalle", [f.clave for f in visibles], key="detalle_operacion")

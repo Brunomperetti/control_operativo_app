@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Iterable, Any
 
-from kiki_control.domain.control_consolidado import EstadoControlConsolidado, ReporteControlConsolidado, ResultadoControlConsolidado
+from kiki_control.domain.control_consolidado import ReporteControlConsolidado, ResultadoControlConsolidado
 
 
 @dataclass(frozen=True)
@@ -91,11 +91,11 @@ def kpis_consolidados(reporte: ReporteControlConsolidado) -> dict[str, list[Kpi]
         "Bloque A — Importes informados por ML oficial": [
             Kpi("Ventas ML oficial", formato_importe(_sumar(r.monto_venta_ml for r in resultados)), "Fuente: Mercado Libre oficial. Campo interno: monto_venta_ml. Columna externa: Ingresos por productos (ARS). Universo: resultados consolidados con venta oficial." + ayuda_limite),
             Kpi("Cargos e impuestos ML", formato_importe(_sumar(r.cargo_venta_impuestos_ml for r in resultados)), "Fuente: Mercado Libre oficial. Campo interno: cargo_venta_impuestos_ml. Columna externa: Cargo por venta e impuestos (ARS). Universo: resultados con venta oficial." + ayuda_limite),
-            Kpi("Costo de envío ML", formato_importe(_sumar(r.costo_envio_ml for r in resultados)), "Fuente: Mercado Libre oficial. Campo interno: costo_envio_ml. Columnas externas: Ingresos por envío (ARS), Costos de envío (ARS) y cargos de envío informados. Universo: resultados con venta oficial." + ayuda_limite),
+            Kpi("Costo de envío ML", formato_importe(_sumar(r.costo_envio_ml for r in resultados)), "Fuente: archivo oficial de Mercado Libre. Campo interno: costo_envio_ml. Columna utilizada: Costos de envío (ARS). Universo: resultados con venta oficial. Informado directamente por la fuente." + ayuda_limite),
             Kpi("Neto esperado ML", formato_importe(_sumar(r.total_informado_ml for r in resultados)), "Fuente: Mercado Libre oficial. Campo interno: total_informado_ml. Columna externa: Total (ARS). Universo: resultados con venta oficial. Fórmula: no se reconstruye; se usa el total informado." + ayuda_limite),
         ],
         "Bloque B — Comparación financiera": [
-            Kpi("Neto ML comparable", formato_importe(_sumar(r.total_informado_ml for r in comparables)), "Fuente: ML oficial. Campo: total_informado_ml. Universo: solo resultados donde también existe neto_aprobado_mp." + ayuda_limite),
+            Kpi("Neto ML comparable", formato_importe(_sumar(r.total_informado_ml for r in comparables)), "Fuente: Mercado Libre oficial. Campo interno: total_informado_ml. Columna utilizada: Total (ARS). Universo: solo resultados donde también existe neto_aprobado_mp. Informado directamente por la fuente." + ayuda_limite),
             Kpi("Neto MP comparable", formato_importe(_sumar(r.neto_aprobado_mp for r in comparables)), "Fuente: Mercado Pago. Campo: neto_aprobado_mp. Columna: MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO. Universo: mismos resultados comparables con ML." + ayuda_limite),
             Kpi("Diferencia comparable ML–MP", formato_importe(_sumar(r.diferencia_ml_mp for r in comparables)), "Fórmula: suma de diferencia_ml_mp en resultados comparables; no mezcla movimientos MP sin ML ni PAYOUT." + ayuda_limite),
             Kpi("Neto MP sin venta oficial asociada", formato_importe(_sumar(r.neto_aprobado_mp for r in resultados if r.neto_aprobado_mp is not None and not r.tiene_mercado_libre_oficial)), "Fuente: Mercado Pago. Universo: movimientos no encontrados en el archivo de ventas oficiales cargado." + ayuda_limite),
@@ -132,7 +132,12 @@ def cobertura_tres_fuentes(ventas_ml: Iterable[Any], operaciones: Iterable[Any],
 
 
 def advertir_periodos_distintos(cobertura: tuple[CoberturaFuente, ...]) -> bool:
-    rangos = {(c.minimo, c.maximo) for c in cobertura if c.minimo != "Sin fechas"}
+    """Compara solo períodos de origen: ML oficial, Eccomapp y origen MP.
+
+    Las liquidaciones MP pueden ocurrir más tarde y no deben disparar esta advertencia por sí solas.
+    """
+    nombres_origen = {"Ventas oficiales ML", "Ventas/costos Eccomapp", "Origen movimientos MP"}
+    rangos = {(c.minimo, c.maximo) for c in cobertura if c.nombre in nombres_origen and c.minimo != "Sin fechas"}
     return len(rangos) > 1
 
 
@@ -162,18 +167,114 @@ def tabla_consolidada(filas):
 
 
 def detalle_control(r: ResultadoControlConsolidado) -> dict[str, str]:
-    return {"Grupo": r.id_grupo_canonico or "No informado", "Órdenes": ", ".join(r.ids_orden) or "No informado", "Estado": r.estado.value, "Fuentes presentes": fuentes_disponibles(r), "Venta ML oficial": formato_importe(r.total_informado_ml), "Costo productos": formato_importe(r.costo_productos_eccomapp), "Neto aprobado MP": formato_importe(r.neto_aprobado_mp), "Diferencia ML–MP": formato_importe(r.diferencia_ml_mp), "Utilidad preliminar": formato_importe(r.utilidad_preliminar_control), "Requiere revisión": "Sí" if r.requiere_revision else "No", "Explicación": "; ".join(r.explicaciones) or "Resultado informado por las fuentes cargadas; requiere revisión si hay datos faltantes o diferencias."}
+    return {
+        "Grupo": r.id_grupo_canonico or "No informado",
+        "Órdenes": ", ".join(r.ids_orden) or "No informado",
+        "Estado": r.estado.value,
+        "Fuentes presentes": fuentes_disponibles(r),
+        "Venta ML oficial": formato_importe(r.monto_venta_ml),
+        "Cargos e impuestos ML": formato_importe(r.cargo_venta_impuestos_ml),
+        "Costo de envío ML": formato_importe(r.costo_envio_ml),
+        "Neto esperado ML": formato_importe(r.total_informado_ml),
+        "Costo productos": formato_importe(r.costo_productos_eccomapp),
+        "Neto aprobado MP": formato_importe(r.neto_aprobado_mp),
+        "Neto financiero total MP": formato_importe(r.neto_financiero_total_mp),
+        "Diferencia ML–MP": formato_importe(r.diferencia_ml_mp),
+        "Utilidad preliminar": formato_importe(r.utilidad_preliminar_control),
+        "Requiere revisión": "Sí" if r.requiere_revision else "No",
+        "Explicación": "; ".join(r.explicaciones) or "Resultado informado por las fuentes cargadas; requiere revisión si hay datos faltantes o diferencias.",
+    }
 
 
-def explicacion_resultado(r: ResultadoControlConsolidado) -> list[dict[str,str]]:
-    falta_utilidad=[]
-    if r.total_informado_ml is None: falta_utilidad.append("Total (ARS) ML oficial")
-    if r.costo_productos_eccomapp is None: falta_utilidad.append("Costo Total (Con IVA) Eccomapp")
+def _filas(*grupos: tuple[int, ...]) -> str:
+    partes = []
+    for nombre, valores in grupos:
+        partes.append(f"{nombre} {valores or '—'}")
+    return " · ".join(partes)
+
+
+def _motivo_no_calculado(valor: Decimal | None, faltantes: tuple[str, ...] = ()) -> str:
+    if valor is not None:
+        return ""
+    return "No calculado: falta " + (", ".join(faltantes) if faltantes else "fuente o campo requerido")
+
+
+def explicacion_resultado(r: ResultadoControlConsolidado) -> list[dict[str, str]]:
+    prudencia = "Control operativo preliminar; no es resultado contable o fiscal definitivo."
     return [
-        {"Concepto":"Utilidad preliminar de control", "Valor": formato_importe(r.utilidad_preliminar_control), "Archivo de origen":"ML oficial + Eccomapp", "Columna utilizada":"Total (ARS); Costo Total (Con IVA) ($)", "Cálculo":"Utilidad preliminar = Total (ARS) ML oficial menos Costo Total (Con IVA) Eccomapp" if not falta_utilidad else "No calculada: falta " + ", ".join(falta_utilidad), "Filas de origen": f"ML {r.filas_origen_ml or '—'} · Eccomapp {r.filas_origen_eccomapp or '—'}"},
-        {"Concepto":"Diferencia ML–MP", "Valor": formato_importe(r.diferencia_ml_mp), "Archivo de origen":"ML oficial + Mercado Pago", "Columna utilizada":"Total (ARS); MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO", "Cálculo":"Diferencia = Neto aprobado MP menos Total (ARS) ML oficial", "Filas de origen": f"ML {r.filas_origen_ml or '—'} · MP {r.filas_origen_mp or '—'}"},
+        {
+            "Concepto": "Venta ML oficial",
+            "Valor": formato_importe(r.monto_venta_ml),
+            "Archivo de origen": "Ventas oficiales de Mercado Libre",
+            "Columna utilizada": "Ingresos por productos (ARS)",
+            "Regla aplicada": "Importe informado directamente por la fuente." if r.monto_venta_ml is not None else _motivo_no_calculado(r.monto_venta_ml, ("Mercado Libre oficial / Ingresos por productos (ARS)",)),
+            "Filas de origen": _filas(("ML", r.filas_origen_ml)),
+            "Limitación": prudencia,
+        },
+        {
+            "Concepto": "Cargos e impuestos ML",
+            "Valor": formato_importe(r.cargo_venta_impuestos_ml),
+            "Archivo de origen": "Ventas oficiales de Mercado Libre",
+            "Columna utilizada": "Cargo por venta e impuestos (ARS)",
+            "Regla aplicada": "Importe informado directamente por la fuente." if r.cargo_venta_impuestos_ml is not None else _motivo_no_calculado(r.cargo_venta_impuestos_ml, ("Mercado Libre oficial / Cargo por venta e impuestos (ARS)",)),
+            "Filas de origen": _filas(("ML", r.filas_origen_ml)),
+            "Limitación": prudencia,
+        },
+        {
+            "Concepto": "Costo de envío ML",
+            "Valor": formato_importe(r.costo_envio_ml),
+            "Archivo de origen": "Ventas oficiales de Mercado Libre",
+            "Columna utilizada": "Costos de envío (ARS)",
+            "Regla aplicada": "Importe informado directamente por la fuente." if r.costo_envio_ml is not None else _motivo_no_calculado(r.costo_envio_ml, ("Mercado Libre oficial / Costos de envío (ARS)",)),
+            "Filas de origen": _filas(("ML", r.filas_origen_ml)),
+            "Limitación": prudencia,
+        },
+        {
+            "Concepto": "Neto esperado ML",
+            "Valor": formato_importe(r.total_informado_ml),
+            "Archivo de origen": "Ventas oficiales de Mercado Libre",
+            "Columna utilizada": "Total (ARS)",
+            "Regla aplicada": "Usado tal como lo informa la fuente; no se reconstruye en presentación." if r.total_informado_ml is not None else _motivo_no_calculado(r.total_informado_ml, ("Mercado Libre oficial / Total (ARS)",)),
+            "Filas de origen": _filas(("ML", r.filas_origen_ml)),
+            "Limitación": prudencia,
+        },
+        {
+            "Concepto": "Costo de productos",
+            "Valor": formato_importe(r.costo_productos_eccomapp),
+            "Archivo de origen": "Eccomapp",
+            "Columna utilizada": "Costo Total (Con IVA) ($)",
+            "Regla aplicada": "Importe informado por Eccomapp y consumido por el dominio." if r.costo_productos_eccomapp is not None else _motivo_no_calculado(r.costo_productos_eccomapp, ("Eccomapp / Costo Total (Con IVA) ($)",)),
+            "Filas de origen": _filas(("Eccomapp", r.filas_origen_eccomapp)),
+            "Limitación": prudencia,
+        },
+        {
+            "Concepto": "Neto aprobado MP",
+            "Valor": formato_importe(r.neto_aprobado_mp),
+            "Archivo de origen": "Mercado Pago",
+            "Columna utilizada": "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO",
+            "Regla aplicada": "Agrupado según las reglas del motor de conciliación." if r.neto_aprobado_mp is not None else _motivo_no_calculado(r.neto_aprobado_mp, ("Mercado Pago / movimiento aprobado",)),
+            "Filas de origen": _filas(("MP", r.filas_origen_mp)),
+            "Limitación": prudencia,
+        },
+        {
+            "Concepto": "Diferencia ML–MP",
+            "Valor": formato_importe(r.diferencia_ml_mp),
+            "Archivo de origen": "Mercado Libre oficial + Mercado Pago",
+            "Columna utilizada": "Total (ARS); MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO",
+            "Regla aplicada": "neto_aprobado_mp - total_informado_ml" if r.diferencia_ml_mp is not None else _motivo_no_calculado(r.diferencia_ml_mp, ("neto_aprobado_mp", "total_informado_ml")),
+            "Filas de origen": _filas(("ML", r.filas_origen_ml), ("MP", r.filas_origen_mp)),
+            "Limitación": prudencia,
+        },
+        {
+            "Concepto": "Utilidad preliminar",
+            "Valor": formato_importe(r.utilidad_preliminar_control),
+            "Archivo de origen": "Mercado Libre oficial + Eccomapp",
+            "Columna utilizada": "Total (ARS); Costo Total (Con IVA) ($)",
+            "Regla aplicada": "total_informado_ml - costo_productos_eccomapp" if r.utilidad_preliminar_control is not None else _motivo_no_calculado(r.utilidad_preliminar_control, ("total_informado_ml", "costo_productos_eccomapp")),
+            "Filas de origen": _filas(("ML", r.filas_origen_ml), ("Eccomapp", r.filas_origen_eccomapp)),
+            "Limitación": prudencia,
+        },
     ]
-
 
 def trazabilidad_tecnica(r: ResultadoControlConsolidado, tolerancia: Decimal, hashes: dict[str,str]) -> dict[str,str]:
     return {"Versión de regla": r.version_regla, "Motivos internos": "; ".join(r.motivos) or "—", "Hashes truncados": ", ".join(f"{k}:{v[:12]}" for k,v in hashes.items() if v), "Filas de origen": f"ML {r.filas_origen_ml}; Eccomapp {r.filas_origen_eccomapp}; MP {r.filas_origen_mp}", "Claves consumidas": f"Comercial {r.claves_resultados_comerciales}; Financiero {r.claves_resultados_financieros}", "Tolerancia": str(tolerancia)}
