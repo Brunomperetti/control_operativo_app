@@ -136,13 +136,20 @@ def fuentes_disponibles(r: ResultadoControlConsolidado) -> str:
     return ", ".join(fuentes) if fuentes else "Sin fuente comercial asociada"
 
 
-def conclusion_ejecutiva_consolidada(reporte: ReporteControlConsolidado) -> str:
+def conclusion_ejecutiva_consolidada(reporte: ReporteControlConsolidado, diagnostico: Any | None = None) -> str:
+    diag = diagnostico or diagnosticar_control_consolidado(reporte)
     calculables = sum(1 for r in reporte.resultados if r.utilidad_preliminar_control is not None)
+    diferencias = diag.diferencias
     return (
-        f"Se consolidaron {reporte.total_resultados} grupos: {reporte.total_completa} completos, "
-        f"{reporte.total_con_diferencia} con diferencia, {reporte.total_sin_venta_oficial} sin venta oficial, "
-        f"{reporte.total_sin_costo_producto} sin costo de producto, {reporte.total_sin_movimiento_financiero} sin movimiento MP, "
-        f"{reporte.total_solo_movimiento_financiero} solo movimientos financieros y {reporte.total_duplicada_o_ambigua} duplicados o ambiguos. "
+        f"Se consolidaron {reporte.total_resultados} grupos. "
+        f"Estados principales del control: {reporte.total_completa} completos, {reporte.total_con_diferencia} con estado principal con diferencia, "
+        f"{reporte.total_sin_venta_oficial} sin venta oficial, {reporte.total_sin_costo_producto} sin costo de producto, "
+        f"{reporte.total_sin_movimiento_financiero} sin movimiento MP, {reporte.total_solo_movimiento_financiero} solo movimientos financieros y "
+        f"{reporte.total_duplicada_o_ambigua} duplicados o ambiguos. "
+        f"En el universo ML–MP existen {diferencias.comparables_totales} grupos comparables: "
+        f"{diferencias.coincidencias_dentro_tolerancia} coinciden dentro de la tolerancia y "
+        f"{diferencias.con_diferencia_ml_mp} presentan diferencias por un total de {formato_importe(diferencias.suma_diferencia_ml_mp)}. "
+        "Los estados de cobertura y fuentes faltantes se informan por separado, sin sumar contadores de universos diferentes ni atribuir causas contables a la diferencia. "
         f"Requieren revisión {reporte.total_requieren_revision}; la utilidad preliminar de control pudo calcularse para {calculables}. "
         "Estos importes son informados por la fuente y no constituyen resultado contable o fiscal definitivo."
     )

@@ -126,3 +126,11 @@ def test_movimientos_no_se_agrupan_y_archivo_ml_rechazado():
     rechazado = normalizar_mercado_pago("ventas.csv", csv_bytes(ML))
     assert rechazado.cantidad_normalizada == 0
     assert rechazado.errores[0].codigo == "FUENTE_NO_COMPATIBLE"
+
+
+def test_mercado_pago_no_aplica_regla_ml_oficial_costo_envio_vacio():
+    resultado = normalizar_mercado_pago("mp.xlsx", xlsx([fila(**{"COSTO DE ENVÍO": ""})]))
+
+    assert resultado.cantidad_normalizada == 0
+    assert resultado.cantidad_rechazada == 1
+    assert any(e.codigo == "IMPORTE_INVALIDO" and e.columna == "COSTO DE ENVÍO" for e in resultado.errores)

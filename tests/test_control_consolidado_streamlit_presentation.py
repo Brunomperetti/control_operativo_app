@@ -309,3 +309,63 @@ def test_excel_residual_muestra_universo_sumas_y_no_formatea_cantidades_como_mon
     assert '$' not in filas['Identidad residual ML cierra'].number_format
     diccionario = wb['Diccionario de cálculos']
     assert any(row[2].value == 'universo ML oficial con los cuatro importes presentes' for row in diccionario.iter_rows(min_row=2))
+
+
+def test_descargas_consolidadas_renderizan_sin_helper_inexistente_y_nombres_xlsx():
+    from datetime import datetime, UTC
+    from io import BytesIO
+    from types import SimpleNamespace
+    from openpyxl import load_workbook
+    import streamlit as st
+    from tests.test_control_consolidado_diagnostics import r, rep
+    from kiki_control.exporting import generar_excepciones_consolidadas_excel, generar_reporte_consolidado_excel, generar_revisiones_consolidadas_excel
+    from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
+    from kiki_control.ui.streamlit_app import _nombre_exportacion
+
+    source = open("src/kiki_control/ui/streamlit_app.py", encoding="utf-8").read()
+    assert "_nombre_descarga" not in source
+
+    st.session_state["reporte"] = SimpleNamespace(fecha_procesamiento_utc=datetime(2026, 7, 22, 15, 4, 5, tzinfo=UTC))
+    reporte = rep([r('a'), r('b')])
+    diagnostico = diagnosticar_control_consolidado(reporte)
+    descargas = (
+        (generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico), _nombre_exportacion("reporte_consolidado_tres_fuentes")),
+        (generar_excepciones_consolidadas_excel(reporte), _nombre_exportacion("excepciones_control_consolidado")),
+        (generar_revisiones_consolidadas_excel(reporte), _nombre_exportacion("revisiones_consolidadas")),
+    )
+
+    for contenido, nombre in descargas:
+        assert nombre.endswith("_20260722_150405.xlsx")
+        assert len(contenido) > 0
+        assert contenido.startswith(b"PK")
+        assert load_workbook(BytesIO(contenido)).sheetnames[0] == "Resumen"
+
+
+def test_advertencia_envio_vacio_muestra_texto_cliente_y_codigo_en_detalle(monkeypatch):
+    import streamlit as st
+    from kiki_control.domain.enums import SeveridadValidacion
+    from kiki_control.ui.streamlit_app import _mostrar_problemas
+    from kiki_control.validation.results import ProblemaValidacion
+
+    class ExpanderDummy:
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    principal = []
+    detalle = []
+    monkeypatch.setattr(st, "expander", lambda *_args, **_kwargs: ExpanderDummy())
+    monkeypatch.setattr(st, "write", lambda texto: detalle.append(texto))
+
+    problema = ProblemaValidacion(
+        "COSTO_ENVIO_VACIO_INTERPRETADO_CERO",
+        "Costo de envío vacío interpretado como $0 según regla confirmada por la clienta.",
+        SeveridadValidacion.ADVERTENCIA,
+        columna="Costos de envío (ARS)",
+        detalle="Filas alcanzadas: 7",
+    )
+    _mostrar_problemas("Advertencias", (problema,), principal.append)
+
+    assert principal == ["Advertencias: Costo de envío vacío interpretado como $0 según regla confirmada. Filas alcanzadas: 7."]
+    assert any("COSTO_ENVIO_VACIO_INTERPRETADO_CERO" in item for item in detalle)

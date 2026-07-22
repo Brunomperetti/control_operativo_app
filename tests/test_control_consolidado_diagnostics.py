@@ -216,3 +216,42 @@ def test_residual_ml_excluye_solo_mp_y_solo_eccomapp_del_universo():
     assert residual.grupos_calculables + residual.grupos_excluidos == residual.grupos_universo_ml_oficial
     assert residual.motivos_exclusion['falta Ingresos por productos (ARS)'] == 1
     assert residual.identidad_cierra_exactamente
+
+
+def test_residual_ml_incluye_envio_vacio_ya_normalizado_como_cero():
+    envio_vacio_normalizado = con_componentes_ml(r('envio-vacio-normalizado'), D('80'), D('100'), D('-20'), D('0'))
+    otro_calculable = con_componentes_ml(r('otro'), D('45'), D('50'), D('-5'), D('0'))
+
+    residual = diagnosticar_control_consolidado(rep([envio_vacio_normalizado, otro_calculable])).residual_ml
+
+    assert residual.grupos_universo_ml_oficial == 2
+    assert residual.grupos_calculables == 2
+    assert residual.grupos_excluidos == 0
+    assert residual.motivos_exclusion['falta Costos de envío (ARS)'] == 0
+    assert residual.suma_total_ars == D('125')
+    assert residual.suma_ingresos_productos == D('150')
+    assert residual.suma_cargo_venta_impuestos == D('-25')
+    assert residual.suma_costos_envio == D('0')
+    assert residual.importe == D('0')
+    assert residual.identidad_cierra_exactamente
+
+
+def test_conclusion_con_diferencias_usa_diagnostico_no_estado_principal():
+    from kiki_control.presentation.control_consolidado_view import conclusion_ejecutiva_consolidada
+
+    reporte = rep([
+        r('diff-a', E.COMPLETA, ml=D('100'), mp=D('110'), dif=D('10')),
+        r('diff-b', E.COMPLETA, ml=D('200'), mp=D('214.34'), dif=D('14.34')),
+        r('ok', E.COMPLETA, ml=D('50'), mp=D('50'), dif=D('0')),
+    ])
+    diagnostico = diagnosticar_control_consolidado(reporte)
+    texto = conclusion_ejecutiva_consolidada(reporte, diagnostico)
+
+    assert reporte.total_con_diferencia == 0
+    assert diagnostico.diferencias.con_diferencia_ml_mp == 2
+    assert diagnostico.diferencias.suma_diferencia_ml_mp == diagnostico.diferencias.suma_neto_mp_comparable - diagnostico.diferencias.suma_neto_ml_comparable
+    assert "En el universo ML–MP existen 3 grupos comparables" in texto
+    assert "1 coinciden dentro de la tolerancia" in texto
+    assert "2 presentan diferencias" in texto
+    assert "$ 24,34" in texto
+    assert "sin sumar contadores de universos diferentes" in texto

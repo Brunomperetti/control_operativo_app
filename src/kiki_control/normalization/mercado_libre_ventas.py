@@ -85,14 +85,26 @@ def normalizar_ventas_mercado_libre(nombre_archivo: str, contenido: bytes, zona_
     ventas: list[VentaOficialMercadoLibre] = []
     rechazadas: list[FilaRechazadaVentaMercadoLibre] = []
     errores_globales: list[ProblemaValidacion] = []
+    costos_envio_vacios_interpretados = 0
     for numero, fila in filas:
+        if es_vacio(fila.get("Costos de envío (ARS)")):
+            costos_envio_vacios_interpretados += 1
         venta, errores = _normalizar_fila(fila, numero, inspeccion.metadatos.sha256, zona)
         if errores:
             rechazadas.append(FilaRechazadaVentaMercadoLibre(numero, tuple(errores)))
             errores_globales.extend(errores)
         else:
             ventas.append(venta)
-    return ResultadoNormalizacionVentasMercadoLibre(tuple(ventas), tuple(rechazadas), tuple(errores_globales), inspeccion.advertencias, len(filas), len(ventas), len(rechazadas), inspeccion.metadatos.sha256, inspeccion.metadatos.nombre_hoja, inspeccion.metadatos.columnas_encontradas)
+    advertencias = list(inspeccion.advertencias)
+    if costos_envio_vacios_interpretados:
+        advertencias.append(ProblemaValidacion(
+            "COSTO_ENVIO_VACIO_INTERPRETADO_CERO",
+            "Costo de envío vacío interpretado como $0 según regla confirmada por la clienta.",
+            SeveridadValidacion.ADVERTENCIA,
+            columna="Costos de envío (ARS)",
+            detalle=f"Filas alcanzadas: {costos_envio_vacios_interpretados}",
+        ))
+    return ResultadoNormalizacionVentasMercadoLibre(tuple(ventas), tuple(rechazadas), tuple(errores_globales), tuple(advertencias), len(filas), len(ventas), len(rechazadas), inspeccion.metadatos.sha256, inspeccion.metadatos.nombre_hoja, inspeccion.metadatos.columnas_encontradas)
 
 
 def _vacio(error: ProblemaValidacion, inspeccion):
@@ -183,6 +195,8 @@ def _id(v: object, campo: str, n: int, errores: list[ProblemaValidacion], opcion
 
 def _dec(v: object, campo: str, n: int, errores: list[ProblemaValidacion]) -> Decimal | None:
     if es_vacio(v):
+        if campo == "Costos de envío (ARS)":
+            return Decimal("0")
         return None
     try:
         return normalizar_decimal(v, campo=campo, opcional=True)
