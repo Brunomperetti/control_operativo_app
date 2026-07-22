@@ -325,3 +325,35 @@ def test_conciliacion_existente_conserva_comportamiento():
     assert r.hashes_importacion_financiera == ("hash-f",)
     assert r.numeros_fila_comercial == (7,)
     assert r.numeros_fila_financiera == (8,)
+
+
+def test_regla_confirmada_costo_envio_vacio_solo_ml_oficial():
+    vacio = fila(id_venta="20000000000000000001")
+    vacio["Costos de envío (ARS)"] = ""
+    cero = fila(id_venta="20000000000000000002")
+    cero["Costos de envío (ARS)"] = "0"
+    negativo = fila(id_venta="20000000000000000003")
+    negativo["Costos de envío (ARS)"] = "-15.25"
+    otro_vacio = fila(id_venta="20000000000000000004")
+    otro_vacio["Ingresos por envío (ARS)"] = ""
+
+    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas([vacio, cero, negativo, otro_vacio]))
+
+    assert [v.costos_envio for v in resultado.ventas] == [Decimal("0"), Decimal("0"), Decimal("-15.25"), Decimal("-10")]
+    assert resultado.ventas[3].ingresos_envio is None
+    assert resultado.cantidad_rechazada == 0
+    advertencia = next(a for a in resultado.advertencias if a.codigo == "COSTO_ENVIO_VACIO_INTERPRETADO_CERO")
+    assert advertencia.mensaje == "Costo de envío vacío interpretado como $0 según regla confirmada por la clienta."
+    assert advertencia.detalle == "Filas alcanzadas: 1"
+
+
+def test_costo_envio_texto_invalido_no_se_convierte_a_cero():
+    invalida = fila()
+    invalida["Costos de envío (ARS)"] = "sin importe"
+
+    resultado = normalizar_ventas_mercado_libre("ventas.xlsx", xlsx_ventas([invalida]))
+
+    assert resultado.cantidad_normalizada == 0
+    assert resultado.cantidad_rechazada == 1
+    assert resultado.errores[0].codigo == "IMPORTE_INVALIDO"
+    assert resultado.errores[0].columna == "Costos de envío (ARS)"

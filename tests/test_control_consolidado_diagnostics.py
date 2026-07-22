@@ -216,3 +216,21 @@ def test_residual_ml_excluye_solo_mp_y_solo_eccomapp_del_universo():
     assert residual.grupos_calculables + residual.grupos_excluidos == residual.grupos_universo_ml_oficial
     assert residual.motivos_exclusion['falta Ingresos por productos (ARS)'] == 1
     assert residual.identidad_cierra_exactamente
+
+
+def test_residual_ml_incluye_envio_vacio_ya_normalizado_como_cero():
+    envio_vacio_normalizado = con_componentes_ml(r('envio-vacio-normalizado'), D('80'), D('100'), D('-20'), D('0'))
+    otro_calculable = con_componentes_ml(r('otro'), D('45'), D('50'), D('-5'), D('0'))
+
+    residual = diagnosticar_control_consolidado(rep([envio_vacio_normalizado, otro_calculable])).residual_ml
+
+    assert residual.grupos_universo_ml_oficial == 2
+    assert residual.grupos_calculables == 2
+    assert residual.grupos_excluidos == 0
+    assert residual.motivos_exclusion['falta Costos de envío (ARS)'] == 0
+    assert residual.suma_total_ars == D('125')
+    assert residual.suma_ingresos_productos == D('150')
+    assert residual.suma_cargo_venta_impuestos == D('-25')
+    assert residual.suma_costos_envio == D('0')
+    assert residual.importe == D('0')
+    assert residual.identidad_cierra_exactamente

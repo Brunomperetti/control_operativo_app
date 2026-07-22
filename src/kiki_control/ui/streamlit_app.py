@@ -186,7 +186,12 @@ def _mostrar_problemas(titulo: str, problemas: tuple[Any, ...], render) -> None:
     resumen: dict[str, int] = {}
     for p in problemas:
         resumen[p.codigo] = resumen.get(p.codigo, 0) + 1
-    render(f"{titulo}: " + ", ".join(f"{k} ({v})" for k, v in resumen.items()))
+    resumenes = []
+    for codigo, cantidad in resumen.items():
+        detalles = tuple(p.detalle for p in problemas if p.codigo == codigo and getattr(p, "detalle", None))
+        detalle = f" — {detalles[0]}" if len(set(detalles)) == 1 else ""
+        resumenes.append(f"{codigo} ({cantidad}){detalle}")
+    render(f"{titulo}: " + ", ".join(resumenes))
     with st.expander(f"Ver detalle de {titulo.lower()}"):
         for p in problemas[:20]:
             fila = f"Fila {p.fila}: " if p.fila else ""

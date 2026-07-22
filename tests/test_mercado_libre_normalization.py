@@ -108,3 +108,10 @@ def test_archivo_mercado_pago_no_se_procesa_como_mercado_libre():
     resultado = normalizar_mercado_libre("mp.csv", csv_bytes(MP))
     assert resultado.cantidad_normalizada == 0
     assert resultado.errores[0].codigo == "FUENTE_NO_COMPATIBLE"
+
+
+def test_eccomapp_no_aplica_regla_ml_oficial_costo_envio_vacio():
+    resultado = normalizar_mercado_libre("eccomapp.csv", contenido([fila(**{"Costo de envío (Seller) ($)": ""})]))
+
+    assert resultado.cantidad_normalizada == 1
+    assert resultado.operaciones[0].costo_envio_vendedor is None
