@@ -44,11 +44,14 @@ from kiki_control.presentation.reconciliation_view import (
 from kiki_control.linking.commercial import vincular_ventas_oficiales_con_eccomapp
 from kiki_control.linking.control_financiero import consolidar_control_financiero
 from kiki_control.presentation.control_consolidado_view import (
+    TITULO_BLOQUE_A,
     advertir_periodos_distintos,
+    auditoria_bloque_a,
     conclusion_ejecutiva_consolidada,
     cobertura_tres_fuentes,
     detalle_control,
     explicacion_resultado,
+    filas_bloque_a,
     filas_grupos_excluidos,
     filas_grupos_involucrados,
     filas_resumen_revisiones,
@@ -60,6 +63,7 @@ from kiki_control.presentation.control_consolidado_view import (
     etiqueta_selector_detalle,
     formato_importe,
     kpis_consolidados,
+    mensaje_conciliacion_bloque_a,
     alcance_completo_consolidado,
     nombre_archivo_descarga,
     textos_secundarios_conclusion,
@@ -482,7 +486,12 @@ def _mostrar_resultados() -> None:
         if not diagnostico.particion.cierra_exactamente or not diagnostico.diferencias.identidad_cierra_exactamente:
             st.error("Error de consistencia en diagnósticos: no se presentan KPIs como confiables hasta revisar la partición o la identidad de diferencias.")
         bloques = kpis_consolidados(reporte)
-        _mostrar_kpis_en_filas("Bloque A — Importes informados por ML oficial", bloques["Bloque A — Importes informados por ML oficial"], (2, 2))
+        st.subheader(TITULO_BLOQUE_A)
+        st.table(filas_bloque_a(reporte, diagnostico))
+        if abs(diagnostico.residual_ml.diferencia_final) <= reporte.tolerancia:
+            st.success(mensaje_conciliacion_bloque_a(reporte, diagnostico))
+        else:
+            st.warning(mensaje_conciliacion_bloque_a(reporte, diagnostico))
         _mostrar_kpis_en_filas("Bloque B — Comparación financiera", bloques["Bloque B — Comparación financiera"], (3, 2))
         _mostrar_kpis_en_filas("Bloque C — Costos y utilidad", bloques["Bloque C — Costos y utilidad"], (3,))
         _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", bloques["Bloque D — Calidad y pendientes"], (3, 3))
@@ -528,10 +537,11 @@ def _mostrar_resultados() -> None:
         st.table([{"Neto ML universo calculable": formato_importe(diagnostico.utilidad.neto_ml_universo_utilidad), "Costo Eccomapp utilizado en utilidad preliminar": formato_importe(diagnostico.utilidad.costo_productos_universo_utilidad), "Utilidad preliminar de control": formato_importe(diagnostico.utilidad.utilidad_preliminar), "Grupos incluidos": diagnostico.utilidad.grupos_calculables}])
         with st.expander("Ver costo total, exclusiones y fórmula de utilidad", expanded=False):
             st.table([{"Costo total informado por Eccomapp": formato_importe(diagnostico.utilidad.costo_productos_universo_utilidad + diagnostico.utilidad.costo_eccomapp_fuera_universo_calculable), "Costo Eccomapp utilizado en utilidad preliminar": formato_importe(diagnostico.utilidad.costo_productos_universo_utilidad), "Costo Eccomapp excluido del universo calculable": formato_importe(diagnostico.utilidad.costo_eccomapp_fuera_universo_calculable), "Grupos incluidos": diagnostico.utilidad.grupos_calculables, "Grupos excluidos": diagnostico.utilidad.grupos_excluidos, "Motivos de exclusión": "; ".join(f"{k}: {v}" for k, v in diagnostico.utilidad.motivos_exclusion.items() if v), "Tooltip": "Origen Eccomapp, columna Costo Total (Con IVA) ($); universo con Total (ARS) ML y costo Eccomapp presentes; fórmula utilidad_preliminar = neto_ml_universo_calculable - costo_eccomapp_universo_calculable; excluye fuente/dato monetario faltante; limitación: control preliminar, no contable ni fiscal.", "Cierra": "Sí" if diagnostico.utilidad.identidad_cierra_exactamente else "No"}])
-        st.subheader("Residual oficial de Mercado Libre")
-        st.table([{"Nombre visible": diagnostico.residual_ml.nombre_visible, "Importe": formato_importe(diagnostico.residual_ml.importe), "Universo": diagnostico.residual_ml.universo}])
-        with st.expander("Ver composición del residual ML", expanded=False):
-            st.table([{"Fórmula": diagnostico.residual_ml.formula, "Columnas utilizadas": ", ".join(diagnostico.residual_ml.columnas_utilizadas), "Universo ML oficial": diagnostico.residual_ml.grupos_universo_ml_oficial, "Grupos calculables": diagnostico.residual_ml.grupos_calculables, "Grupos excluidos": diagnostico.residual_ml.grupos_excluidos, "Suma Total (ARS)": formato_importe(diagnostico.residual_ml.suma_total_ars), "Suma Ingresos por productos (ARS)": formato_importe(diagnostico.residual_ml.suma_ingresos_productos), "Suma Cargo por venta e impuestos (ARS)": formato_importe(diagnostico.residual_ml.suma_cargo_venta_impuestos), "Suma Costos de envío (ARS)": formato_importe(diagnostico.residual_ml.suma_costos_envio), "Motivos de exclusión": "; ".join(f"{k}: {v}" for k, v in diagnostico.residual_ml.motivos_exclusion.items() if v), "Cierra": "Sí" if diagnostico.residual_ml.identidad_cierra_exactamente else "No"}])
+        st.subheader(TITULO_BLOQUE_A)
+        st.table(auditoria_bloque_a(reporte, diagnostico))
+        st.caption(f"Método del cupón: {diagnostico.residual_ml.metodo_cupones} · Estado de conciliación: {diagnostico.residual_ml.estado_conciliacion} · Diferencia final: {formato_importe(diagnostico.residual_ml.diferencia_final)}")
+        with st.expander("Ver detalle técnico de la formación del neto ML", expanded=False):
+            st.table([{"Fórmula": diagnostico.residual_ml.formula, "Columnas utilizadas": ", ".join(diagnostico.residual_ml.columnas_utilizadas), "Universo ML oficial": diagnostico.residual_ml.grupos_universo_ml_oficial, "Grupos calculables": diagnostico.residual_ml.grupos_calculables, "Grupos excluidos": diagnostico.residual_ml.grupos_excluidos, "Suma Total (ARS)": formato_importe(diagnostico.residual_ml.suma_total_ars), "Suma Ingresos por productos (ARS)": formato_importe(diagnostico.residual_ml.suma_ingresos_productos), "Suma Ingresos por envío (ARS)": formato_importe(diagnostico.residual_ml.suma_ingresos_envio), "Suma Cargo por venta e impuestos (ARS)": formato_importe(diagnostico.residual_ml.suma_cargo_venta_impuestos), "Suma Costos de envío (ARS)": formato_importe(diagnostico.residual_ml.suma_costos_envio), "Suma Anulaciones y reembolsos (ARS)": formato_importe(diagnostico.residual_ml.suma_anulaciones_reembolsos), "Suma Cupones de descuento": formato_importe(diagnostico.residual_ml.suma_cupones_descuento), "Motivos de exclusión": "; ".join(f"{k}: {v}" for k, v in diagnostico.residual_ml.motivos_exclusion.items() if v), "Cierra": "Sí" if diagnostico.residual_ml.identidad_cierra_exactamente else "No"}])
         st.subheader("Puente de importes entre fuentes")
         st.table([{"Universo triple": diagnostico.puente.universo_neto_esperado, "Neto ML": formato_importe(diagnostico.puente.neto_oficial_ml), "Neto Eccomapp": formato_importe(diagnostico.puente.neto_informado_eccomapp), "Neto aprobado MP": formato_importe(diagnostico.puente.neto_aprobado_mp), "MP − ML": formato_importe(diagnostico.puente.mp_menos_ml), "Identidad cierra": "Sí" if diagnostico.puente.identidad_cierra_exactamente else "No"}])
         grupos_excluidos = diagnostico.puente.grupos_excluidos_universo_triple

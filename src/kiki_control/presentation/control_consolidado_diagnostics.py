@@ -59,6 +59,16 @@ class CoberturaMonetariaFuente:
 
 
 @dataclass(frozen=True)
+class ComponenteFormacionNetoMl:
+    concepto: str
+    importe: Decimal
+    origen: str
+    columna_origen: str
+    metodo: str
+    filas_utilizadas: int
+
+
+@dataclass(frozen=True)
 class ResidualMercadoLibre:
     nombre_visible: str
     formula: str
@@ -70,10 +80,17 @@ class ResidualMercadoLibre:
     grupos_excluidos: int
     suma_total_ars: Decimal
     suma_ingresos_productos: Decimal
+    suma_ingresos_envio: Decimal
     suma_cargo_venta_impuestos: Decimal
     suma_costos_envio: Decimal
+    suma_anulaciones_reembolsos: Decimal
+    suma_cupones_descuento: Decimal
     identidad_cierra_exactamente: bool
     motivos_exclusion: Mapping[str, int]
+    metodo_cupones: str
+    diferencia_final: Decimal
+    estado_conciliacion: str
+    componentes: tuple[ComponenteFormacionNetoMl, ...]
 
 
 @dataclass(frozen=True)
@@ -165,6 +182,16 @@ def _sum(valores: Iterable[Decimal | None]) -> Decimal:
         if valor is not None:
             total += valor
     return total
+
+
+def _sumar_y_contar(valores: Iterable[Decimal | None]) -> tuple[Decimal, int]:
+    total = _ZERO
+    cantidad = 0
+    for valor in valores:
+        if valor is not None:
+            total += valor
+            cantidad += 1
+    return total, cantidad
 
 
 def _grupo(r: ResultadoControlConsolidado) -> str:
@@ -362,26 +389,66 @@ def diagnosticar_residual_ml(reporte: ReporteControlConsolidado) -> ResidualMerc
             motivos["falta Cargo por venta e impuestos (ARS)"] += 1
         if r.costo_envio_ml is None:
             motivos["falta Costos de envío (ARS)"] += 1
-    suma_total = _sum(r.total_informado_ml for r in calculables)
-    suma_ingresos = _sum(r.monto_venta_ml for r in calculables)
-    suma_cargos = _sum(r.cargo_venta_impuestos_ml for r in calculables)
-    suma_envios = _sum(r.costo_envio_ml for r in calculables)
-    residual = suma_total - (suma_ingresos + suma_cargos + suma_envios)
+    suma_total, filas_total = _sumar_y_contar(r.total_informado_ml for r in candidatos_ml)
+    suma_ingresos, filas_ingresos = _sumar_y_contar(r.monto_venta_ml for r in candidatos_ml)
+    suma_ingresos_envio, filas_ingresos_envio = _sumar_y_contar(r.ingresos_envio_ml for r in candidatos_ml)
+    suma_cargos, filas_cargos = _sumar_y_contar(r.cargo_venta_impuestos_ml for r in candidatos_ml)
+    suma_costos_envio, filas_costos_envio = _sumar_y_contar(r.costo_envio_ml for r in candidatos_ml)
+    suma_anulaciones, filas_anulaciones = _sumar_y_contar(r.anulaciones_reembolsos_ml for r in candidatos_ml)
+    suma_cupones_fuente, filas_cupones = _sumar_y_contar(r.descuentos_bonificaciones_ml for r in candidatos_ml)
+    residual_sin_cupon = suma_total - (suma_ingresos + suma_ingresos_envio + suma_cargos + suma_costos_envio + suma_anulaciones)
+    diferencia_con_fuente = residual_sin_cupon - suma_cupones_fuente
+    puede_calcular_cupon_residual = len(excluidos) == 0
+    usar_cupon_fuente = filas_cupones > 0 and suma_cupones_fuente != _ZERO and abs(diferencia_con_fuente) <= reporte.tolerancia
+    if usar_cupon_fuente:
+        suma_cupones = suma_cupones_fuente
+        metodo_cupones = "INFORMADO_POR_FUENTE"
+    elif puede_calcular_cupon_residual:
+        suma_cupones = residual_sin_cupon
+        metodo_cupones = "CALCULADO_COMO_RESIDUAL"
+    else:
+        suma_cupones = suma_cupones_fuente
+        metodo_cupones = "INFORMADO_POR_FUENTE" if filas_cupones > 0 else "CALCULADO_COMO_RESIDUAL"
+    residual = suma_total - (suma_ingresos + suma_ingresos_envio + suma_cargos + suma_costos_envio + suma_anulaciones + suma_cupones)
+    componentes = (
+        ComponenteFormacionNetoMl("Ingresos por productos", suma_ingresos, "Mercado Libre oficial", "Ingresos por productos (ARS)", "INFORMADO_POR_FUENTE", filas_ingresos),
+        ComponenteFormacionNetoMl("Ingresos por envíos", suma_ingresos_envio, "Mercado Libre oficial", "Ingresos por envío (ARS)", "INFORMADO_POR_FUENTE", filas_ingresos_envio),
+        ComponenteFormacionNetoMl("Cargos por venta e impuestos", suma_cargos, "Mercado Libre oficial", "Cargo por venta e impuestos (ARS)", "INFORMADO_POR_FUENTE", filas_cargos),
+        ComponenteFormacionNetoMl("Costos de envío", suma_costos_envio, "Mercado Libre oficial", "Costos de envío (ARS)", "INFORMADO_POR_FUENTE", filas_costos_envio),
+        ComponenteFormacionNetoMl("Anulaciones y reembolsos", suma_anulaciones, "Mercado Libre oficial", "Anulaciones y reembolsos (ARS)", "INFORMADO_POR_FUENTE", filas_anulaciones),
+        ComponenteFormacionNetoMl(
+            "Cupones de descuento",
+            suma_cupones,
+            "Mercado Libre oficial" if metodo_cupones == "INFORMADO_POR_FUENTE" else "Mercado Libre oficial (cálculo controlado)",
+            "Descuentos y bonificaciones" if metodo_cupones == "INFORMADO_POR_FUENTE" else "Total (ARS)",
+            metodo_cupones,
+            filas_cupones if metodo_cupones == "INFORMADO_POR_FUENTE" else filas_total,
+        ),
+        ComponenteFormacionNetoMl("Otros conceptos pendientes de clasificación", residual, "Mercado Libre oficial", "Sin columna identificada", "RESIDUAL_POST_CLASIFICACION", filas_total),
+        ComponenteFormacionNetoMl("Neto informado por Mercado Libre", suma_total, "Mercado Libre oficial", "Total (ARS)", "INFORMADO_POR_FUENTE", filas_total),
+    )
     return ResidualMercadoLibre(
-        "Otros conceptos y ajustes ML no desagregados en este resumen",
-        "Total (ARS) - (Ingresos por productos (ARS) + Cargo por venta e impuestos (ARS) + Costos de envío (ARS))",
-        "universo ML oficial con los cuatro importes presentes",
-        ("Total (ARS)", "Ingresos por productos (ARS)", "Cargo por venta e impuestos (ARS)", "Costos de envío (ARS)"),
+        "Otros conceptos pendientes de clasificación",
+        "Total (ARS) - (Ingresos por productos (ARS) + Ingresos por envío (ARS) + Cargo por venta e impuestos (ARS) + Costos de envío (ARS) + Anulaciones y reembolsos (ARS) + Cupones de descuento)",
+        "universo ML oficial con Bloque A auditable",
+        ("Total (ARS)", "Ingresos por productos (ARS)", "Ingresos por envío (ARS)", "Cargo por venta e impuestos (ARS)", "Costos de envío (ARS)", "Anulaciones y reembolsos (ARS)", "Descuentos y bonificaciones"),
         residual,
         len(candidatos_ml),
         len(calculables),
         len(excluidos),
         suma_total,
         suma_ingresos,
+        suma_ingresos_envio,
         suma_cargos,
-        suma_envios,
-        suma_total == suma_ingresos + suma_cargos + suma_envios + residual,
+        suma_costos_envio,
+        suma_anulaciones,
+        suma_cupones,
+        abs(residual) <= reporte.tolerancia,
         motivos,
+        metodo_cupones,
+        residual,
+        "CIERRA" if abs(residual) <= reporte.tolerancia else "PENDIENTE",
+        componentes,
     )
 
 def diagnosticar_control_consolidado(reporte: ReporteControlConsolidado, inicio_ml: date | datetime | None = None, fin_ml: date | datetime | None = None, fechas_mp_por_fila: Mapping[int, date | datetime | None] | None = None) -> DiagnosticoControlConsolidado:

@@ -300,11 +300,11 @@ def generar_revisiones_consolidadas_excel(reporte: ReporteControlConsolidado) ->
 def _escribir_resumen_consolidado(ws: Worksheet, reporte: ReporteControlConsolidado, tipo: str) -> None:
     ws.append(["Campo", "Valor"])
     diag = diagnosticar_control_consolidado(reporte)
-    for fila in (("Nombre", "Kiki Control Financiero"), ("Tipo de reporte", tipo), ("Versión de regla", reporte.version_regla), ("Tolerancia", _decimal_o_vacio(reporte.tolerancia)), ("Total grupos", reporte.total_resultados), ("Venta oficial sin Total (ARS)", reporte.total_total_ml_ausente), ("Costo total Eccomapp", _decimal_o_vacio(diag.utilidad.costo_productos_universo_utilidad + diag.utilidad.costo_eccomapp_fuera_universo_calculable)), ("Costo utilizado en utilidad", _decimal_o_vacio(diag.utilidad.costo_productos_universo_utilidad)), ("Costo excluido", _decimal_o_vacio(diag.utilidad.costo_eccomapp_fuera_universo_calculable)), ("Grupos calculables", diag.utilidad.grupos_calculables), ("Grupos excluidos", diag.utilidad.grupos_excluidos), ("Fórmula utilidad preliminar", "utilidad_preliminar = neto_ml_universo_calculable - costo_eccomapp_universo_calculable"), ("Motivos de exclusión", "; ".join(f"{k}: {v}" for k, v in diag.utilidad.motivos_exclusion.items() if v)), ("Aclaración", "Control operativo preliminar; no es resultado contable ni fiscal definitivo.")):
+    for fila in (("Nombre", "Kiki Control Financiero"), ("Tipo de reporte", tipo), ("Versión de regla", reporte.version_regla), ("Tolerancia", _decimal_o_vacio(reporte.tolerancia)), ("Total grupos", reporte.total_resultados), ("Venta oficial sin Total (ARS)", reporte.total_total_ml_ausente), ("Estado conciliación Bloque A", diag.residual_ml.estado_conciliacion), ("Método cupón Bloque A", diag.residual_ml.metodo_cupones), ("Diferencia final Bloque A", _decimal_o_vacio(diag.residual_ml.diferencia_final)), ("Costo total Eccomapp", _decimal_o_vacio(diag.utilidad.costo_productos_universo_utilidad + diag.utilidad.costo_eccomapp_fuera_universo_calculable)), ("Costo utilizado en utilidad", _decimal_o_vacio(diag.utilidad.costo_productos_universo_utilidad)), ("Costo excluido", _decimal_o_vacio(diag.utilidad.costo_eccomapp_fuera_universo_calculable)), ("Grupos calculables", diag.utilidad.grupos_calculables), ("Grupos excluidos", diag.utilidad.grupos_excluidos), ("Fórmula utilidad preliminar", "utilidad_preliminar = neto_ml_universo_calculable - costo_eccomapp_universo_calculable"), ("Motivos de exclusión", "; ".join(f"{k}: {v}" for k, v in diag.utilidad.motivos_exclusion.items() if v)), ("Aclaración", "Control operativo preliminar; no es resultado contable ni fiscal definitivo.")):
         ws.append(list(fila))
     _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2}, freeze=False)
     for row in ws.iter_rows(min_row=2):
-        if row[0].value in {"Tolerancia", "Costo total Eccomapp", "Costo utilizado en utilidad", "Costo excluido"} and row[1].value != "": row[1].number_format = _FORMATO_MONEDA_ARS
+        if row[0].value in {"Tolerancia", "Diferencia final Bloque A", "Costo total Eccomapp", "Costo utilizado en utilidad", "Costo excluido"} and row[1].value != "": row[1].number_format = _FORMATO_MONEDA_ARS
 
 
 def _escribir_cobertura_consolidada(ws: Worksheet, diag: Any) -> None:
@@ -315,12 +315,20 @@ def _escribir_cobertura_consolidada(ws: Worksheet, diag: Any) -> None:
 
 
 def _escribir_puente_consolidado(ws: Worksheet, diag: Any) -> None:
-    ws.append(["Concepto", "Valor"])
+    ws.append(["Concepto", "Valor", "Origen", "Método"])
     p = diag.puente
     residual = diag.residual_ml
     filas_monetarias = set()
+    for componente in residual.componentes:
+        ws.append([_texto_seguro(componente.concepto), componente.importe, _texto_seguro(f"{componente.origen} · {componente.columna_origen}"), _texto_seguro(componente.metodo)])
+        filas_monetarias.add(ws.max_row)
+    ws.append(["Estado conciliación Bloque A", _texto_seguro(residual.estado_conciliacion), "", ""])
+    ws.append(["Método cupón Bloque A", _texto_seguro(residual.metodo_cupones), "", ""])
+    ws.append(["Diferencia final Bloque A", residual.diferencia_final, "", ""])
+    filas_monetarias.add(ws.max_row)
+    ws.append(["", "", "", ""])
     for fila in (("Neto ML", p.neto_oficial_ml), ("Neto Eccomapp", p.neto_informado_eccomapp), ("Neto aprobado MP", p.neto_aprobado_mp), ("Eccomapp − ML", p.eccomapp_menos_ml), ("MP − Eccomapp", p.mp_menos_eccomapp), ("MP − ML", p.mp_menos_ml), ("Aporte excluidos a diferencia ML–MP", p.aporte_excluidos_a_diferencia_ml_mp)):
-        ws.append(list(fila))
+        ws.append([fila[0], fila[1], "", ""])
         filas_monetarias.add(ws.max_row)
     for fila in (
         ("Residual ML", residual.importe),
@@ -329,17 +337,20 @@ def _escribir_puente_consolidado(ws: Worksheet, diag: Any) -> None:
         ("Grupos excluidos residual ML", residual.grupos_excluidos),
         ("Suma Total (ARS)", residual.suma_total_ars),
         ("Suma Ingresos por productos (ARS)", residual.suma_ingresos_productos),
+        ("Suma Ingresos por envío (ARS)", residual.suma_ingresos_envio),
         ("Suma Cargo por venta e impuestos (ARS)", residual.suma_cargo_venta_impuestos),
         ("Suma Costos de envío (ARS)", residual.suma_costos_envio),
+        ("Suma Anulaciones y reembolsos (ARS)", residual.suma_anulaciones_reembolsos),
+        ("Suma Cupones de descuento", residual.suma_cupones_descuento),
         ("Identidad residual ML cierra", "Sí" if residual.identidad_cierra_exactamente else "No"),
         ("Motivos exclusión residual ML", "; ".join(f"{k}: {v}" for k, v in residual.motivos_exclusion.items() if v)),
     ):
-        ws.append(list(fila))
-        if fila[0] in {"Residual ML", "Suma Total (ARS)", "Suma Ingresos por productos (ARS)", "Suma Cargo por venta e impuestos (ARS)", "Suma Costos de envío (ARS)"}:
+        ws.append([fila[0], fila[1], "", ""])
+        if fila[0] in {"Residual ML", "Suma Total (ARS)", "Suma Ingresos por productos (ARS)", "Suma Ingresos por envío (ARS)", "Suma Cargo por venta e impuestos (ARS)", "Suma Costos de envío (ARS)", "Suma Anulaciones y reembolsos (ARS)", "Suma Cupones de descuento"}:
             filas_monetarias.add(ws.max_row)
-    ws.append(["Advertencia", "No comparar importes de universos distintos sin revisar Cobertura y universos."])
-    ws.append(["Aclaración temporal", "Si se genera sin diagnóstico de sesión, la distribución temporal no puede clasificar contra período ML ni fechas MP y queda sin fecha."])
-    _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2}, freeze=False)
+    ws.append(["Advertencia", "No comparar importes de universos distintos sin revisar Cobertura y universos.", "", ""])
+    ws.append(["Aclaración temporal", "Si se genera sin diagnóstico de sesión, la distribución temporal no puede clasificar contra período ML ni fechas MP y queda sin fecha.", "", ""])
+    _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={3,4}, freeze=False)
     for row_idx in filas_monetarias:
         ws.cell(row=row_idx, column=2).number_format = _FORMATO_MONEDA_ARS
     for row in range(2, ws.max_row + 1):
@@ -375,7 +386,7 @@ def _escribir_diccionario_consolidado(ws: Worksheet) -> None:
         ("Costo Eccomapp utilizado en utilidad", "Suma de costo_productos_eccomapp dentro del universo calculable", "grupos con Total (ARS) ML y costo Eccomapp presentes", "ML: Total (ARS); Eccomapp: Costo Total (Con IVA) ($)"),
         ("Costo Eccomapp excluido", "costo_total_eccomapp - costo_eccomapp_universo_calculable", "grupos Eccomapp fuera del universo calculable", "Eccomapp: Costo Total (Con IVA) ($); motivos de exclusión"),
         ("Utilidad preliminar", "Total (ARS) ML - Costo Total (Con IVA) Eccomapp", "universo calculable de utilidad", "ML: Total (ARS); Eccomapp: Costo Total (Con IVA) ($)"),
-        ("Otros conceptos y ajustes ML no desagregados en este resumen", "Total (ARS) - (Ingresos por productos (ARS) + Cargo por venta e impuestos (ARS) + Costos de envío (ARS))", "universo ML oficial con los cuatro importes presentes", "Total (ARS); Ingresos por productos (ARS); Cargo por venta e impuestos (ARS); Costos de envío (ARS)"),
+        ("Formación del neto informado por Mercado Libre", "Ingresos por productos + Ingresos por envío + Cargo por venta e impuestos + Costos de envío + Anulaciones y reembolsos + Cupones de descuento + Otros conceptos pendientes de clasificación = Total (ARS)", "universo ML oficial con Bloque A auditable", "Total (ARS); Ingresos por productos (ARS); Ingresos por envío (ARS); Cargo por venta e impuestos (ARS); Costos de envío (ARS); Anulaciones y reembolsos (ARS); Descuentos y bonificaciones"),
         ("MP − ML", "Neto aprobado MP - Neto ML", "universo ML–Eccomapp–MP para puente triple", "Total (ARS); neto Eccomapp; movimientos aprobados MP"),
     ]
     for fila in filas: ws.append([_texto_seguro(x) for x in fila])

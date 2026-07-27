@@ -139,11 +139,12 @@ def test_cobertura_residual_puente_excluidos_y_neto_mp_doble():
     diag = diagnosticar_control_consolidado(reporte, date(2026,7,1), date(2026,7,31), {21: date(2026,7,10)})
     assert {c.universo for c in diag.cobertura_monetaria} >= {'universo completo ML oficial', 'universo completo Eccomapp', 'universo ML–Eccomapp', 'universo ML–MP', 'universo ML–Eccomapp–MP', 'universo calculable de utilidad'}
     assert diag.utilidad.costo_eccomapp_fuera_universo_calculable == D('18560')
-    assert diag.residual_ml.nombre_visible == 'Otros conceptos y ajustes ML no desagregados en este resumen'
+    assert diag.residual_ml.nombre_visible == 'Otros conceptos pendientes de clasificación'
     assert diag.residual_ml.grupos_universo_ml_oficial == 2
     assert diag.residual_ml.grupos_calculables == 0
     assert diag.residual_ml.grupos_excluidos == 2
-    assert diag.residual_ml.importe == D('0')
+    assert diag.residual_ml.importe == D('-120')
+    assert diag.residual_ml.estado_conciliacion == 'PENDIENTE'
     assert len(diag.puente.grupos_excluidos_universo_triple) == 3
     assert diag.puente.aporte_excluidos_a_diferencia_ml_mp == D('20')
     assert diag.temporal_mp_sin_venta.dentro.neto_aprobado_mp == D('5')
@@ -190,12 +191,16 @@ def test_residual_ml_solo_calcula_grupos_con_cuatro_importes_e_identidad():
     assert residual.grupos_universo_ml_oficial == 6
     assert residual.grupos_calculables == 2
     assert residual.grupos_excluidos == 4
-    assert residual.importe == D('0')
-    assert residual.suma_total_ars == D('120')
-    assert residual.suma_ingresos_productos == D('150')
-    assert residual.suma_cargo_venta_impuestos == D('-20')
-    assert residual.suma_costos_envio == D('-10')
-    assert residual.identidad_cierra_exactamente
+    assert residual.importe == D('5')
+    assert residual.suma_total_ars == D('150')
+    assert residual.suma_ingresos_productos == D('184')
+    assert residual.suma_ingresos_envio == D('0')
+    assert residual.suma_cargo_venta_impuestos == D('-23')
+    assert residual.suma_costos_envio == D('-16')
+    assert residual.suma_anulaciones_reembolsos == D('0')
+    assert residual.suma_cupones_descuento == D('0')
+    assert not residual.identidad_cierra_exactamente
+    assert residual.metodo_cupones == 'CALCULADO_COMO_RESIDUAL'
     assert residual.motivos_exclusion['falta Total (ARS)'] == 1
     assert residual.motivos_exclusion['falta Ingresos por productos (ARS)'] == 1
     assert residual.motivos_exclusion['falta Cargo por venta e impuestos (ARS)'] == 1
@@ -215,7 +220,8 @@ def test_residual_ml_excluye_solo_mp_y_solo_eccomapp_del_universo():
     assert residual.grupos_excluidos == 1
     assert residual.grupos_calculables + residual.grupos_excluidos == residual.grupos_universo_ml_oficial
     assert residual.motivos_exclusion['falta Ingresos por productos (ARS)'] == 1
-    assert residual.identidad_cierra_exactamente
+    assert not residual.identidad_cierra_exactamente
+    assert residual.importe == D('10')
 
 
 def test_residual_ml_incluye_envio_vacio_ya_normalizado_como_cero():
@@ -230,10 +236,38 @@ def test_residual_ml_incluye_envio_vacio_ya_normalizado_como_cero():
     assert residual.motivos_exclusion['falta Costos de envío (ARS)'] == 0
     assert residual.suma_total_ars == D('125')
     assert residual.suma_ingresos_productos == D('150')
+    assert residual.suma_ingresos_envio == D('0')
     assert residual.suma_cargo_venta_impuestos == D('-25')
     assert residual.suma_costos_envio == D('0')
+    assert residual.suma_anulaciones_reembolsos == D('0')
+    assert residual.suma_cupones_descuento == D('0')
     assert residual.importe == D('0')
     assert residual.identidad_cierra_exactamente
+
+
+def test_cupon_explicito_se_respeta_cuando_cierra_dentro_de_tolerancia():
+    reporte = rep([replace(r('explicito'), total_informado_ml=D('80'), monto_venta_ml=D('100'), ingresos_envio_ml=D('5'), cargo_venta_impuestos_ml=D('-10'), costo_envio_ml=D('-3'), anulaciones_reembolsos_ml=D('0'), descuentos_bonificaciones_ml=D('-12'))])
+    residual = diagnosticar_control_consolidado(reporte).residual_ml
+    assert residual.metodo_cupones == 'INFORMADO_POR_FUENTE'
+    assert residual.suma_cupones_descuento == D('-12')
+    assert residual.diferencia_final == D('0')
+    assert residual.estado_conciliacion == 'CIERRA'
+
+
+def test_cupon_residual_se_calcula_si_fuente_esta_en_cero():
+    reporte = rep([replace(r('residual'), total_informado_ml=D('85'), monto_venta_ml=D('100'), ingresos_envio_ml=None, cargo_venta_impuestos_ml=D('-5'), costo_envio_ml=D('-5'), anulaciones_reembolsos_ml=D('0'), descuentos_bonificaciones_ml=D('0'))])
+    residual = diagnosticar_control_consolidado(reporte).residual_ml
+    assert residual.metodo_cupones == 'CALCULADO_COMO_RESIDUAL'
+    assert residual.suma_cupones_descuento == D('-5')
+    assert residual.diferencia_final == D('0')
+
+
+def test_diferencia_final_queda_pendiente_si_faltan_componentes_base():
+    reporte = rep([replace(r('pendiente'), total_informado_ml=D('90'), monto_venta_ml=None, ingresos_envio_ml=None, cargo_venta_impuestos_ml=D('-5'), costo_envio_ml=D('-5'), anulaciones_reembolsos_ml=D('0'), descuentos_bonificaciones_ml=D('0'))])
+    residual = diagnosticar_control_consolidado(reporte).residual_ml
+    assert residual.grupos_excluidos == 1
+    assert residual.diferencia_final == D('100')
+    assert residual.estado_conciliacion == 'PENDIENTE'
 
 
 def test_conclusion_con_diferencias_usa_diagnostico_no_estado_principal():

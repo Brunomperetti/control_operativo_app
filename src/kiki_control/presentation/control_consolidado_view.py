@@ -26,6 +26,9 @@ class CoberturaFuente:
     extra: str = ""
 
 
+TITULO_BLOQUE_A = "Bloque A — Formación del neto informado por Mercado Libre"
+
+
 def texto_rango_cobertura(minimo: str, maximo: str) -> str:
     """Devuelve una cobertura legible sin repetir la misma fecha."""
     if minimo == maximo:
@@ -44,6 +47,42 @@ def filas_cobertura_presentacion(cobertura: Iterable[CoberturaFuente]) -> list[d
 def nombre_archivo_descarga(prefijo: str, fecha: str) -> str:
     """Construye nombres de descarga diferenciados y testeables."""
     return f"{prefijo}{fecha}.xlsx" if prefijo.endswith("_") else f"{prefijo}_{fecha}.xlsx"
+
+
+def filas_bloque_a(reporte: ReporteControlConsolidado, diagnostico: Any | None = None) -> list[dict[str, str]]:
+    diag = diagnostico or diagnosticar_control_consolidado(reporte)
+    return [
+        {
+            "Concepto": componente.concepto,
+            "Importe": formato_importe(componente.importe),
+            "Origen": f"{componente.origen} · {componente.columna_origen}",
+            "Método": componente.metodo,
+        }
+        for componente in diag.residual_ml.componentes
+    ]
+
+
+def auditoria_bloque_a(reporte: ReporteControlConsolidado, diagnostico: Any | None = None) -> list[dict[str, str]]:
+    diag = diagnostico or diagnosticar_control_consolidado(reporte)
+    return [
+        {
+            "Concepto": componente.concepto,
+            "Importe": formato_importe(componente.importe),
+            "Columna de origen": componente.columna_origen,
+            "Método": componente.metodo,
+            "Filas utilizadas": str(componente.filas_utilizadas),
+            "Tolerancia": formato_importe(reporte.tolerancia),
+            "Diferencia final": formato_importe(diag.residual_ml.diferencia_final),
+        }
+        for componente in diag.residual_ml.componentes
+    ]
+
+
+def mensaje_conciliacion_bloque_a(reporte: ReporteControlConsolidado, diagnostico: Any | None = None) -> str:
+    diag = diagnostico or diagnosticar_control_consolidado(reporte)
+    if abs(diag.residual_ml.diferencia_final) <= reporte.tolerancia:
+        return "La conciliación cierra"
+    return f"Queda una diferencia pendiente de clasificación de {formato_importe(diag.residual_ml.diferencia_final)}"
 
 
 @dataclass(frozen=True)
