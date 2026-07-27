@@ -344,7 +344,10 @@ def test_listado_mp_sin_venta_ml():
 # ---------------------------------------------------------------------------
 
 def test_exportacion_excel_diferencias():
-    r = _r("dif-excel", ml=D("100"), mp=D("125"), dif=D("25"))
+    r = _r(
+        "dif-excel", ml=D("100"), mp=D("125"), neto_fin=D("110"), dif=D("10"),
+        imp_rec=D("-10"), imp_dev=D("-3"), imp_env=D("-1"), imp_otros=D("-1"),
+    )
     reporte = _rep([r])
     diag_b = diagnosticar_bloque_b(reporte)
     bytes_xlsx = generar_reporte_consolidado_excel(reporte, diag_bloque_b=diag_b)
@@ -355,6 +358,31 @@ def test_exportacion_excel_diferencias():
     ws_dif = wb["Bloque B — Diferencias"]
     # Header row + 1 data row
     assert ws_dif.max_row == 2
+    encabezados = {celda.value for celda in ws_dif[1]}
+    assert {
+        "Neto informado ML", "Neto aprobado bruto MP", "Reclamos/disputas MP",
+        "Devoluciones MP", "Envíos MP", "Otros impactos MP",
+        "Neto financiero total MP", "Diferencia financiera MP − ML",
+    }.issubset(encabezados)
+    assert {
+        "Bloque B — Resumen", "Bloque B — Diferencias", "Bloque B — Movimientos",
+        "Bloque B — MP sin venta ML", "Bloque B — Fondos y payouts",
+    }.issubset(wb.sheetnames)
+
+
+def test_diagnostico_compensacion_total_usa_neto_financiero_y_no_bruto():
+    compensada = _r(
+        "pago-reclamo", ml=D("0"), mp=D("10928.07"), neto_fin=D("0"),
+        dif=D("0"), imp_rec=D("-10928.07"), filas_mp=(7, 8), ind=IND_REC,
+    )
+    diag = diagnosticar_bloque_b(_rep([compensada]))
+
+    assert diag.resumen.comparables_totales == 1
+    assert diag.resumen.coincidencias == 1
+    assert diag.resumen.con_diferencia == 0
+    assert diag.resumen.neto_mp_comparable == D("0")
+    assert diag.resumen.diferencia_universo_comparable == D("0")
+    assert diag.grupos_con_diferencia == ()
 
 
 # ---------------------------------------------------------------------------
