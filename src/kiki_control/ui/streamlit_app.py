@@ -45,33 +45,48 @@ from kiki_control.linking.commercial import vincular_ventas_oficiales_con_eccoma
 from kiki_control.linking.control_financiero import consolidar_control_financiero
 from kiki_control.presentation.control_consolidado_view import (
     TITULO_BLOQUE_A,
+    TITULO_BLOQUE_B,
+    CONVENCION_DIFERENCIA_ML_MP,
+    TEXTO_COBERTURA_FECHAS_MP,
     advertir_periodos_distintos,
     auditoria_bloque_a,
     conclusion_ejecutiva_consolidada,
     cobertura_tres_fuentes,
     detalle_control,
+    detalle_diferencia_ml,
+    detalle_diferencia_mp,
+    detalle_conciliacion_diferencia,
     explicacion_resultado,
     filas_bloque_a,
+    filas_fondos_mp,
+    filas_grupos_con_diferencia,
     filas_grupos_excluidos,
     filas_grupos_involucrados,
+    filas_mp_sin_venta,
+    filas_movimientos_diferencia,
     filas_resumen_revisiones,
     filas_tabla_consolidada,
     filas_cobertura_presentacion,
     filtrar_filas_consolidadas,
     filtrar_grupos_excluidos,
     filtrar_grupos_involucrados_por_motivo,
+    filtrar_mp_sin_venta,
     etiqueta_selector_detalle,
     formato_importe,
     kpis_consolidados,
     mensaje_conciliacion_bloque_a,
     alcance_completo_consolidado,
     nombre_archivo_descarga,
+    resumen_bloque_b_tabla,
     textos_secundarios_conclusion,
+    texto_universo_comparable,
+    texto_universo_comparable_puente,
     motivos_disponibles,
     contar_mostrando,
     tabla_consolidada,
     trazabilidad_tecnica,
 )
+from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b, clasificaciones_movimientos_mp_por_fila
 from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
 from kiki_control.reconciliation import reconciliar
 from kiki_control.ui.session_cycle import (
@@ -275,6 +290,45 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
         st.session_state["cobertura_consolidada"] = cobertura_tres_fuentes(ventas_ml.ventas, eccomapp.operaciones, mercado_pago.movimientos)
         st.session_state["cobertura"] = cobertura_archivos(eccomapp.operaciones, mercado_pago.movimientos)
         st.session_state["firma_procesamiento"] = firma
+        # Datos de enriquecimiento para Bloque B
+        st.session_state["enriq_fechas_liq_mp_por_fila"] = {
+            m.numero_fila_origen: m.fecha_liquidacion_local
+            for m in mercado_pago.movimientos
+            if getattr(m, "numero_fila_origen", None) is not None
+        }
+        st.session_state["enriq_tipos_mp_por_fila"] = {
+            m.numero_fila_origen: m.tipo_operacion.value
+            for m in mercado_pago.movimientos
+            if getattr(m, "numero_fila_origen", None) is not None
+        }
+        st.session_state["enriq_ids_op_mp_por_fila"] = {
+            m.numero_fila_origen: m.id_operacion_mercado_pago
+            for m in mercado_pago.movimientos
+            if getattr(m, "numero_fila_origen", None) is not None and getattr(m, "id_operacion_mercado_pago", None)
+        }
+        st.session_state["enriq_fechas_venta_ml_por_fila"] = {
+            v.fila_origen: v.fecha_venta
+            for v in ventas_ml.ventas
+            if getattr(v, "fila_origen", None) is not None and getattr(v, "fecha_venta", None) is not None
+        }
+        st.session_state["enriq_ids_orden_mp_por_fila"] = {
+            m.numero_fila_origen: m.id_orden
+            for m in mercado_pago.movimientos
+            if getattr(m, "numero_fila_origen", None) is not None
+        }
+        st.session_state["enriq_fechas_aprobacion_mp_por_fila"] = {
+            m.numero_fila_origen: m.fecha_aprobacion_local
+            for m in mercado_pago.movimientos
+            if getattr(m, "numero_fila_origen", None) is not None
+        }
+        st.session_state["enriq_clasificaciones_mp_por_fila"] = clasificaciones_movimientos_mp_por_fila(
+            mercado_pago.movimientos
+        )
+        st.session_state["enriq_netos_mp_por_fila"] = {
+            m.numero_fila_origen: m.monto_neto_impactado
+            for m in mercado_pago.movimientos
+            if getattr(m, "numero_fila_origen", None) is not None
+        }
         st.success("Control consolidado finalizado.")
 
 def _mostrar_normalizacion(nombre: str, resultado: Any) -> None:
@@ -442,6 +496,38 @@ def _fechas_mp_por_fila_normalizadas() -> dict[int, Any]:
     return {m.numero_fila_origen: m.fecha_origen_local for m in movimientos if getattr(m, "numero_fila_origen", None) is not None}
 
 
+def _enriq_fechas_liq_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_fechas_liq_mp_por_fila", {})
+
+
+def _enriq_tipos_mp() -> dict[int, str]:
+    return st.session_state.get("enriq_tipos_mp_por_fila", {})
+
+
+def _enriq_ids_op_mp() -> dict[int, str]:
+    return st.session_state.get("enriq_ids_op_mp_por_fila", {})
+
+
+def _enriq_fechas_venta_ml() -> dict[int, Any]:
+    return st.session_state.get("enriq_fechas_venta_ml_por_fila", {})
+
+
+def _enriq_ids_orden_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_ids_orden_mp_por_fila", {})
+
+
+def _enriq_fechas_aprobacion_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_fechas_aprobacion_mp_por_fila", {})
+
+
+def _enriq_montos_neto_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_netos_mp_por_fila", {})
+
+
+def _enriq_clasificaciones_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_clasificaciones_mp_por_fila", {})
+
+
 def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
     return {
         "Categoría temporal": nombre,
@@ -449,6 +535,7 @@ def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
         "Neto aprobado MP": formato_importe(item.neto_aprobado_mp),
         "Neto financiero total MP": formato_importe(item.neto_financiero_total_mp),
     }
+
 
 def _mostrar_kpis_en_filas(titulo: str, kpis: list[Any], tamanos: tuple[int, ...]) -> None:
     st.subheader(titulo)
@@ -463,10 +550,152 @@ def _mostrar_kpis_en_filas(titulo: str, kpis: list[Any], tamanos: tuple[int, ...
             col.metric(kpi.nombre, kpi.valor, help=kpi.ayuda)
 
 
+def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
+    """Renderiza el Bloque B rediseñado."""
+    st.subheader(TITULO_BLOQUE_B)
+    st.caption(CONVENCION_DIFERENCIA_ML_MP)
+
+    # Resumen compacto
+    st.table(resumen_bloque_b_tabla(diag_bloque_b))
+
+    if not diag_bloque_b.coherencia_suma_diferencias:
+        st.warning(
+            "La suma de diferencias individuales no coincide con la diferencia total. "
+            "Revisar consistencia del diagnóstico."
+        )
+
+    # Universo explícito
+    st.info(texto_universo_comparable(diag_bloque_b))
+
+    # Operaciones con diferencia
+    st.subheader("Operaciones con diferencia ML–MP")
+    grupos = diag_bloque_b.grupos_con_diferencia
+    if not grupos:
+        st.success("No hay operaciones con diferencia que superen la tolerancia.")
+    else:
+        st.dataframe(
+            filas_grupos_con_diferencia(grupos),
+            use_container_width=True,
+            hide_index=True,
+        )
+        # Detalle por operación
+        opciones_dif = [g.id_grupo for g in grupos]
+        if len(opciones_dif) == 1:
+            elegido = opciones_dif[0]
+        else:
+            elegido = st.selectbox(
+                "Seleccionar operación con diferencia para ver detalle",
+                opciones_dif,
+                key="detalle_diferencia_bloque_b",
+            )
+        grupo_elegido = next(g for g in grupos if g.id_grupo == elegido)
+        resultado_dif = _buscar_resultado_para_grupo(grupo_elegido, reporte)
+        if resultado_dif is not None:
+            with st.expander("Datos de Mercado Libre para esta operación", expanded=True):
+                st.table(detalle_diferencia_ml(resultado_dif))
+            with st.expander("Datos de Mercado Pago para esta operación", expanded=True):
+                st.table(detalle_diferencia_mp(resultado_dif))
+                st.caption("Movimientos MP individuales asociados (sin datos personales)")
+                st.dataframe(filas_movimientos_diferencia(grupo_elegido), use_container_width=True, hide_index=True)
+            with st.expander("Tabla de conciliación de la diferencia", expanded=True):
+                st.table(detalle_conciliacion_diferencia(resultado_dif))
+                st.caption(
+                    "No se suman conceptos de distinta naturaleza para forzar el cierre. "
+                    "La parte pendiente permanece sin clasificar."
+                )
+
+    # Neto MP sin venta ML
+    st.subheader("Movimientos de Mercado Pago sin venta ML encontrada")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Cantidad de grupos", diag_bloque_b.cantidad_mp_sin_venta)
+    c2.metric("Neto aprobado MP", formato_importe(diag_bloque_b.neto_aprobado_mp_sin_venta))
+    c3.metric("Neto financiero total MP", formato_importe(diag_bloque_b.neto_financiero_total_mp_sin_venta))
+
+    movs_sin_venta = diag_bloque_b.movimientos_mp_sin_venta
+    if movs_sin_venta:
+        b1, b2, b3 = st.columns([2, 2, 2])
+        busqueda_id = b1.text_input("Buscar por ID", key="bloque_b_buscar_id_mp")
+        tipos_disponibles = sorted({t for m in movs_sin_venta for t in m.tipos_movimiento})
+        filtro_tipo = b2.selectbox(
+            "Filtrar por tipo de movimiento",
+            options=("", *tipos_disponibles),
+            format_func=lambda x: "Todos" if x == "" else x,
+            key="bloque_b_filtro_tipo",
+        )
+        cats_disponibles = sorted({m.categoria_temporal for m in movs_sin_venta})
+        filtro_cat = b3.selectbox(
+            "Filtrar por categoría temporal",
+            options=("", *cats_disponibles),
+            format_func=lambda x: "Todas" if x == "" else x,
+            key="bloque_b_filtro_cat",
+        )
+        movs_visibles = filtrar_mp_sin_venta(movs_sin_venta, busqueda_id, filtro_tipo, filtro_cat)
+        st.caption(contar_mostrando(movs_visibles, len(movs_sin_venta)))
+        st.dataframe(
+            filas_mp_sin_venta(movs_visibles),
+            use_container_width=True,
+            hide_index=True,
+            height=400,
+        )
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        from kiki_control.exporting.excel import generar_bloque_b_mp_sin_venta_excel
+        st.download_button(
+            "Descargar MP sin venta ML",
+            data=generar_bloque_b_mp_sin_venta_excel(diag_bloque_b),
+            file_name=_nombre_exportacion("kiki_bloque_b_mp_sin_venta_"),
+            mime=mime,
+        )
+    else:
+        st.info("No hay movimientos MP sin venta ML encontrada.")
+
+    st.subheader("Movimientos de fondos y payouts")
+    f1, f2 = st.columns(2)
+    f1.metric("Cantidad", diag_bloque_b.cantidad_movimientos_fondos)
+    f2.metric("Importe financiero total", formato_importe(diag_bloque_b.neto_financiero_total_mp_fondos))
+    if diag_bloque_b.movimientos_fondos:
+        st.dataframe(filas_fondos_mp(diag_bloque_b.movimientos_fondos), use_container_width=True, hide_index=True)
+        st.caption("Estos movimientos se presentan separados y no se contabilizan como ventas ML faltantes.")
+    else:
+        st.info("No hay movimientos de fondos ni payouts.")
+
+
+def _id_resultado_clave(r: Any) -> str:
+    if getattr(r, "id_grupo_canonico", None):
+        return r.id_grupo_canonico
+    if getattr(r, "ids_orden", None):
+        return ", ".join(r.ids_orden)
+    return r.clave_resultado
+
+
+def _buscar_resultado_para_grupo(grupo: Any, reporte: Any) -> Any:
+    """Busca el ResultadoControlConsolidado correspondiente al grupo con diferencia."""
+    for r in reporte.resultados:
+        id_g = _id_resultado_clave(r)
+        if id_g == grupo.id_grupo:
+            return r
+        if grupo.ids_orden and r.ids_orden == grupo.ids_orden:
+            return r
+    return None
+
+
 def _mostrar_resultados() -> None:
     reporte = st.session_state["reporte_consolidado"]
     inicio_ml, fin_ml = _periodo_ventas_ml_normalizadas()
     diagnostico = diagnosticar_control_consolidado(reporte, inicio_ml, fin_ml, _fechas_mp_por_fila_normalizadas())
+    diag_bloque_b = diagnosticar_bloque_b(
+        reporte,
+        inicio_ml=inicio_ml,
+        fin_ml=fin_ml,
+        fechas_origen_mp_por_fila=_fechas_mp_por_fila_normalizadas(),
+        fechas_liquidacion_mp_por_fila=_enriq_fechas_liq_mp(),
+        tipos_movimiento_mp_por_fila=_enriq_tipos_mp(),
+        ids_operacion_mp_por_fila=_enriq_ids_op_mp(),
+        fechas_venta_ml_por_fila=_enriq_fechas_venta_ml(),
+        ids_orden_mp_por_fila=_enriq_ids_orden_mp(),
+        fechas_aprobacion_mp_por_fila=_enriq_fechas_aprobacion_mp(),
+        montos_neto_mp_por_fila=_enriq_montos_neto_mp(),
+        clasificaciones_mp_por_fila=_enriq_clasificaciones_mp(),
+    )
     tab_resumen, tab_operacion, tab_auditoria = st.tabs(["Resumen ejecutivo", "Control por operación", "Auditoría y descargas"])
 
     with tab_resumen:
@@ -474,9 +703,18 @@ def _mostrar_resultados() -> None:
             st.header("Cobertura temporal")
             cobertura = st.session_state["cobertura_consolidada"]
             st.dataframe(filas_cobertura_presentacion(cobertura), use_container_width=True, hide_index=True)
-            st.caption("Las liquidaciones de Mercado Pago pueden extenderse fuera del período de venta; se muestran como cobertura financiera y no disparan por sí solas la advertencia de períodos de origen.")
+            st.caption(TEXTO_COBERTURA_FECHAS_MP)
             if advertir_periodos_distintos(cobertura):
                 st.warning("Los períodos de origen de ML oficial, Eccomapp y Mercado Pago no coinciden. Esto requiere revisión, pero no implica por sí mismo un error.")
+            with st.expander("Cómo interpretar las fechas de Mercado Pago", expanded=False):
+                st.write(
+                    "**Fecha de venta ML:** cuándo ocurrió la operación comercial.\n\n"
+                    "**Fecha de origen MP:** cuándo se originó el movimiento financiero.\n\n"
+                    "**Fecha de liquidación MP:** cuándo el dinero se acredita o queda disponible.\n\n"
+                    "Una venta del 20/07 puede liquidarse después. "
+                    "Una liquidación del 20/07 puede corresponder a una venta anterior. "
+                    "La diferencia temporal no implica por sí sola un error."
+                )
         st.header("Conclusión ejecutiva")
         st.info(conclusion_ejecutiva_consolidada(reporte, diagnostico))
         for texto in textos_secundarios_conclusion(reporte):
@@ -492,7 +730,7 @@ def _mostrar_resultados() -> None:
             st.success(mensaje_conciliacion_bloque_a(reporte, diagnostico))
         else:
             st.warning(mensaje_conciliacion_bloque_a(reporte, diagnostico))
-        _mostrar_kpis_en_filas("Bloque B — Comparación financiera", bloques["Bloque B — Comparación financiera"], (3, 2))
+        _mostrar_bloque_b(reporte, diag_bloque_b)
         _mostrar_kpis_en_filas("Bloque C — Costos y utilidad", bloques["Bloque C — Costos y utilidad"], (3,))
         _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", bloques["Bloque D — Calidad y pendientes"], (3, 3))
         st.subheader("Resumen compacto de revisiones")
@@ -543,7 +781,24 @@ def _mostrar_resultados() -> None:
         with st.expander("Ver detalle técnico de la formación del neto ML", expanded=False):
             st.table([{"Fórmula": diagnostico.residual_ml.formula, "Columnas utilizadas": ", ".join(diagnostico.residual_ml.columnas_utilizadas), "Universo ML oficial": diagnostico.residual_ml.grupos_universo_ml_oficial, "Grupos calculables": diagnostico.residual_ml.grupos_calculables, "Grupos excluidos": diagnostico.residual_ml.grupos_excluidos, "Suma Total (ARS)": formato_importe(diagnostico.residual_ml.suma_total_ars), "Suma Ingresos por productos (ARS)": formato_importe(diagnostico.residual_ml.suma_ingresos_productos), "Suma Ingresos por envío (ARS)": formato_importe(diagnostico.residual_ml.suma_ingresos_envio), "Suma Cargo por venta e impuestos (ARS)": formato_importe(diagnostico.residual_ml.suma_cargo_venta_impuestos), "Suma Costos de envío (ARS)": formato_importe(diagnostico.residual_ml.suma_costos_envio), "Suma Anulaciones y reembolsos (ARS)": formato_importe(diagnostico.residual_ml.suma_anulaciones_reembolsos), "Suma Cupones de descuento": formato_importe(diagnostico.residual_ml.suma_cupones_descuento), "Motivos de exclusión": "; ".join(f"{k}: {v}" for k, v in diagnostico.residual_ml.motivos_exclusion.items() if v), "Cierra": "Sí" if diagnostico.residual_ml.identidad_cierra_exactamente else "No"}])
         st.subheader("Puente de importes entre fuentes")
-        st.table([{"Universo triple": diagnostico.puente.universo_neto_esperado, "Neto ML": formato_importe(diagnostico.puente.neto_oficial_ml), "Neto Eccomapp": formato_importe(diagnostico.puente.neto_informado_eccomapp), "Neto aprobado MP": formato_importe(diagnostico.puente.neto_aprobado_mp), "MP − ML": formato_importe(diagnostico.puente.mp_menos_ml), "Identidad cierra": "Sí" if diagnostico.puente.identidad_cierra_exactamente else "No"}])
+        st.caption(texto_universo_comparable_puente(diag_bloque_b, diagnostico.puente.universo_neto_esperado))
+        st.table([
+            {
+                "Universo": "Comparable total (ML + MP)",
+                "Grupos": diag_bloque_b.resumen.comparables_totales,
+                "Coincidentes": diag_bloque_b.resumen.coincidencias,
+                "Con diferencia": diag_bloque_b.resumen.con_diferencia,
+                "Diferencia total": formato_importe(diag_bloque_b.resumen.diferencia_universo_comparable),
+            },
+            {
+                "Universo": "Subuniverso conciliado (dentro de tolerancia)",
+                "Grupos": diag_bloque_b.resumen.coincidencias,
+                "Coincidentes": diag_bloque_b.resumen.coincidencias,
+                "Con diferencia": 0,
+                "Diferencia total": formato_importe(diag_bloque_b.resumen.diferencia_subuniverso_conciliado),
+            },
+        ])
+        st.table([{"Universo triple": diagnostico.puente.universo_neto_esperado, "Neto ML": formato_importe(diagnostico.puente.neto_oficial_ml), "Neto Eccomapp": formato_importe(diagnostico.puente.neto_informado_eccomapp), "Neto aprobado MP": formato_importe(diagnostico.puente.neto_aprobado_mp), "MP − ML": formato_importe(diagnostico.puente.mp_menos_ml), "Universo": f"Triple ({diagnostico.puente.universo_neto_esperado} grupos ML+Eccomapp+MP)"}])
         grupos_excluidos = diagnostico.puente.grupos_excluidos_universo_triple
         if grupos_excluidos:
             with st.expander("Ver grupos excluidos del puente", expanded=False):
@@ -571,7 +826,7 @@ def _mostrar_resultados() -> None:
         st.header("Descargas consolidadas")
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         d1, d2, d3 = st.columns(3)
-        d1.download_button("Descargar control consolidado de 3 fuentes", data=generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico), file_name=_nombre_exportacion("kiki_control_consolidado_3_fuentes_", reporte), mime=mime)
+        d1.download_button("Descargar control consolidado de 3 fuentes", data=generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico, diag_bloque_b=diag_bloque_b), file_name=_nombre_exportacion("kiki_control_consolidado_3_fuentes_", reporte), mime=mime)
         d2.download_button("Descargar excepciones del control consolidado", data=generar_excepciones_consolidadas_excel(reporte), file_name=_nombre_exportacion("kiki_control_excepciones_consolidadas_", reporte), mime=mime)
         d3.download_button("Descargar revisiones del control consolidado", data=generar_revisiones_consolidadas_excel(reporte), file_name=_nombre_exportacion("kiki_control_revisiones_consolidadas_", reporte), mime=mime)
         with st.expander("Auditoría histórica Eccomapp–Mercado Pago (Auditoría de conciliación Eccomapp–Mercado Pago)", expanded=False):

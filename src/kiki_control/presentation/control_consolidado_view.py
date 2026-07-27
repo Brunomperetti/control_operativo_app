@@ -9,6 +9,14 @@ from typing import Iterable, Any
 from kiki_control.domain.control_consolidado import EstadoControlConsolidado, ReporteControlConsolidado, ResultadoControlConsolidado
 from kiki_control.presentation.control_consolidado_diagnostics import DiagnosticoControlConsolidado, diagnosticar_control_consolidado, motivos_datos_criticos_faltantes, tiene_datos_criticos_faltantes
 from kiki_control.presentation.formatters import formato_pesos_argentino
+from kiki_control.presentation.bloque_b_diagnostics import (
+    DetalleMovimientoMp,
+    DiagnosticoBloqueB,
+    EstadoExplicacionDiferencia,
+    ESTADOS_EXPLICACION_VISIBLES,
+    GrupoConDiferencia,
+    MovimientoMpSinVentaML,
+)
 
 
 @dataclass(frozen=True)
@@ -27,6 +35,7 @@ class CoberturaFuente:
 
 
 TITULO_BLOQUE_A = "Bloque A — Formación del neto informado por Mercado Libre"
+TITULO_BLOQUE_B = "Bloque B — Conciliación entre el neto ML y Mercado Pago"
 
 
 def texto_rango_cobertura(minimo: str, maximo: str) -> str:
@@ -535,3 +544,187 @@ def explicacion_resultado(r: ResultadoControlConsolidado) -> list[dict[str, str]
 
 def trazabilidad_tecnica(r: ResultadoControlConsolidado, tolerancia: Decimal, hashes: dict[str,str]) -> dict[str,str]:
     return {"Versión de regla": r.version_regla, "Motivos internos": "; ".join(r.motivos) or "—", "Hashes truncados": ", ".join(f"{k}:{v[:12]}" for k,v in hashes.items() if v), "Filas de origen": f"ML {r.filas_origen_ml}; Eccomapp {r.filas_origen_eccomapp}; MP {r.filas_origen_mp}", "Claves consumidas": f"Comercial {r.claves_resultados_comerciales}; Financiero {r.claves_resultados_financieros}", "Tolerancia": str(tolerancia)}
+
+
+# ---------------------------------------------------------------------------
+# Bloque B — Conciliación entre el neto ML y Mercado Pago
+# ---------------------------------------------------------------------------
+
+CONVENCION_DIFERENCIA_ML_MP = (
+    "Convención: diferencia_ml_mp = neto_aprobado_mp − total_informado_ml. "
+    "Positiva: Mercado Pago informa más neto que Mercado Libre. "
+    "Negativa: Mercado Pago informa menos neto que Mercado Libre."
+)
+
+TEXTO_COBERTURA_FECHAS_MP = (
+    "Mercado Libre y Eccomapp informan ventas ocurridas en el período seleccionado. "
+    "Mercado Pago también incluye movimientos originados en días anteriores y liquidaciones futuras. "
+    "Por eso las fechas de origen y liquidación no deben compararse directamente como si fueran fechas de venta."
+)
+
+
+def resumen_bloque_b_tabla(diag: DiagnosticoBloqueB) -> list[dict[str, str]]:
+    """Devuelve filas compactas para el resumen de Bloque B."""
+    r = diag.resumen
+    return [
+        {"Indicador": "Grupos comparables", "Valor": str(r.comparables_totales)},
+        {"Indicador": "Coinciden dentro de tolerancia", "Valor": str(r.coincidencias)},
+        {"Indicador": "Grupos con diferencia", "Valor": str(r.con_diferencia)},
+        {"Indicador": "Neto ML comparable", "Valor": formato_importe(r.neto_ml_comparable)},
+        {"Indicador": "Neto MP comparable", "Valor": formato_importe(r.neto_mp_comparable)},
+        {"Indicador": "Diferencia universo comparable (MP − ML)", "Valor": formato_importe(r.diferencia_universo_comparable)},
+        {"Indicador": "Diferencia operaciones fuera de tolerancia", "Valor": formato_importe(r.diferencia_operaciones_fuera_tolerancia)},
+        {"Indicador": "Diferencia subuniverso conciliado (dentro de tolerancia)", "Valor": formato_importe(r.diferencia_subuniverso_conciliado)},
+    ]
+
+
+def filas_grupos_con_diferencia(grupos: Iterable[GrupoConDiferencia]) -> list[dict[str, Any]]:
+    """Transforma grupos con diferencia en filas de presentación."""
+    return [
+        {
+            "ID de grupo u orden": g.id_grupo,
+            "Fecha de venta ML": g.fecha_venta_ml,
+            "Neto informado ML": formato_importe(g.total_informado_ml),
+            "Neto aprobado MP": formato_importe(g.neto_aprobado_mp),
+            "Diferencia MP − ML": formato_importe(g.diferencia_ml_mp),
+            "Movimientos MP": g.cantidad_movimientos_mp,
+            "Origen MP desde": g.fecha_min_origen_mp,
+            "Origen MP hasta": g.fecha_max_origen_mp,
+            "Liquidación desde": g.fecha_min_liquidacion,
+            "Liquidación hasta": g.fecha_max_liquidacion,
+            "Tipos de movimientos": ", ".join(g.tipos_movimientos),
+            "Estado de explicación": ESTADOS_EXPLICACION_VISIBLES.get(g.estado_explicacion, g.estado_explicacion),
+            "Motivo": g.motivo_visible,
+            "Acción recomendada": g.accion_recomendada,
+        }
+        for g in grupos
+    ]
+
+
+def filas_mp_sin_venta(movs: Iterable[MovimientoMpSinVentaML]) -> list[dict[str, Any]]:
+    """Transforma movimientos MP sin venta ML en filas de presentación."""
+    return [
+        {
+            "ID de grupo u orden": m.id_grupo,
+            "IDs de movimiento MP": ", ".join(m.ids_movimiento_mp) if m.ids_movimiento_mp else "—",
+            "Tipo de movimiento": ", ".join(m.tipos_movimiento),
+            "Fecha de origen": m.fecha_min_origen,
+            "Fecha de liquidación": m.fecha_max_liquidacion,
+            "Neto aprobado MP": formato_importe(m.neto_aprobado_mp),
+            "Neto financiero total MP": formato_importe(m.neto_financiero_total_mp),
+            "Categoría temporal": m.categoria_temporal,
+            "Motivo sin venta ML": m.motivo_sin_venta,
+            "Acción recomendada": m.accion_recomendada,
+        }
+        for m in movs
+    ]
+
+
+def filtrar_mp_sin_venta(
+    movs: Iterable[MovimientoMpSinVentaML],
+    busqueda_id: str = "",
+    filtro_tipo: str = "",
+    filtro_categoria: str = "",
+) -> tuple[MovimientoMpSinVentaML, ...]:
+    """Filtra movimientos MP sin venta ML por ID, tipo y categoría temporal."""
+    q_id = (busqueda_id or "").strip().lower()
+    q_tipo = (filtro_tipo or "").strip()
+    q_cat = (filtro_categoria or "").strip()
+    result = []
+    for m in movs:
+        if q_id and q_id not in m.id_grupo.lower():
+            continue
+        if q_tipo and q_tipo not in ", ".join(m.tipos_movimiento):
+            continue
+        if q_cat and q_cat != m.categoria_temporal:
+            continue
+        result.append(m)
+    return tuple(result)
+
+
+def filas_movimientos_diferencia(grupo: GrupoConDiferencia) -> list[dict[str, Any]]:
+    """Devuelve una fila por cada movimiento MP individual asociado a un grupo con diferencia."""
+    return [
+        {
+            "ID movimiento MP": m.id_movimiento_mp,
+            "ID orden": m.id_orden,
+            "Tipo de movimiento": m.tipo_movimiento,
+            "Clasificación normalizada": m.clasificacion_normalizada,
+            "Fecha de origen": m.fecha_origen,
+            "Fecha de aprobación": m.fecha_aprobacion,
+            "Fecha de liquidación": m.fecha_liquidacion,
+            "Monto neto impactado": formato_importe(m.monto_neto_impactado),
+            "Fila de origen": m.fila_origen,
+        }
+        for m in grupo.movimientos_asociados
+    ]
+
+
+def filas_fondos_mp(movs: Iterable[MovimientoMpSinVentaML]) -> list[dict[str, Any]]:
+    """Transforma movimientos de fondos/payouts MP en filas de presentación."""
+    return filas_mp_sin_venta(movs)
+
+
+def detalle_diferencia_ml(r: ResultadoControlConsolidado) -> list[dict[str, str]]:
+    """Detalle de los datos ML para una operación con diferencia."""
+    return [
+        {"Concepto": "ID de venta o grupo", "Valor": ", ".join(r.ids_orden) if r.ids_orden else r.clave_resultado},
+        {"Concepto": "Ingresos por productos (ARS)", "Valor": formato_importe(r.monto_venta_ml)},
+        {"Concepto": "Ingresos por envío (ARS)", "Valor": formato_importe(r.ingresos_envio_ml)},
+        {"Concepto": "Cargos e impuestos (ARS)", "Valor": formato_importe(r.cargo_venta_impuestos_ml)},
+        {"Concepto": "Costos de envío (ARS)", "Valor": formato_importe(r.costo_envio_ml)},
+        {"Concepto": "Anulaciones y reembolsos (ARS)", "Valor": formato_importe(r.anulaciones_reembolsos_ml)},
+        {"Concepto": "Descuentos informados (ARS)", "Valor": formato_importe(r.descuentos_bonificaciones_ml)},
+        {"Concepto": "Total informado (ARS)", "Valor": formato_importe(r.total_informado_ml)},
+        {"Concepto": "Filas de origen ML", "Valor": ", ".join(map(str, r.filas_origen_ml)) or "—"},
+    ]
+
+
+def detalle_diferencia_mp(r: ResultadoControlConsolidado) -> list[dict[str, str]]:
+    """Detalle de los datos MP para una operación con diferencia."""
+    return [
+        {"Concepto": "ID de orden", "Valor": ", ".join(r.ids_orden) if r.ids_orden else "—"},
+        {"Concepto": "Neto aprobado MP (utilizado en comparación)", "Valor": formato_importe(r.neto_aprobado_mp)},
+        {"Concepto": "Neto financiero total MP", "Valor": formato_importe(r.neto_financiero_total_mp)},
+        {"Concepto": "Impactos de envío MP", "Valor": formato_importe(r.impacto_pagos_envio_mp)},
+        {"Concepto": "Devoluciones MP", "Valor": formato_importe(r.impacto_devoluciones_mp)},
+        {"Concepto": "Reclamos o disputas MP", "Valor": formato_importe(r.impacto_reclamos_disputas_mp)},
+        {"Concepto": "Otros impactos MP", "Valor": formato_importe(r.impacto_otros_mp)},
+        {"Concepto": "Filas de origen MP", "Valor": ", ".join(map(str, r.filas_origen_mp)) or "—"},
+    ]
+
+
+def detalle_conciliacion_diferencia(r: ResultadoControlConsolidado) -> list[dict[str, str]]:
+    """Tabla de construcción de la conciliación para una operación con diferencia."""
+    return [
+        {"Concepto": "Neto informado ML", "Valor": formato_importe(r.total_informado_ml), "Origen": "ML oficial — Total (ARS)"},
+        {"Concepto": "Neto aprobado MP", "Valor": formato_importe(r.neto_aprobado_mp), "Origen": "MP — MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO"},
+        {"Concepto": "Diferencia MP − ML", "Valor": formato_importe(r.diferencia_ml_mp), "Origen": "Calculado: neto_aprobado_mp − total_informado_ml"},
+        {"Concepto": "Devoluciones observadas", "Valor": formato_importe(r.impacto_devoluciones_mp), "Origen": "MP — impacto_devoluciones"},
+        {"Concepto": "Reclamos/disputas observados", "Valor": formato_importe(r.impacto_reclamos_disputas_mp), "Origen": "MP — impacto_reclamos_disputas"},
+        {"Concepto": "Envíos observados", "Valor": formato_importe(r.impacto_pagos_envio_mp), "Origen": "MP — impacto_pagos_envio"},
+        {"Concepto": "Otros impactos observados", "Valor": formato_importe(r.impacto_otros_mp), "Origen": "MP — impacto_otros"},
+    ]
+
+
+def texto_universo_comparable(diag_bloque_b: DiagnosticoBloqueB) -> str:
+    """Texto explícito del universo comparable para evitar la contradicción del puente."""
+    r = diag_bloque_b.resumen
+    return (
+        f"Las {r.coincidencias} operaciones conciliadas cierran dentro de la tolerancia "
+        f"(diferencia agregada del subuniverso conciliado: {formato_importe(r.diferencia_subuniverso_conciliado)}). "
+        f"Quedan {r.con_diferencia} operaciones por analizar, "
+        f"con una diferencia total fuera de tolerancia de {formato_importe(r.diferencia_operaciones_fuera_tolerancia)}."
+    )
+
+
+def texto_universo_comparable_puente(diag_bloque_b: DiagnosticoBloqueB, universo_triple: int) -> str:
+    """Texto explícito del puente diferenciando el universo triple del comparable."""
+    r = diag_bloque_b.resumen
+    return (
+        f"Universo comparable total (ML + MP): {r.comparables_totales} grupos "
+        f"({r.coincidencias} coincidentes y {r.con_diferencia} con diferencia, "
+        f"diferencia universo comparable {formato_importe(r.diferencia_universo_comparable)}, "
+        f"de los cuales {formato_importe(r.diferencia_operaciones_fuera_tolerancia)} corresponden a operaciones fuera de tolerancia). "
+        f"Universo del puente triple (ML + Eccomapp + MP): {universo_triple} grupos."
+    )
