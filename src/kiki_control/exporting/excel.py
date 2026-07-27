@@ -281,7 +281,9 @@ def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagno
     if diag_bloque_b is not None:
         _escribir_resumen_bloque_b(wb.create_sheet("Bloque B — Resumen"), diag_bloque_b)
         _escribir_diferencias_bloque_b(wb.create_sheet("Bloque B — Diferencias"), diag_bloque_b)
+        _escribir_movimientos_bloque_b(wb.create_sheet("Bloque B — Movimientos"), diag_bloque_b)
         _escribir_mp_sin_venta_bloque_b(wb.create_sheet("Bloque B — MP sin venta ML"), diag_bloque_b)
+        _escribir_fondos_bloque_b(wb.create_sheet("Bloque B — Fondos y payouts"), diag_bloque_b)
     _escribir_diccionario_consolidado(wb.create_sheet("Diccionario de cálculos"))
     salida = BytesIO(); wb.save(salida); return salida.getvalue()
 
@@ -457,7 +459,9 @@ def _escribir_resumen_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
         ("Grupos con diferencia", r.con_diferencia),
         ("Neto ML comparable", r.neto_ml_comparable),
         ("Neto MP comparable", r.neto_mp_comparable),
-        ("Diferencia total (MP − ML)", r.diferencia_total),
+        ("Diferencia universo comparable completo (MP − ML)", r.diferencia_universo_comparable),
+        ("Diferencia operaciones fuera de tolerancia", r.diferencia_operaciones_fuera_tolerancia),
+        ("Diferencia subuniverso conciliado", r.diferencia_subuniverso_conciliado),
         ("Suma individual de diferencias", diag.suma_diferencias_individuales),
         ("Coherencia suma diferencias", "Sí" if diag.coherencia_suma_diferencias else "No"),
         ("Cantidad MP sin venta ML", diag.cantidad_mp_sin_venta),
@@ -471,7 +475,7 @@ def _escribir_resumen_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
     for fila in filas:
         ws.append(list(fila))
     _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2}, freeze=False)
-    monetarios = {"Neto ML comparable", "Neto MP comparable", "Diferencia total (MP − ML)", "Suma individual de diferencias", "Neto aprobado MP sin venta", "Neto financiero total MP sin venta"}
+    monetarios = {"Neto ML comparable", "Neto MP comparable", "Diferencia universo comparable completo (MP − ML)", "Diferencia operaciones fuera de tolerancia", "Diferencia subuniverso conciliado", "Suma individual de diferencias", "Neto aprobado MP sin venta", "Neto financiero total MP sin venta"}
     for row in ws.iter_rows(min_row=2):
         if row[0].value in monetarios and isinstance(row[1].value, Decimal):
             row[1].number_format = _FORMATO_MONEDA_ARS
@@ -518,3 +522,31 @@ def _escribir_mp_sin_venta_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> 
         ])
     mon_cols = {idx for idx, c in enumerate(_COLUMNAS_MP_SIN_VENTA, start=1) if c in _COLS_MONETARIAS_MP_SIN}
     _formatear_tabla(ws, moneda_columnas=mon_cols, wrap_columnas={9, 10}, freeze=True)
+
+
+def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
+    """Escribe fondos/payouts en un universo separado de las ventas faltantes."""
+    ws.append(list(_COLUMNAS_MP_SIN_VENTA))
+    for m in diag.movimientos_fondos:
+        ws.append([_texto_seguro(m.id_grupo), _texto_seguro(", ".join(m.ids_movimiento_mp)),
+                   _texto_seguro(", ".join(m.tipos_movimiento)), _texto_seguro(m.fecha_min_origen),
+                   _texto_seguro(m.fecha_max_liquidacion), _decimal_o_vacio(m.neto_aprobado_mp),
+                   _decimal_o_vacio(m.neto_financiero_total_mp), _texto_seguro(m.categoria_temporal),
+                   _texto_seguro(m.motivo_sin_venta), _texto_seguro(m.accion_recomendada)])
+    mon_cols = {idx for idx, c in enumerate(_COLUMNAS_MP_SIN_VENTA, start=1) if c in _COLS_MONETARIAS_MP_SIN}
+    _formatear_tabla(ws, moneda_columnas=mon_cols, wrap_columnas={9, 10}, freeze=True)
+
+
+def _escribir_movimientos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
+    columnas = ("ID de grupo", "ID de movimiento MP", "ID de orden", "Tipo", "Clasificación normalizada",
+                "Fecha de origen", "Fecha de aprobación", "Fecha de liquidación",
+                "Neto impactado", "Fila de origen")
+    ws.append(list(columnas))
+    for grupo in diag.grupos_con_diferencia:
+        for mov in grupo.movimientos_asociados:
+            ws.append([_texto_seguro(grupo.id_grupo), _texto_seguro(mov.id_movimiento_mp),
+                       _texto_seguro(mov.id_orden), _texto_seguro(mov.tipo_movimiento),
+                       _texto_seguro(mov.clasificacion_normalizada), _texto_seguro(mov.fecha_origen),
+                       _texto_seguro(mov.fecha_aprobacion), _texto_seguro(mov.fecha_liquidacion),
+                       _decimal_o_vacio(mov.monto_neto_impactado), mov.fila_origen])
+    _formatear_tabla(ws, moneda_columnas={9}, wrap_columnas=set(), freeze=True)
