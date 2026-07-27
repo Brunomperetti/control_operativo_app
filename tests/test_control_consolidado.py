@@ -69,8 +69,8 @@ def fin(
         1 if neto is not None and cantidad_movimientos > 0 else 0, None, neto, None,
         D("4") if flags.get("pago_envio", False) else D("0"),
         D("-5") if flags.get("devolucion", False) else D("0"),
-        D("-6") if flags.get("reclamo", False) or flags.get("disputa", False) else D("0"),
-        D("0"), neto or D("0"), None, D("0.50"), flags.get("devolucion", False),
+        flags.get("impacto_reclamo", D("-6")) if flags.get("reclamo", False) or flags.get("disputa", False) else D("0"),
+        D("0"), flags.get("neto_financiero", neto or D("0")), None, D("0.50"), flags.get("devolucion", False),
         flags.get("reclamo", False), flags.get("disputa", False), flags.get("pago_envio", False),
         flags.get("desconocido", False), flags.get("pendiente", False), flags.get("duplicados", False),
     )
@@ -129,6 +129,54 @@ def test_diferencias_positiva_negativa_cero_y_tolerancia():
     assert unico(reporte([venta("O1")], [op("O1")], [fin("O1", neto=D("79"))])).diferencia_ml_mp == D("-1")
     assert unico(reporte([venta("O1")], [op("O1")], [fin("O1", neto=D("80.25"))])).estado == EstadoControlConsolidado.COMPLETA
     assert unico(reporte([venta("O1")], [op("O1")], [fin("O1", neto=D("80.75"))])).estado == EstadoControlConsolidado.CON_DIFERENCIA
+
+
+def test_bloque_b_pago_sin_reversa_usa_neto_financiero():
+    r = unico(reporte([venta("O1", total=D("80"))], [op("O1")], [fin("O1", neto=D("80"))]))
+    assert (r.neto_aprobado_mp, r.neto_financiero_total_mp, r.diferencia_ml_mp) == (D("80"), D("80"), D("0"))
+
+
+def test_bloque_b_pago_y_reclamo_total_concilia_financieramente():
+    r = unico(reporte([venta("O1", total=D("0"))], [op("O1")], [
+        fin("O1", neto=D("10928.07"), neto_financiero=D("0"), reclamo=True, impacto_reclamo=D("-10928.07")),
+    ]))
+    assert r.neto_aprobado_mp == D("10928.07")
+    assert r.impacto_reclamos_disputas_mp == D("-10928.07")
+    assert r.neto_financiero_total_mp == r.diferencia_ml_mp == D("0")
+
+
+def test_bloque_b_pago_y_devolucion_total_concilia_financieramente():
+    r = unico(reporte([venta("O1", total=D("0"))], [op("O1")], [
+        fin("O1", neto=D("100"), neto_financiero=D("0"), devolucion=True),
+    ]))
+    assert (r.neto_aprobado_mp, r.neto_financiero_total_mp, r.diferencia_ml_mp) == (D("100"), D("0"), D("0"))
+
+
+def test_bloque_b_reversa_parcial_deja_diferencia_financiera():
+    r = unico(reporte([venta("O1", total=D("50"))], [op("O1")], [
+        fin("O1", neto=D("100"), neto_financiero=D("70"), devolucion=True),
+    ]))
+    assert r.diferencia_ml_mp == D("20")
+
+
+def test_bloque_b_multiples_movimientos_suma_el_neto_financiero_total():
+    r = unico(reporte([venta("O1", total=D("80"))], [op("O1")], [
+        fin("O1", 1, D("100"), neto_financiero=D("100")),
+        fin("O1", 2, D("0"), neto_financiero=D("-20"), devolucion=True),
+    ]))
+    assert (r.neto_aprobado_mp, r.neto_financiero_total_mp, r.diferencia_ml_mp) == (D("100"), D("80"), D("0"))
+
+
+def test_bloque_b_conciliacion_exacta_se_mantiene_dentro_de_tolerancia():
+    r = unico(reporte([venta("O1", total=D("80"))], [op("O1")], [fin("O1", neto=D("100"), neto_financiero=D("80"))]))
+    assert r.diferencia_ml_mp == D("0")
+    assert "DIFERENCIA_ML_MP_SUPERA_TOLERANCIA" not in r.motivos
+
+
+def test_bloque_b_diferencia_financiera_fuera_de_tolerancia():
+    r = unico(reporte([venta("O1", total=D("80"))], [op("O1")], [fin("O1", neto=D("100"), neto_financiero=D("80.51"))]))
+    assert r.diferencia_ml_mp == D("0.51")
+    assert r.estado == EstadoControlConsolidado.CON_DIFERENCIA
 
 
 def test_utilidad_eccomapp_conservada_separada_y_costo_agregado():
