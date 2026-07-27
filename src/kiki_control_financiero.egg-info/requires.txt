@@ -1,6 +1,0 @@
-pandas
-openpyxl
-streamlit>=1.36
-
-[dev]
-pytest
