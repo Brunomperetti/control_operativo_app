@@ -6,7 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 
-VERSION_REGLA_CONCILIACION = "ML_MP_ID_ORDER_NETO_V1"
+VERSION_REGLA_CONCILIACION = "ML_MP_ID_ORDER_NETO_V2"
 
 
 class EstadoConciliacion(StrEnum):

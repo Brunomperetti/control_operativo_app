@@ -140,8 +140,9 @@ def _resultado_desde(
     total_ml = ml_vals["total_informado_ml"]
     dif_venta = ml_vals["monto_venta_ml"] - monto_ec if ml_vals["monto_venta_ml"] is not None and monto_ec is not None else None
     dif_neto_ec = total_ml - neto_ec if total_ml is not None and neto_ec is not None else None
-    # La conciliación usa el impacto algebraico completo de MP. El neto de
-    # pagos aprobados se conserva separado como métrica bruta de auditoría.
+    # La conciliación parte del pago aprobado y suma únicamente movimientos que
+    # modifican el neto comparable. PAGO_ENVIO queda como componente visible ya
+    # incluido; PAYOUT permanece en el universo separado de fondos.
     dif_ml_mp = neto_fin - total_ml if neto_fin is not None and total_ml is not None else None
     utilidad_control = total_ml - costo_prod if total_ml is not None and costo_prod is not None else None
     motivos = list(comercial.motivos if comercial else ())

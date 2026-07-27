@@ -37,6 +37,7 @@ from kiki_control.presentation.bloque_b_diagnostics import (
 )
 from kiki_control.presentation.control_consolidado_view import (
     TITULO_BLOQUE_B,
+    filas_movimientos_bloque_b,
     filas_movimientos_diferencia,
     texto_universo_comparable,
 )
@@ -155,6 +156,28 @@ def test_grupo_ml_mp_coincide_dentro_tolerancia():
     assert diag.resumen.coincidencias == 1
     assert diag.resumen.con_diferencia == 0
     assert len(diag.grupos_con_diferencia) == 0
+
+
+def test_pago_envio_conciliado_sigue_visible_en_ui_y_excel_como_incluido():
+    r = _r("envio-incluido", ml=D("8777.90"), mp=D("8777.90"), dif=D("0"),
+           filas_mp=(7, 8), ind=IND_ENV, imp_env=D("2449.46"))
+    diag = diagnosticar_bloque_b(
+        _rep([r]),
+        clasificaciones_mp_por_fila={7: "PAGO_APROBADO", 8: "PAGO_ENVIO"},
+        tipos_movimiento_mp_por_fila={7: "PAGO_APROBADO", 8: "PAGO_ENVIO"},
+        montos_neto_mp_por_fila={7: D("8777.90"), 8: D("2449.46")},
+    )
+
+    assert diag.grupos_con_diferencia == ()
+    filas_ui = filas_movimientos_bloque_b(diag)
+    assert filas_ui[1]["Tratamiento en neto comparable"] == "Componente ya incluido; no se suma nuevamente"
+
+    wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(_rep([r]), diag_bloque_b=diag)))
+    movimientos = wb["Bloque B — Movimientos"]
+    assert movimientos.max_row == 3
+    assert movimientos["F3"].value == "Componente ya incluido; no se suma nuevamente"
+    resumen = wb["Bloque B — Resumen"]
+    assert any(row[0].value == "Tratamiento PAGO_ENVIO" for row in resumen.iter_rows(min_row=2))
 
 
 # ---------------------------------------------------------------------------

@@ -152,6 +152,8 @@ class DiagnosticoBloqueB:
     neto_aprobado_mp_fondos: Decimal
     neto_financiero_total_mp_fondos: Decimal
     movimientos_fondos: tuple[MovimientoMpSinVentaML, ...]
+    grupos_movimientos_asociados: tuple[tuple[str, tuple[DetalleMovimientoMp, ...]], ...]
+    """Detalle individual de todos los grupos MP, aun cuando concilien sin diferencia."""
     suma_diferencias_individuales: Decimal
     coherencia_suma_diferencias: bool
     """Verifica que suma_diferencias_individuales == diferencia_operaciones_fuera_tolerancia."""
@@ -562,6 +564,19 @@ def diagnosticar_bloque_b(
             movimientos_asociados=movimientos_asociados,
         ))
 
+    grupos_movimientos = tuple(
+        (
+            _id_grupo(r),
+            _construir_detalle_movimientos(
+                r.filas_origen_mp, ids_op, ids_orden_mp, tipos,
+                fechas_origen, fechas_aprobacion, fechas_liq, montos_neto,
+                clasificaciones,
+            ),
+        )
+        for r in reporte.resultados
+        if r.tiene_mercado_pago
+    )
+
     # --- Universo MP sin venta ML (por presencia real de fuentes) ---
     # Incluye SOLO_MOVIMIENTO_FINANCIERO, SIN_VENTA_OFICIAL y cualquier estado
     # donde tiene_mercado_pago == True y tiene_mercado_libre_oficial == False.
@@ -642,6 +657,7 @@ def diagnosticar_bloque_b(
         neto_aprobado_mp_fondos=neto_ap_fondos,
         neto_financiero_total_mp_fondos=neto_fin_fondos,
         movimientos_fondos=tuple(movimientos_fondos),
+        grupos_movimientos_asociados=grupos_movimientos,
         suma_diferencias_individuales=suma_ind,
         coherencia_suma_diferencias=coherencia,
     )

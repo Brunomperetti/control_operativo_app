@@ -63,6 +63,7 @@ from kiki_control.presentation.control_consolidado_view import (
     filas_grupos_excluidos,
     filas_grupos_involucrados,
     filas_mp_sin_venta,
+    filas_movimientos_bloque_b,
     filas_movimientos_diferencia,
     filas_resumen_revisiones,
     filas_tabla_consolidada,
@@ -566,6 +567,13 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
 
     # Universo explícito
     st.info(texto_universo_comparable(diag_bloque_b))
+
+    st.subheader("Movimientos MP asociados")
+    st.caption(
+        "PAGO_ENVIO permanece visible para trazabilidad como componente ya incluido en el pago aprobado; "
+        "no se suma nuevamente al neto comparable."
+    )
+    st.dataframe(filas_movimientos_bloque_b(diag_bloque_b), use_container_width=True, hide_index=True)
 
     # Operaciones con diferencia
     st.subheader("Operaciones con diferencia ML–MP")

@@ -552,6 +552,8 @@ def trazabilidad_tecnica(r: ResultadoControlConsolidado, tolerancia: Decimal, ha
 
 CONVENCION_DIFERENCIA_ML_MP = (
     "Convención: diferencia_ml_mp = neto_financiero_total_mp − total_informado_ml. "
+    "Neto financiero total MP = pagos aprobados + reclamos/disputas + devoluciones + otros impactos independientes; "
+    "PAGO_ENVIO se muestra como componente ya incluido y no se suma nuevamente. "
     "Positiva: Mercado Pago informa más neto que Mercado Libre. "
     "Negativa: Mercado Pago informa menos neto que Mercado Libre."
 )
@@ -588,7 +590,7 @@ def filas_grupos_con_diferencia(grupos: Iterable[GrupoConDiferencia]) -> list[di
             "Neto aprobado MP": formato_importe(g.neto_aprobado_mp),
             "Reclamos/disputas MP": formato_importe(g.impacto_reclamos_disputas_mp),
             "Devoluciones MP": formato_importe(g.impacto_devoluciones_mp),
-            "Envíos MP": formato_importe(g.impacto_pagos_envio_mp),
+            "Envíos MP (incluidos; no se resuman)": formato_importe(g.impacto_pagos_envio_mp),
             "Otros impactos MP": formato_importe(g.impacto_otros_mp),
             "Neto financiero total MP": formato_importe(g.neto_financiero_total_mp),
             "Diferencia MP − ML": formato_importe(g.diferencia_ml_mp),
@@ -649,20 +651,37 @@ def filtrar_mp_sin_venta(
 
 def filas_movimientos_diferencia(grupo: GrupoConDiferencia) -> list[dict[str, Any]]:
     """Devuelve una fila por cada movimiento MP individual asociado a un grupo con diferencia."""
-    return [
-        {
+    return [_fila_movimiento_mp(m) for m in grupo.movimientos_asociados]
+
+
+def _fila_movimiento_mp(m: Any) -> dict[str, Any]:
+    return {
             "ID movimiento MP": m.id_movimiento_mp,
             "ID orden": m.id_orden,
             "Tipo de movimiento": m.tipo_movimiento,
             "Clasificación normalizada": m.clasificacion_normalizada,
+            "Tratamiento en neto comparable": (
+                "Componente ya incluido; no se suma nuevamente"
+                if m.clasificacion_normalizada == "PAGO_ENVIO"
+                else "Movimiento de fondos separado"
+                if m.clasificacion_normalizada == "PAYOUT"
+                else "Modifica el neto comparable"
+            ),
             "Fecha de origen": m.fecha_origen,
             "Fecha de aprobación": m.fecha_aprobacion,
             "Fecha de liquidación": m.fecha_liquidacion,
             "Monto neto impactado": formato_importe(m.monto_neto_impactado),
             "Fila de origen": m.fila_origen,
         }
-        for m in grupo.movimientos_asociados
-    ]
+
+
+def filas_movimientos_bloque_b(diag: DiagnosticoBloqueB) -> list[dict[str, Any]]:
+    """Lista todo movimiento individual y explicita si afecta el neto comparable."""
+    filas: list[dict[str, Any]] = []
+    for id_grupo, movimientos in diag.grupos_movimientos_asociados:
+        for movimiento in movimientos:
+            filas.append({"ID de grupo": id_grupo, **_fila_movimiento_mp(movimiento)})
+    return filas
 
 
 def filas_fondos_mp(movs: Iterable[MovimientoMpSinVentaML]) -> list[dict[str, Any]]:
@@ -691,7 +710,7 @@ def detalle_diferencia_mp(r: ResultadoControlConsolidado) -> list[dict[str, str]
         {"Concepto": "ID de orden", "Valor": ", ".join(r.ids_orden) if r.ids_orden else "—"},
         {"Concepto": "Neto aprobado bruto MP", "Valor": formato_importe(r.neto_aprobado_mp)},
         {"Concepto": "Neto financiero total MP", "Valor": formato_importe(r.neto_financiero_total_mp)},
-        {"Concepto": "Impactos de envío MP", "Valor": formato_importe(r.impacto_pagos_envio_mp)},
+        {"Concepto": "Pagos de envío MP (ya incluidos; no se resuman)", "Valor": formato_importe(r.impacto_pagos_envio_mp)},
         {"Concepto": "Devoluciones MP", "Valor": formato_importe(r.impacto_devoluciones_mp)},
         {"Concepto": "Reclamos o disputas MP", "Valor": formato_importe(r.impacto_reclamos_disputas_mp)},
         {"Concepto": "Otros impactos MP", "Valor": formato_importe(r.impacto_otros_mp)},
@@ -706,9 +725,9 @@ def detalle_conciliacion_diferencia(r: ResultadoControlConsolidado) -> list[dict
         {"Concepto": "Neto aprobado bruto MP", "Valor": formato_importe(r.neto_aprobado_mp), "Origen": "MP — pagos aprobados"},
         {"Concepto": "Devoluciones observadas", "Valor": formato_importe(r.impacto_devoluciones_mp), "Origen": "MP — impacto_devoluciones"},
         {"Concepto": "Reclamos/disputas observados", "Valor": formato_importe(r.impacto_reclamos_disputas_mp), "Origen": "MP — impacto_reclamos_disputas"},
-        {"Concepto": "Envíos observados", "Valor": formato_importe(r.impacto_pagos_envio_mp), "Origen": "MP — impacto_pagos_envio"},
+        {"Concepto": "Envíos observados (ya incluidos; no se resuman)", "Valor": formato_importe(r.impacto_pagos_envio_mp), "Origen": "MP — componente informativo del pago aprobado"},
         {"Concepto": "Otros impactos observados", "Valor": formato_importe(r.impacto_otros_mp), "Origen": "MP — impacto_otros"},
-        {"Concepto": "Neto financiero total MP", "Valor": formato_importe(r.neto_financiero_total_mp), "Origen": "Suma algebraica de todos los movimientos MP asociados"},
+        {"Concepto": "Neto financiero total MP", "Valor": formato_importe(r.neto_financiero_total_mp), "Origen": "Pago aprobado + movimientos que modifican el neto; excluye PAGO_ENVIO ya incluido y PAYOUT"},
         {"Concepto": "Diferencia financiera MP − ML", "Valor": formato_importe(r.diferencia_ml_mp), "Origen": "Calculado: neto_financiero_total_mp − total_informado_ml"},
     ]
 

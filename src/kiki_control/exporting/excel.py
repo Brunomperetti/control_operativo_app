@@ -469,6 +469,7 @@ def _escribir_resumen_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
         ("Neto aprobado MP sin venta", diag.neto_aprobado_mp_sin_venta),
         ("Neto financiero total MP sin venta", diag.neto_financiero_total_mp_sin_venta),
         ("Convención", "diferencia_ml_mp = neto_financiero_total_mp − total_informado_ml"),
+        ("Tratamiento PAGO_ENVIO", "Componente ya incluido en el neto aprobado bruto MP: se muestra, pero no se suma nuevamente."),
         ("Positiva", "MP informa más neto que ML"),
         ("Negativa", "MP informa menos neto que ML"),
         ("Aclaración", "Control operativo preliminar; no es resultado contable ni fiscal definitivo."),
@@ -544,15 +545,17 @@ def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
 
 
 def _escribir_movimientos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
-    columnas = ("ID de grupo", "ID de movimiento MP", "ID de orden", "Tipo", "Clasificación normalizada",
+    columnas = ("ID de grupo", "ID de movimiento MP", "ID de orden", "Tipo", "Clasificación normalizada", "Tratamiento en neto comparable",
                 "Fecha de origen", "Fecha de aprobación", "Fecha de liquidación",
                 "Neto impactado", "Fila de origen")
     ws.append(list(columnas))
-    for grupo in diag.grupos_con_diferencia:
-        for mov in grupo.movimientos_asociados:
-            ws.append([_texto_seguro(grupo.id_grupo), _texto_seguro(mov.id_movimiento_mp),
+    for id_grupo, movimientos in diag.grupos_movimientos_asociados:
+        for mov in movimientos:
+            ws.append([_texto_seguro(id_grupo), _texto_seguro(mov.id_movimiento_mp),
                        _texto_seguro(mov.id_orden), _texto_seguro(mov.tipo_movimiento),
-                       _texto_seguro(mov.clasificacion_normalizada), _texto_seguro(mov.fecha_origen),
+                       _texto_seguro(mov.clasificacion_normalizada),
+                       _texto_seguro("Componente ya incluido; no se suma nuevamente" if mov.clasificacion_normalizada == "PAGO_ENVIO" else "Movimiento de fondos separado" if mov.clasificacion_normalizada == "PAYOUT" else "Modifica el neto comparable"),
+                       _texto_seguro(mov.fecha_origen),
                        _texto_seguro(mov.fecha_aprobacion), _texto_seguro(mov.fecha_liquidacion),
                        _decimal_o_vacio(mov.monto_neto_impactado), mov.fila_origen])
-    _formatear_tabla(ws, moneda_columnas={9}, wrap_columnas=set(), freeze=True)
+    _formatear_tabla(ws, moneda_columnas={10}, wrap_columnas={6}, freeze=True)

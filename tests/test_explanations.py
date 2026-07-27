@@ -66,7 +66,7 @@ def test_neto_aprobado_con_id_muestra_filas_suma_final_y_agrupacion():
     movimientos = [mov(monto="40", id_mp="a"), mov(monto="60", id_mp="b", fila=11), mov(monto="-10", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="env", fila=12)]
     resultado = reconciliar([op(neto="100")], movimientos).resultados[0]
     assert resultado.neto_pagos_aprobados == Decimal("100")
-    assert resultado.neto_financiero_total == Decimal("90")
+    assert resultado.neto_financiero_total == Decimal("100")
     paso = next(p for p in explicar_operacion(resultado, [op(neto="100")], movimientos, Decimal("0.01")) if p.resultado == "Neto aprobado MP")
     assert paso.valor_calculado == "$ 100,00"
     assert "Movimientos PAGO_APROBADO utilizados" in paso.regla_o_formula
@@ -119,7 +119,7 @@ def test_pago_aprobado_sin_id_orden_no_se_presenta_como_usado_y_conserva_estado_
 
 def test_neto_aprobado_sin_pagos_aprobados_conserva_explicacion():
     solo_envio = reconciliar([op(neto="100")], [mov(monto="-10", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="env")]).resultados[0]
-    assert solo_envio.neto_pagos_aprobados is None and solo_envio.neto_financiero_total == Decimal("-10")
+    assert solo_envio.neto_pagos_aprobados is None and solo_envio.neto_financiero_total == Decimal("0")
     paso = next(p for p in explicar_operacion(solo_envio, [op(neto="100")], [mov(monto="-10", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="env")], Decimal("0.01")) if p.resultado == "Neto aprobado MP")
     assert paso.regla_o_formula == "No hay movimientos normalizados como pago aprobado; por eso el Neto aprobado MP queda vacío."
 

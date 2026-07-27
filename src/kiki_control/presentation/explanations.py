@@ -81,7 +81,7 @@ COLUMNAS_TABLA = {
     "Neto informado ML": DefinicionColumna("neto_informado_ml", "Neto informado ML", f"Columna ML {ML_NETO}."),
     "Neto aprobado MP": DefinicionColumna("neto_pagos_aprobados_mp", "Neto aprobado MP", f"Suma de {MP_NETO} solo para movimientos PAGO_APROBADO de la orden."),
     "Diferencia": DefinicionColumna("diferencia", "Diferencia", "Neto aprobado MP menos neto informado ML. Queda vacía cuando la operación no es comparable."),
-    "Neto financiero total": DefinicionColumna("neto_financiero_total", "Neto financiero total", "Suma el impacto neto de todos los movimientos MP asociados: pagos, envíos, devoluciones, reclamos y otros. Por eso puede diferir del neto aprobado MP."),
+    "Neto financiero total": DefinicionColumna("neto_financiero_total", "Neto financiero total", "Suma pagos aprobados y movimientos que modifican el neto comparable, como devoluciones y reclamos. PAGO_ENVIO queda visible como componente ya incluido y PAYOUT se separa como movimiento de fondos."),
     "Utilidad informada ML": DefinicionColumna("utilidad_informada", "Utilidad informada ML", f"Valor informado en {ML_UTILIDAD}; no recalculado por la aplicación."),
     "Pago dividido": DefinicionColumna("pago_dividido", "Pago dividido", "Sí cuando la orden posee más de un movimiento PAGO_APROBADO; la aplicación suma sus netos para el control principal."),
     "Devolución": DefinicionColumna("devolucion", "Devolución", "Derivado de tipos financieros normalizados como devolución de dinero o devolución de envío."),
@@ -111,7 +111,7 @@ def guia_general() -> dict[str, str | tuple[DefinicionEstado, ...]]:
         "Cómo se vinculan Mercado Libre y Mercado Pago": f"La clave primaria es el ID de orden: Mercado Libre usa {ML_ID_ORDER} y Mercado Pago usa {MP_ID_ORDER}. El SKU ({ML_SKU} en ML y {MP_SKU} en MP) es validación secundaria, no clave principal. Los movimientos de Mercado Pago se agrupan por orden; un contador de grupos financieros no equivale a cantidad de filas del XLSX.",
         "Cobertura temporal de los archivos": "La aplicación compara las coberturas informadas y no recorta automáticamente el XLSX. Si los períodos no coinciden, un movimiento sin venta en el CSV de Mercado Libre no demuestra por sí solo un error.",
         "Cómo se calculan los indicadores del resumen": "Los indicadores se calculan sobre resultados normalizados y universos explícitos: comparables, solo ML, solo MP y movimientos de fondos separados.",
-        "Diferencia entre neto aprobado MP y neto financiero total": "El neto aprobado MP suma solo pagos aprobados usados en el control principal. El neto financiero total suma todos los movimientos asociados, incluidos envíos, devoluciones, reclamos y otros movimientos.",
+        "Diferencia entre neto aprobado MP y neto financiero total": "El neto aprobado MP suma pagos aprobados. El neto financiero total agrega solo ajustes financieros independientes; PAGO_ENVIO es un componente ya incluido que no se vuelve a sumar y PAYOUT se informa separado.",
         "Costo de envío vacío en Mercado Libre oficial": "En el archivo oficial de Mercado Libre, un valor vacío en Costos de envío (ARS) se interpreta como $0 porque la clienta confirmó que significa que el seller no tuvo costo de envío.",
         "Significado de los estados": ESTADOS,
         "Diferencia entre excepción y revisión manual": "Excepciones y casos especiales es una clasificación visual amplia. Revisión manual cuenta únicamente resultados con requiere_revision verdadero; una devolución, pago dividido o movimiento de fondos puede mostrarse como caso especial sin requerir revisión manual.",
@@ -158,14 +158,14 @@ def explicar_operacion(resultado: ResultadoConciliacion, operaciones: Sequence[O
     pago_aprobado_sin_id = _sumar_decimales(m.monto_neto_impactado for m in pagos if m.id_orden is None and resultado.id_orden is None)
     componentes_total = [
         f"Pagos aprobados comparables: {formato_pesos_argentino(resultado.neto_pagos_aprobados)}",
-        f"pagos de envío: {formato_pesos_argentino(resultado.impacto_pagos_envio)}",
+        f"pagos de envío (ya incluidos; no se resuman): {formato_pesos_argentino(resultado.impacto_pagos_envio)}",
         f"devoluciones: {formato_pesos_argentino(resultado.impacto_devoluciones)}",
         f"reclamos/disputas: {formato_pesos_argentino(resultado.impacto_reclamos_disputas)}",
         f"otros: {formato_pesos_argentino(resultado.impacto_otros)}",
     ]
     if pago_aprobado_sin_id is not None:
         componentes_total.append(f"Pago aprobado sin ID de orden — no comparable: {formato_pesos_argentino(pago_aprobado_sin_id)}")
-    regla_total = "Suma todos los movimientos MP asociados. " + "; ".join(componentes_total) + "."
+    regla_total = "Suma pagos aprobados y movimientos que modifican el neto comparable; excluye PAGO_ENVIO ya incluido y PAYOUT. " + "; ".join(componentes_total) + "."
     if pago_aprobado_sin_id is not None:
         regla_total += " Este pago aprobado sin ID de orden forma parte del Neto financiero total, pero no forma parte del neto aprobado comparable, no genera diferencia contra Mercado Libre y no modifica el motor ni el modelo de dominio."
     pasos.append(PasoCalculoOperacion("Neto financiero total", formato_pesos_argentino(resultado.neto_financiero_total), regla_total, "Mercado Pago", (MP_TIPO, MP_NETO), _solo_filas(resultado.numeros_fila_financiera)))

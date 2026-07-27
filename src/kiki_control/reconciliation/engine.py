@@ -152,7 +152,10 @@ def _crear_resultado(id_orden: str | None, operaciones: tuple[OperacionComercial
         impacto_devoluciones=_sumar(m for m in movimientos if m.tipo_operacion in DEVOLUCIONES),
         impacto_reclamos_disputas=_sumar(m for m in movimientos if m.tipo_operacion in RECLAMOS_DISPUTAS),
         impacto_otros=_sumar(m for m in movimientos if m.tipo_operacion not in CONTROL_PRINCIPAL),
-        neto_financiero_total=_sumar(movimientos),
+        # PAGO_ENVIO es un componente del pago aprobado, no un segundo ingreso.
+        # PAYOUT se informa en el universo de fondos. Los restantes movimientos
+        # (incluidos reclamos y devoluciones) sí conservan su signo algebraico.
+        neto_financiero_total=_sumar(m for m in movimientos if m.modifica_neto_comparable),
         utilidad_neta_informada=utilidad,
         tolerancia_aplicada=tolerancia,
         tiene_devolucion=any(m.tipo_operacion in DEVOLUCIONES for m in movimientos),

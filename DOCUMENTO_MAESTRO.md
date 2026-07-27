@@ -1238,7 +1238,7 @@ Los resultados `SOLO_MOVIMIENTO_FINANCIERO` se diagnostican por fecha MP normali
 
 En diagnósticos consolidados, `Decimal("0")` es un importe válido y nunca debe tratarse como ausencia. La selección entre importes alternativos debe realizarse con comparaciones explícitas contra `None`; por ejemplo, para temporalidad MP se usa `neto_financiero_total_mp` si existe aunque sea cero, luego `neto_aprobado_mp` y solo finalmente cero explícito si ambos están ausentes.
 
-`neto_aprobado_mp` y `neto_financiero_total_mp` no son equivalentes. El primero representa pagos aprobados comparables; el segundo conserva el impacto financiero total de movimientos como devoluciones, reclamos, disputas, PAYOUT, movimientos de fondos u otros casos que pueden no tener pago aprobado comparable. Por eso la ausencia de `neto_aprobado_mp` no implica automáticamente datos críticos incompletos.
+`neto_aprobado_mp` y `neto_financiero_total_mp` no son equivalentes. El primero representa pagos aprobados comparables. Para el Bloque B, el segundo se calcula como pagos aprobados más devoluciones, reclamos, disputas y otros impactos independientes. `PAGO_ENVIO` se conserva como desglose trazable ya incluido en el pago aprobado y no se suma nuevamente; `PAYOUT` permanece separado como movimiento de fondos. Por eso la ausencia de `neto_aprobado_mp` no implica automáticamente datos críticos incompletos.
 
 Los datos críticos faltantes se limitan a: venta oficial con `Total (ARS)` ausente; Eccomapp con costo de producto ausente; y venta oficial con Mercado Pago que debería compararse contra un pago pero no tiene neto aprobado comparable. Devoluciones, reclamos, disputas y movimientos de fondos con neto financiero válido se revisan como casos financieros, no como faltantes críticos.
 
