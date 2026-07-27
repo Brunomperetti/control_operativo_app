@@ -263,3 +263,18 @@ def test_invalidacion_elimina_widgets_de_diagnosticos_y_conserva_configuracion()
     assert estado["tolerancia_texto"] == "0,01"
     assert "reporte_consolidado" not in estado
     assert "firma_procesamiento" not in estado
+
+
+def test_claves_bloque_b_nuevas_se_limpian_e_invalidan():
+    claves = {
+        "enriq_fechas_liq_mp_por_fila", "enriq_tipos_mp_por_fila",
+        "enriq_ids_op_mp_por_fila", "enriq_fechas_venta_ml_por_fila",
+        "enriq_estados_mp_por_fila", "enriq_fechas_aprobacion_mp_por_fila",
+        "enriq_netos_mp_por_fila", "detalle_diferencia_bloque_b",
+        "bloque_b_buscar_id_mp", "bloque_b_filtro_tipo", "bloque_b_filtro_cat",
+    }
+    assert claves.issubset(SESSION_KEYS_TO_CLEAR)
+    assert claves.issubset(RESULT_KEYS_TO_CLEAR)
+    estado = dict.fromkeys(claves, "anterior")
+    invalidar_resultados_conocidos(estado)
+    assert claves.isdisjoint(estado)

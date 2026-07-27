@@ -163,7 +163,7 @@ def test_grupo_con_diferencia_positiva():
     assert diag.resumen.con_diferencia == 1
     assert len(diag.grupos_con_diferencia) == 1
     assert diag.grupos_con_diferencia[0].diferencia_ml_mp == D("10")
-    assert diag.resumen.diferencia_total == D("10")
+    assert diag.resumen.diferencia_operaciones_fuera_tolerancia == D("10")
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ def test_grupo_con_diferencia_negativa():
     diag = diagnosticar_bloque_b(reporte)
     assert diag.resumen.con_diferencia == 1
     assert diag.grupos_con_diferencia[0].diferencia_ml_mp == D("-15")
-    assert diag.resumen.diferencia_total == D("-15")
+    assert diag.resumen.diferencia_operaciones_fuera_tolerancia == D("-15")
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ def test_suma_diferencias_individuales_igual_total():
     diag = diagnosticar_bloque_b(reporte)
     assert diag.resumen.con_diferencia == 2
     suma_ind = diag.grupos_con_diferencia[0].diferencia_ml_mp + diag.grupos_con_diferencia[1].diferencia_ml_mp
-    assert suma_ind == diag.resumen.diferencia_total
+    assert suma_ind == diag.resumen.diferencia_operaciones_fuera_tolerancia
     assert diag.coherencia_suma_diferencias
 
 
@@ -312,9 +312,11 @@ def test_payout_separado_de_ventas_faltantes():
     )
     reporte = _rep([r])
     diag = diagnosticar_bloque_b(reporte)
-    mov = diag.movimientos_mp_sin_venta[0]
+    assert diag.cantidad_mp_sin_venta == 0
+    assert diag.neto_aprobado_mp_sin_venta == D("0")
+    assert diag.cantidad_movimientos_fondos == 1
+    mov = diag.movimientos_fondos[0]
     assert "Payout" in mov.motivo_sin_venta or "movimiento de fondos" in mov.motivo_sin_venta.lower()
-    assert "faltante" not in mov.accion_recomendada.lower() or "no presentar" in mov.accion_recomendada.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +393,7 @@ def test_suma_individual_igual_diferencia_total():
     r2 = _r("x2", ml=D("200"), mp=D("192"), dif=D("-8"))
     reporte = _rep([r1, r2])
     diag = diagnosticar_bloque_b(reporte)
-    assert abs(diag.suma_diferencias_individuales - diag.resumen.diferencia_total) <= D("0.01")
+    assert abs(diag.suma_diferencias_individuales - diag.resumen.diferencia_operaciones_fuera_tolerancia) <= D("0.01")
     assert diag.coherencia_suma_diferencias
 
 
@@ -503,3 +505,34 @@ def test_no_float_en_bloque_b_diagnostics():
     """Verificar que bloque_b_diagnostics.py no usa float."""
     source = open("src/kiki_control/presentation/bloque_b_diagnostics.py", encoding="utf-8").read()
     assert "float(" not in source
+
+
+def test_tres_diferencias_corresponden_a_sus_universos():
+    dentro = _r("dentro", ml=D("100"), mp=D("100.005"), dif=D("0.005"))
+    fuera = _r("fuera", ml=D("100"), mp=D("110"), dif=D("10"))
+    diag = diagnosticar_bloque_b(_rep([dentro, fuera]))
+    assert diag.resumen.diferencia_universo_comparable == D("10.005")
+    assert diag.resumen.diferencia_operaciones_fuera_tolerancia == D("10")
+    assert diag.resumen.diferencia_subuniverso_conciliado == D("0.005")
+
+
+def test_detalle_movimientos_y_hojas_separadas():
+    r = _r("dif-detalle", ml=D("100"), mp=D("110"), dif=D("10"), filas_mp=(7, 8))
+    diag = diagnosticar_bloque_b(
+        _rep([r]),
+        ids_operacion_mp_por_fila={7: "mov-7", 8: "mov-8"},
+        ids_orden_mp_por_fila={7: "orden", 8: "orden"},
+        tipos_movimiento_mp_por_fila={7: "PAGO", 8: "DEVOLUCION"},
+        estados_mp_por_fila={7: "APROBADO", 8: "APROBADO"},
+        fechas_origen_mp_por_fila={7: date(2026, 7, 1)},
+        fechas_aprobacion_mp_por_fila={7: date(2026, 7, 2), 8: date(2026, 7, 3)},
+        fechas_liquidacion_mp_por_fila={7: date(2026, 7, 4), 8: None},
+        montos_neto_mp_por_fila={7: D("120"), 8: D("-10")},
+    )
+    movimientos = diag.grupos_con_diferencia[0].movimientos_asociados
+    assert len(movimientos) == 2
+    assert movimientos[0].fecha_origen == "01/07/2026"
+    assert movimientos[1].fecha_origen == "Sin fecha"
+    wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(_rep([r]), diag_bloque_b=diag)))
+    assert {"Bloque B — Movimientos", "Bloque B — Fondos y payouts"}.issubset(wb.sheetnames)
+    assert wb["Bloque B — Movimientos"].max_row == 3

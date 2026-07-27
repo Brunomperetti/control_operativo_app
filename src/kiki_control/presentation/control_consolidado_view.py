@@ -10,7 +10,7 @@ from kiki_control.domain.control_consolidado import EstadoControlConsolidado, Re
 from kiki_control.presentation.control_consolidado_diagnostics import DiagnosticoControlConsolidado, diagnosticar_control_consolidado, motivos_datos_criticos_faltantes, tiene_datos_criticos_faltantes
 from kiki_control.presentation.formatters import formato_pesos_argentino
 from kiki_control.presentation.bloque_b_diagnostics import (
-    DetalleMovimientoMP,
+    DetalleMovimientoMp,
     DiagnosticoBloqueB,
     EstadoExplicacionDiferencia,
     ESTADOS_EXPLICACION_VISIBLES,
@@ -665,7 +665,7 @@ def filas_fondos_mp(movs: Iterable[MovimientoMpSinVentaML]) -> list[dict[str, An
     return filas_mp_sin_venta(movs)
 
 
-(r: ResultadoControlConsolidado) -> list[dict[str, str]]:
+def detalle_diferencia_ml(r: ResultadoControlConsolidado) -> list[dict[str, str]]:
     """Detalle de los datos ML para una operación con diferencia."""
     return [
         {"Concepto": "ID de venta o grupo", "Valor": ", ".join(r.ids_orden) if r.ids_orden else r.clave_resultado},

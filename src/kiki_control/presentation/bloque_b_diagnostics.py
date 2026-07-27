@@ -39,7 +39,7 @@ ESTADOS_EXPLICACION_VISIBLES: dict[EstadoExplicacionDiferencia, str] = {
 
 
 @dataclass(frozen=True)
-class DetalleMovimientoMP:
+class DetalleMovimientoMp:
     """Detalle inmutable de un movimiento MP individual asociado a un grupo con diferencia."""
 
     id_movimiento_mp: str
@@ -73,7 +73,7 @@ class GrupoConDiferencia:
     motivo_visible: str
     motivos_secundarios: tuple[str, ...]
     accion_recomendada: str
-    movimientos_asociados: tuple[DetalleMovimientoMP, ...]
+    movimientos_asociados: tuple[DetalleMovimientoMp, ...]
 
 
 @dataclass(frozen=True)
@@ -366,16 +366,17 @@ def _construir_detalle_movimientos(
     fechas_aprobacion: Mapping[int, date | datetime | None],
     fechas_liq: Mapping[int, date | datetime | None],
     montos_neto: Mapping[int, Decimal | None],
-) -> tuple[DetalleMovimientoMP, ...]:
+    estados: Mapping[int, str],
+) -> tuple[DetalleMovimientoMp, ...]:
     """Construye la tupla de detalle de movimientos MP para las filas dadas."""
-    detalles: list[DetalleMovimientoMP] = []
+    detalles: list[DetalleMovimientoMp] = []
     for fila in filas_mp:
         tipo_mov = tipos.get(fila, "Sin tipo")
-        detalles.append(DetalleMovimientoMP(
+        detalles.append(DetalleMovimientoMp(
             id_movimiento_mp=ids_op.get(fila, "—"),
             id_orden=ids_orden.get(fila) or "—",
             tipo_movimiento=tipo_mov,
-            estado_normalizado=tipo_mov,
+            estado_normalizado=estados.get(fila, "Sin estado"),
             fecha_origen=_fecha_str(_as_date(fechas_origen.get(fila))),
             fecha_aprobacion=_fecha_str(_as_date(fechas_aprobacion.get(fila))),
             fecha_liquidacion=_fecha_str(_as_date(fechas_liq.get(fila))),
@@ -401,6 +402,7 @@ def diagnosticar_bloque_b(
     ids_orden_mp_por_fila: Mapping[int, str | None] | None = None,
     fechas_aprobacion_mp_por_fila: Mapping[int, date | datetime | None] | None = None,
     montos_neto_mp_por_fila: Mapping[int, Decimal | None] | None = None,
+    estados_mp_por_fila: Mapping[int, str] | None = None,
 ) -> DiagnosticoBloqueB:
     """Genera el diagnóstico completo de Bloque B.
 
@@ -429,6 +431,7 @@ def diagnosticar_bloque_b(
     ids_orden_mp = ids_orden_mp_por_fila or {}
     fechas_aprobacion = fechas_aprobacion_mp_por_fila or {}
     montos_neto = montos_neto_mp_por_fila or {}
+    estados = estados_mp_por_fila or {}
 
     # --- Universo comparable (ML + MP) ---
     comparables = tuple(
@@ -504,6 +507,7 @@ def diagnosticar_bloque_b(
         movimientos_asociados = _construir_detalle_movimientos(
             r.filas_origen_mp, ids_op, ids_orden_mp, tipos,
             fechas_origen, fechas_aprobacion, fechas_liq, montos_neto,
+            estados,
         )
 
         grupos_con_dif.append(GrupoConDiferencia(

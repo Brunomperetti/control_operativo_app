@@ -321,7 +321,12 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
             for m in mercado_pago.movimientos
             if getattr(m, "numero_fila_origen", None) is not None
         }
-        st.session_state["enriq_montos_neto_mp_por_fila"] = {
+        st.session_state["enriq_estados_mp_por_fila"] = {
+            m.numero_fila_origen: "APROBADO"
+            for m in mercado_pago.movimientos
+            if getattr(m, "numero_fila_origen", None) is not None
+        }
+        st.session_state["enriq_netos_mp_por_fila"] = {
             m.numero_fila_origen: m.monto_neto_impactado
             for m in mercado_pago.movimientos
             if getattr(m, "numero_fila_origen", None) is not None
@@ -518,7 +523,11 @@ def _enriq_fechas_aprobacion_mp() -> dict[int, Any]:
 
 
 def _enriq_montos_neto_mp() -> dict[int, Any]:
-    return st.session_state.get("enriq_montos_neto_mp_por_fila", {})
+    return st.session_state.get("enriq_netos_mp_por_fila", {})
+
+
+def _enriq_estados_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_estados_mp_por_fila", {})
 
 
 def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
@@ -582,16 +591,14 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
                 key="detalle_diferencia_bloque_b",
             )
         grupo_elegido = next(g for g in grupos if g.id_grupo == elegido)
-        mapa_resultados = {
-            _id_resultado_clave(r): r
-            for r in reporte.resultados
-        }
         resultado_dif = _buscar_resultado_para_grupo(grupo_elegido, reporte)
         if resultado_dif is not None:
             with st.expander("Datos de Mercado Libre para esta operación", expanded=True):
                 st.table(detalle_diferencia_ml(resultado_dif))
             with st.expander("Datos de Mercado Pago para esta operación", expanded=True):
                 st.table(detalle_diferencia_mp(resultado_dif))
+                st.caption("Movimientos MP individuales asociados (sin datos personales)")
+                st.dataframe(filas_movimientos_diferencia(grupo_elegido), use_container_width=True, hide_index=True)
             with st.expander("Tabla de conciliación de la diferencia", expanded=True):
                 st.table(detalle_conciliacion_diferencia(resultado_dif))
                 st.caption(
@@ -643,6 +650,16 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
     else:
         st.info("No hay movimientos MP sin venta ML encontrada.")
 
+    st.subheader("Movimientos de fondos y payouts")
+    f1, f2 = st.columns(2)
+    f1.metric("Cantidad", diag_bloque_b.cantidad_movimientos_fondos)
+    f2.metric("Importe financiero total", formato_importe(diag_bloque_b.neto_financiero_total_mp_fondos))
+    if diag_bloque_b.movimientos_fondos:
+        st.dataframe(filas_fondos_mp(diag_bloque_b.movimientos_fondos), use_container_width=True, hide_index=True)
+        st.caption("Estos movimientos se presentan separados y no se contabilizan como ventas ML faltantes.")
+    else:
+        st.info("No hay movimientos de fondos ni payouts.")
+
 
 def _id_resultado_clave(r: Any) -> str:
     if getattr(r, "id_grupo_canonico", None):
@@ -679,6 +696,7 @@ def _mostrar_resultados() -> None:
         ids_orden_mp_por_fila=_enriq_ids_orden_mp(),
         fechas_aprobacion_mp_por_fila=_enriq_fechas_aprobacion_mp(),
         montos_neto_mp_por_fila=_enriq_montos_neto_mp(),
+        estados_mp_por_fila=_enriq_estados_mp(),
     )
     tab_resumen, tab_operacion, tab_auditoria = st.tabs(["Resumen ejecutivo", "Control por operación", "Auditoría y descargas"])
 
@@ -772,14 +790,14 @@ def _mostrar_resultados() -> None:
                 "Grupos": diag_bloque_b.resumen.comparables_totales,
                 "Coincidentes": diag_bloque_b.resumen.coincidencias,
                 "Con diferencia": diag_bloque_b.resumen.con_diferencia,
-                "Diferencia total": formato_importe(diag_bloque_b.resumen.diferencia_total),
+                "Diferencia total": formato_importe(diag_bloque_b.resumen.diferencia_universo_comparable),
             },
             {
                 "Universo": "Subuniverso conciliado (dentro de tolerancia)",
                 "Grupos": diag_bloque_b.resumen.coincidencias,
                 "Coincidentes": diag_bloque_b.resumen.coincidencias,
                 "Con diferencia": 0,
-                "Diferencia total": formato_importe(Decimal("0")),
+                "Diferencia total": formato_importe(diag_bloque_b.resumen.diferencia_subuniverso_conciliado),
             },
         ])
         st.table([{"Universo triple": diagnostico.puente.universo_neto_esperado, "Neto ML": formato_importe(diagnostico.puente.neto_oficial_ml), "Neto Eccomapp": formato_importe(diagnostico.puente.neto_informado_eccomapp), "Neto aprobado MP": formato_importe(diagnostico.puente.neto_aprobado_mp), "MP − ML": formato_importe(diagnostico.puente.mp_menos_ml), "Universo": f"Triple ({diagnostico.puente.universo_neto_esperado} grupos ML+Eccomapp+MP)"}])
