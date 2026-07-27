@@ -32,8 +32,8 @@ from kiki_control.presentation.bloque_b_diagnostics import (
     categoria_temporal_mp,
     clasificar_diferencia,
     diagnosticar_bloque_b,
-    estado_normalizado_movimiento_mp,
-    estados_movimientos_mp_por_fila,
+    clasificacion_normalizada_movimiento_mp,
+    clasificaciones_movimientos_mp_por_fila,
 )
 from kiki_control.presentation.control_consolidado_view import (
     TITULO_BLOQUE_B,
@@ -528,7 +528,7 @@ def test_detalle_movimientos_y_hojas_separadas():
         ids_operacion_mp_por_fila={7: "mov-7", 8: "mov-8"},
         ids_orden_mp_por_fila={7: "orden", 8: "orden"},
         tipos_movimiento_mp_por_fila={7: "PAGO", 8: "DEVOLUCION"},
-        estados_mp_por_fila={7: "APROBADO", 8: "APROBADO"},
+        clasificaciones_mp_por_fila={7: "APROBADO", 8: "APROBADO"},
         fechas_origen_mp_por_fila={7: date(2026, 7, 1)},
         fechas_aprobacion_mp_por_fila={7: date(2026, 7, 2), 8: date(2026, 7, 3)},
         fechas_liquidacion_mp_por_fila={7: date(2026, 7, 4), 8: None},
@@ -551,40 +551,42 @@ def test_detalle_movimientos_y_hojas_separadas():
         (TipoOperacionFinanciera.PAYOUT, "PAYOUT"),
     ],
 )
-def test_estado_real_del_movimiento_mp(tipo, esperado):
+def test_clasificacion_real_del_movimiento_mp(tipo, esperado):
     movimiento = SimpleNamespace(tipo_operacion=tipo)
-    assert estado_normalizado_movimiento_mp(movimiento) == esperado
+    assert clasificacion_normalizada_movimiento_mp(movimiento) == esperado
 
 
-def test_estado_movimiento_mp_solo_usa_fallback_si_esta_ausente():
-    assert estado_normalizado_movimiento_mp(SimpleNamespace(tipo_operacion=None)) == "Sin estado"
+def test_clasificacion_movimiento_mp_solo_usa_fallback_si_esta_ausente():
+    assert clasificacion_normalizada_movimiento_mp(SimpleNamespace(tipo_operacion=None)) == "Sin clasificación"
 
 
-def test_enriquecimiento_indexa_estados_reales_por_fila():
+def test_enriquecimiento_indexa_clasificaciones_reales_por_fila():
     movimientos = (
         SimpleNamespace(numero_fila_origen=2, tipo_operacion=TipoOperacionFinanciera.PAGO_APROBADO),
         SimpleNamespace(numero_fila_origen=3, tipo_operacion=TipoOperacionFinanciera.DEVOLUCION_DINERO),
         SimpleNamespace(numero_fila_origen=4, tipo_operacion=TipoOperacionFinanciera.PAYOUT),
         SimpleNamespace(numero_fila_origen=5, tipo_operacion=None),
     )
-    assert estados_movimientos_mp_por_fila(movimientos) == {
+    assert clasificaciones_movimientos_mp_por_fila(movimientos) == {
         2: "PAGO_APROBADO",
         3: "DEVOLUCION_DINERO",
         4: "PAYOUT",
-        5: "Sin estado",
+        5: "Sin clasificación",
     }
 
 
-def test_ui_y_excel_conservan_estados_distintos():
+def test_ui_y_excel_conservan_clasificaciones_distintas():
     r = _r("dif-estados", ml=D("100"), mp=D("110"), dif=D("10"), filas_mp=(7, 8, 9))
     diag = diagnosticar_bloque_b(
         _rep([r]),
-        estados_mp_por_fila={7: "PAGO_APROBADO", 8: "RECLAMO", 9: "PAYOUT"},
+        clasificaciones_mp_por_fila={7: "PAGO_APROBADO", 8: "RECLAMO", 9: "PAYOUT"},
     )
     grupo = diag.grupos_con_diferencia[0]
-    assert [fila["Estado normalizado"] for fila in filas_movimientos_diferencia(grupo)] == [
+    assert [fila["Clasificación normalizada"] for fila in filas_movimientos_diferencia(grupo)] == [
         "PAGO_APROBADO", "RECLAMO", "PAYOUT"
     ]
     wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(_rep([r]), diag_bloque_b=diag)))
-    estados_excel = [celda.value for celda in wb["Bloque B — Movimientos"]["E"][1:]]
-    assert estados_excel == ["PAGO_APROBADO", "RECLAMO", "PAYOUT"]
+    hoja_movimientos = wb["Bloque B — Movimientos"]
+    assert hoja_movimientos["E1"].value == "Clasificación normalizada"
+    clasificaciones_excel = [celda.value for celda in hoja_movimientos["E"][1:]]
+    assert clasificaciones_excel == ["PAGO_APROBADO", "RECLAMO", "PAYOUT"]

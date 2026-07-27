@@ -538,7 +538,7 @@ def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
 
 
 def _escribir_movimientos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
-    columnas = ("ID de grupo", "ID de movimiento MP", "ID de orden", "Tipo", "Estado",
+    columnas = ("ID de grupo", "ID de movimiento MP", "ID de orden", "Tipo", "Clasificación normalizada",
                 "Fecha de origen", "Fecha de aprobación", "Fecha de liquidación",
                 "Neto impactado", "Fila de origen")
     ws.append(list(columnas))
@@ -546,7 +546,7 @@ def _escribir_movimientos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> N
         for mov in grupo.movimientos_asociados:
             ws.append([_texto_seguro(grupo.id_grupo), _texto_seguro(mov.id_movimiento_mp),
                        _texto_seguro(mov.id_orden), _texto_seguro(mov.tipo_movimiento),
-                       _texto_seguro(mov.estado_normalizado), _texto_seguro(mov.fecha_origen),
+                       _texto_seguro(mov.clasificacion_normalizada), _texto_seguro(mov.fecha_origen),
                        _texto_seguro(mov.fecha_aprobacion), _texto_seguro(mov.fecha_liquidacion),
                        _decimal_o_vacio(mov.monto_neto_impactado), mov.fila_origen])
     _formatear_tabla(ws, moneda_columnas={9}, wrap_columnas=set(), freeze=True)

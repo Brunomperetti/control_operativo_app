@@ -21,23 +21,23 @@ from kiki_control.domain.control_consolidado import (
 _ZERO = Decimal("0")
 
 
-def estado_normalizado_movimiento_mp(movimiento: Any) -> str:
-    """Devuelve el tipo normalizado real del movimiento MP como estado visible.
+def clasificacion_normalizada_movimiento_mp(movimiento: Any) -> str:
+    """Devuelve el tipo normalizado real del movimiento MP como clasificación visible.
 
     ``MovimientoFinanciero`` no tiene un campo de estado independiente: su
-    clasificación normalizada está en ``tipo_operacion``. Se evita inferir un
-    estado único a partir de la fecha de aprobación.
+    clasificación normalizada está en ``tipo_operacion``. Se evita inferir una
+    clasificación a partir de la fecha de aprobación.
     """
     tipo = getattr(movimiento, "tipo_operacion", None)
     valor = getattr(tipo, "value", tipo)
     texto = str(valor).strip() if valor is not None else ""
-    return texto or "Sin estado"
+    return texto or "Sin clasificación"
 
 
-def estados_movimientos_mp_por_fila(movimientos: Iterable[Any]) -> dict[int, str]:
-    """Indexa el estado normalizado real de cada movimiento por su fila fuente."""
+def clasificaciones_movimientos_mp_por_fila(movimientos: Iterable[Any]) -> dict[int, str]:
+    """Indexa la clasificación normalizada real de cada movimiento por su fila fuente."""
     return {
-        numero_fila: estado_normalizado_movimiento_mp(movimiento)
+        numero_fila: clasificacion_normalizada_movimiento_mp(movimiento)
         for movimiento in movimientos
         if (numero_fila := getattr(movimiento, "numero_fila_origen", None)) is not None
     }
@@ -67,7 +67,7 @@ class DetalleMovimientoMp:
     id_movimiento_mp: str
     id_orden: str
     tipo_movimiento: str
-    estado_normalizado: str
+    clasificacion_normalizada: str
     fecha_origen: str
     fecha_aprobacion: str
     fecha_liquidacion: str
@@ -388,7 +388,7 @@ def _construir_detalle_movimientos(
     fechas_aprobacion: Mapping[int, date | datetime | None],
     fechas_liq: Mapping[int, date | datetime | None],
     montos_neto: Mapping[int, Decimal | None],
-    estados: Mapping[int, str],
+    clasificaciones: Mapping[int, str],
 ) -> tuple[DetalleMovimientoMp, ...]:
     """Construye la tupla de detalle de movimientos MP para las filas dadas."""
     detalles: list[DetalleMovimientoMp] = []
@@ -398,7 +398,7 @@ def _construir_detalle_movimientos(
             id_movimiento_mp=ids_op.get(fila, "—"),
             id_orden=ids_orden.get(fila) or "—",
             tipo_movimiento=tipo_mov,
-            estado_normalizado=estados.get(fila, "Sin estado"),
+            clasificacion_normalizada=clasificaciones.get(fila, "Sin clasificación"),
             fecha_origen=_fecha_str(_as_date(fechas_origen.get(fila))),
             fecha_aprobacion=_fecha_str(_as_date(fechas_aprobacion.get(fila))),
             fecha_liquidacion=_fecha_str(_as_date(fechas_liq.get(fila))),
@@ -424,7 +424,7 @@ def diagnosticar_bloque_b(
     ids_orden_mp_por_fila: Mapping[int, str | None] | None = None,
     fechas_aprobacion_mp_por_fila: Mapping[int, date | datetime | None] | None = None,
     montos_neto_mp_por_fila: Mapping[int, Decimal | None] | None = None,
-    estados_mp_por_fila: Mapping[int, str] | None = None,
+    clasificaciones_mp_por_fila: Mapping[int, str] | None = None,
 ) -> DiagnosticoBloqueB:
     """Genera el diagnóstico completo de Bloque B.
 
@@ -453,7 +453,7 @@ def diagnosticar_bloque_b(
     ids_orden_mp = ids_orden_mp_por_fila or {}
     fechas_aprobacion = fechas_aprobacion_mp_por_fila or {}
     montos_neto = montos_neto_mp_por_fila or {}
-    estados = estados_mp_por_fila or {}
+    clasificaciones = clasificaciones_mp_por_fila or {}
 
     # --- Universo comparable (ML + MP) ---
     comparables = tuple(
@@ -529,7 +529,7 @@ def diagnosticar_bloque_b(
         movimientos_asociados = _construir_detalle_movimientos(
             r.filas_origen_mp, ids_op, ids_orden_mp, tipos,
             fechas_origen, fechas_aprobacion, fechas_liq, montos_neto,
-            estados,
+            clasificaciones,
         )
 
         grupos_con_dif.append(GrupoConDiferencia(

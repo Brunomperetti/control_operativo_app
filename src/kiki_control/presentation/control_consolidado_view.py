@@ -649,7 +649,7 @@ def filas_movimientos_diferencia(grupo: GrupoConDiferencia) -> list[dict[str, An
             "ID movimiento MP": m.id_movimiento_mp,
             "ID orden": m.id_orden,
             "Tipo de movimiento": m.tipo_movimiento,
-            "Estado normalizado": m.estado_normalizado,
+            "Clasificación normalizada": m.clasificacion_normalizada,
             "Fecha de origen": m.fecha_origen,
             "Fecha de aprobación": m.fecha_aprobacion,
             "Fecha de liquidación": m.fecha_liquidacion,

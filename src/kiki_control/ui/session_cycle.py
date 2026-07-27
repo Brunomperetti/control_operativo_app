@@ -47,7 +47,7 @@ SESSION_KEYS_TO_CLEAR = (
     "enriq_fechas_venta_ml_por_fila",
     "enriq_ids_orden_mp_por_fila",
     "enriq_fechas_aprobacion_mp_por_fila",
-    "enriq_estados_mp_por_fila",
+    "enriq_clasificaciones_mp_por_fila",
     "enriq_netos_mp_por_fila",
     # Filtros y selectores de Bloque B
     "detalle_diferencia_bloque_b",
@@ -89,7 +89,7 @@ RESULT_KEYS_TO_CLEAR = (
     "enriq_fechas_venta_ml_por_fila",
     "enriq_ids_orden_mp_por_fila",
     "enriq_fechas_aprobacion_mp_por_fila",
-    "enriq_estados_mp_por_fila",
+    "enriq_clasificaciones_mp_por_fila",
     "enriq_netos_mp_por_fila",
     # Filtros y selectores de Bloque B
     "detalle_diferencia_bloque_b",

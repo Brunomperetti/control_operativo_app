@@ -86,7 +86,7 @@ from kiki_control.presentation.control_consolidado_view import (
     tabla_consolidada,
     trazabilidad_tecnica,
 )
-from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b, estados_movimientos_mp_por_fila
+from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b, clasificaciones_movimientos_mp_por_fila
 from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
 from kiki_control.reconciliation import reconciliar
 from kiki_control.ui.session_cycle import (
@@ -321,7 +321,7 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
             for m in mercado_pago.movimientos
             if getattr(m, "numero_fila_origen", None) is not None
         }
-        st.session_state["enriq_estados_mp_por_fila"] = estados_movimientos_mp_por_fila(
+        st.session_state["enriq_clasificaciones_mp_por_fila"] = clasificaciones_movimientos_mp_por_fila(
             mercado_pago.movimientos
         )
         st.session_state["enriq_netos_mp_por_fila"] = {
@@ -524,8 +524,8 @@ def _enriq_montos_neto_mp() -> dict[int, Any]:
     return st.session_state.get("enriq_netos_mp_por_fila", {})
 
 
-def _enriq_estados_mp() -> dict[int, Any]:
-    return st.session_state.get("enriq_estados_mp_por_fila", {})
+def _enriq_clasificaciones_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_clasificaciones_mp_por_fila", {})
 
 
 def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
@@ -694,7 +694,7 @@ def _mostrar_resultados() -> None:
         ids_orden_mp_por_fila=_enriq_ids_orden_mp(),
         fechas_aprobacion_mp_por_fila=_enriq_fechas_aprobacion_mp(),
         montos_neto_mp_por_fila=_enriq_montos_neto_mp(),
-        estados_mp_por_fila=_enriq_estados_mp(),
+        clasificaciones_mp_por_fila=_enriq_clasificaciones_mp(),
     )
     tab_resumen, tab_operacion, tab_auditoria = st.tabs(["Resumen ejecutivo", "Control por operación", "Auditoría y descargas"])
 
