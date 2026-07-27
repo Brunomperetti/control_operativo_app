@@ -2,9 +2,13 @@ from decimal import Decimal
 
 from kiki_control.presentation.control_consolidado_view import (
     FilaControlConsolidado,
+    TITULO_BLOQUE_A,
+    auditoria_bloque_a,
     filtrar_filas_consolidadas,
+    filas_bloque_a,
     formato_importe,
     kpis_consolidados,
+    mensaje_conciliacion_bloque_a,
 )
 from kiki_control.ui.session_cycle import (
     construir_firma_procesamiento_tres_fuentes,
@@ -40,6 +44,7 @@ def test_streamlit_no_duplica_formulas_financieras_y_usa_apis_existentes():
     assert "Diferencia =" not in source
     assert "Auditoría de conciliación Eccomapp–Mercado Pago" in source
     assert "Histórico Eccomapp–MP: descargar reporte completo" in source
+    assert TITULO_BLOQUE_A == "Bloque A — Formación del neto informado por Mercado Libre"
 
 
 def test_presentacion_sin_float_y_negativos_con_signo():
@@ -74,6 +79,39 @@ def test_kpis_comparables_utilidad_parcial_y_mp_sin_ml():
     assert b["Neto MP sin venta ML"] == "$ 30,00"
     assert b["Utilidad preliminar calculable"] == "$ 60,00"
     assert b["Cobertura de utilidad"] == "1 de 3"
+
+
+def test_bloque_a_muestra_formacion_completa_metodo_cupon_y_cierre():
+    from kiki_control.domain.control_consolidado import EstadoControlConsolidado, IndicadoresFinancieros, ReporteControlConsolidado, ResultadoControlConsolidado
+
+    ind = IndicadoresFinancieros(False, False, False, False, False, False, False, False)
+    resultado = ResultadoControlConsolidado(
+        "a", "a", ("a",), True, True, True, None,
+        Decimal("150"), Decimal("-20"), Decimal("5"), Decimal("-10"), Decimal("0"), Decimal("-3"), Decimal("122"),
+        Decimal("150"), Decimal("40"), None, Decimal("122"), None, Decimal("122"), Decimal("122"),
+        None, None, None, None, Decimal("0"), Decimal("0"), Decimal("0"), Decimal("82"), Decimal("0.01"),
+        EstadoControlConsolidado.COMPLETA, False, (), (), ind, "v", (), (), (), (1,), (), (), (), (),
+    )
+    reporte = ReporteControlConsolidado((resultado,), "v", Decimal("0.01"), 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, Decimal("122"), Decimal("122"), Decimal("40"))
+
+    filas = filas_bloque_a(reporte)
+    auditoria = auditoria_bloque_a(reporte)
+
+    assert [fila["Concepto"] for fila in filas] == [
+        "Ingresos por productos",
+        "Ingresos por envíos",
+        "Cargos por venta e impuestos",
+        "Costos de envío",
+        "Anulaciones y reembolsos",
+        "Cupones de descuento",
+        "Otros conceptos pendientes de clasificación",
+        "Neto informado por Mercado Libre",
+    ]
+    assert filas[5]["Método"] == "SIN_EVIDENCIA"
+    assert filas[6]["Importe"] == "$ 0,00"
+    assert mensaje_conciliacion_bloque_a(reporte) == "La conciliación cierra"
+    assert auditoria[5]["Columna de origen"] == "Sin columna identificada"
+    assert auditoria[5]["Diferencia final"] == "$ 0,00"
 
 
 def test_integral_tres_fuentes_sintetico_en_memoria_presentacion_y_cobertura():
@@ -301,14 +339,17 @@ def test_excel_residual_muestra_universo_sumas_y_no_formatea_cantidades_como_mon
     wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(reporte)))
     ws = wb['Puente de fuentes']
     filas = {row[0].value: row[1] for row in ws.iter_rows(min_row=2, values_only=False)}
+    assert filas['Método cupón Bloque A'].value in {'INFORMADO_POR_FUENTE', 'CALCULADO_COMO_RESIDUAL', 'SIN_EVIDENCIA'}
+    assert filas['Diferencia final Bloque A'].value == D('0')
     assert filas['Universo ML oficial'].value == 1
     assert '$' not in filas['Universo ML oficial'].number_format
     assert filas['Suma Total (ARS)'].value == D('120')
+    assert filas['Suma Ingresos por envío (ARS)'].value == D('0')
     assert '$' in filas['Suma Total (ARS)'].number_format
     assert filas['Identidad residual ML cierra'].value == 'Sí'
     assert '$' not in filas['Identidad residual ML cierra'].number_format
     diccionario = wb['Diccionario de cálculos']
-    assert any(row[2].value == 'universo ML oficial con los cuatro importes presentes' for row in diccionario.iter_rows(min_row=2))
+    assert any(row[2].value == 'universo ML oficial con Bloque A auditable' for row in diccionario.iter_rows(min_row=2))
 
 
 def test_descargas_consolidadas_renderizan_sin_helper_inexistente_y_nombres_xlsx():
@@ -454,3 +495,4 @@ def test_total_ml_ausente_aparece_en_conclusion_kpis_y_excel():
     wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(reporte)))
     resumen = {row[0].value: row[1].value for row in wb['Resumen'].iter_rows(min_row=2, max_col=2)}
     assert resumen['Venta oficial sin Total (ARS)'] == 1
+    assert resumen['Estado conciliación Bloque A'] in {'CIERRA', 'PENDIENTE'}
