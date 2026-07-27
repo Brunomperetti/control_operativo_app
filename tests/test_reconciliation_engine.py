@@ -88,6 +88,20 @@ def test_movimientos_sin_orden_payout_otros_y_no_se_mezclan():
     assert reporte.resultados[1].motivos == (MotivoConciliacion.ORDEN_AUSENTE,)
 
 
+def test_payout_con_id_orden_permanece_como_fondo_separado():
+    payout = mov(id_orden="1", monto="-250", tipo=TipoOperacionFinanciera.PAYOUT, id_mp="payout")
+    reporte = reconciliar([op(id_orden="1")], [mov(id_orden="1"), payout])
+    venta = next(r for r in reporte.resultados if r.estado != EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
+    fondos = next(r for r in reporte.resultados if r.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
+
+    assert payout.tratamiento_neto_comparable == TratamientoNetoComparable.MOVIMIENTO_DE_FONDOS
+    assert venta.neto_financiero_total == Decimal("100")
+    assert venta.impacto_otros == Decimal("0")
+    assert fondos.id_orden == "1"
+    assert fondos.neto_financiero_total == Decimal("0")
+    assert fondos.impacto_otros == Decimal("0")
+
+
 def test_liquidacion_pendiente_envio_y_componentes_total():
     r = único(reconciliar([op(neto="100")], [mov(monto="100", liquidado=False), mov(monto="-10", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="e", fila=11)]))
     assert r.estado == EstadoConciliacion.PENDIENTE_ACREDITACION

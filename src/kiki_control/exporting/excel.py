@@ -18,6 +18,7 @@ from kiki_control.domain.control_consolidado import ReporteControlConsolidado, R
 from kiki_control.domain.reconciliation import ReporteConciliacion, ResultadoConciliacion
 from kiki_control.presentation.bloque_b_diagnostics import DiagnosticoBloqueB, GrupoConDiferencia, MovimientoMpSinVentaML, ESTADOS_EXPLICACION_VISIBLES
 from kiki_control.presentation.control_consolidado_diagnostics import DiagnosticoControlConsolidado, diagnosticar_control_consolidado
+from kiki_control.presentation.control_consolidado_view import texto_tratamiento_neto_comparable
 from kiki_control.presentation.review_cases import caso_a_fila, clasificar_revisiones
 from kiki_control.presentation.reconciliation_view import (
     CoberturaArchivosPresentacion,
@@ -554,7 +555,7 @@ def _escribir_movimientos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> N
             ws.append([_texto_seguro(id_grupo), _texto_seguro(mov.id_movimiento_mp),
                        _texto_seguro(mov.id_orden), _texto_seguro(mov.tipo_movimiento),
                        _texto_seguro(mov.clasificacion_normalizada),
-                       _texto_seguro("Componente ya incluido; no se suma nuevamente" if mov.clasificacion_normalizada == "PAGO_ENVIO" else "Movimiento de fondos separado" if mov.clasificacion_normalizada == "PAYOUT" else "Modifica el neto comparable"),
+                       _texto_seguro(texto_tratamiento_neto_comparable(mov.tratamiento_neto_comparable)),
                        _texto_seguro(mov.fecha_origen),
                        _texto_seguro(mov.fecha_aprobacion), _texto_seguro(mov.fecha_liquidacion),
                        _decimal_o_vacio(mov.monto_neto_impactado), mov.fila_origen])

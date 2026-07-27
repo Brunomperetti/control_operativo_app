@@ -17,6 +17,7 @@ from kiki_control.domain.control_consolidado import (
     ResultadoControlConsolidado,
     TipoMovimientoFinanciero,
 )
+from kiki_control.domain.financial_movement import TratamientoNetoComparable
 
 _ZERO = Decimal("0")
 
@@ -40,6 +41,18 @@ def clasificaciones_movimientos_mp_por_fila(movimientos: Iterable[Any]) -> dict[
         numero_fila: clasificacion_normalizada_movimiento_mp(movimiento)
         for movimiento in movimientos
         if (numero_fila := getattr(movimiento, "numero_fila_origen", None)) is not None
+    }
+
+
+def tratamientos_movimientos_mp_por_fila(
+    movimientos: Iterable[Any],
+) -> dict[int, TratamientoNetoComparable]:
+    """Indexa el tratamiento normalizado sin inferirlo desde nombres visibles."""
+    return {
+        numero_fila: tratamiento
+        for movimiento in movimientos
+        if (numero_fila := getattr(movimiento, "numero_fila_origen", None)) is not None
+        and (tratamiento := getattr(movimiento, "tratamiento_neto_comparable", None)) is not None
     }
 
 
@@ -68,6 +81,7 @@ class DetalleMovimientoMp:
     id_orden: str
     tipo_movimiento: str
     clasificacion_normalizada: str
+    tratamiento_neto_comparable: TratamientoNetoComparable | None
     fecha_origen: str
     fecha_aprobacion: str
     fecha_liquidacion: str
@@ -396,6 +410,7 @@ def _construir_detalle_movimientos(
     fechas_liq: Mapping[int, date | datetime | None],
     montos_neto: Mapping[int, Decimal | None],
     clasificaciones: Mapping[int, str],
+    tratamientos: Mapping[int, TratamientoNetoComparable],
 ) -> tuple[DetalleMovimientoMp, ...]:
     """Construye la tupla de detalle de movimientos MP para las filas dadas."""
     detalles: list[DetalleMovimientoMp] = []
@@ -406,6 +421,7 @@ def _construir_detalle_movimientos(
             id_orden=ids_orden.get(fila) or "—",
             tipo_movimiento=tipo_mov,
             clasificacion_normalizada=clasificaciones.get(fila, "Sin clasificación"),
+            tratamiento_neto_comparable=tratamientos.get(fila),
             fecha_origen=_fecha_str(_as_date(fechas_origen.get(fila))),
             fecha_aprobacion=_fecha_str(_as_date(fechas_aprobacion.get(fila))),
             fecha_liquidacion=_fecha_str(_as_date(fechas_liq.get(fila))),
@@ -432,6 +448,7 @@ def diagnosticar_bloque_b(
     fechas_aprobacion_mp_por_fila: Mapping[int, date | datetime | None] | None = None,
     montos_neto_mp_por_fila: Mapping[int, Decimal | None] | None = None,
     clasificaciones_mp_por_fila: Mapping[int, str] | None = None,
+    tratamientos_mp_por_fila: Mapping[int, TratamientoNetoComparable] | None = None,
 ) -> DiagnosticoBloqueB:
     """Genera el diagnóstico completo de Bloque B.
 
@@ -449,6 +466,7 @@ def diagnosticar_bloque_b(
     - ids_orden_mp_por_fila: fila MP → ID de orden ML asociado (puede ser None)
     - fechas_aprobacion_mp_por_fila: fila MP → fecha de aprobación
     - montos_neto_mp_por_fila: fila MP → monto neto impactado
+    - tratamientos_mp_por_fila: fila MP → semántica normalizada para el neto comparable
     """
     inicio = _as_date(inicio_ml)
     fin = _as_date(fin_ml)
@@ -461,6 +479,7 @@ def diagnosticar_bloque_b(
     fechas_aprobacion = fechas_aprobacion_mp_por_fila or {}
     montos_neto = montos_neto_mp_por_fila or {}
     clasificaciones = clasificaciones_mp_por_fila or {}
+    tratamientos = tratamientos_mp_por_fila or {}
 
     # --- Universo comparable (ML + MP) ---
     comparables = tuple(
@@ -536,7 +555,7 @@ def diagnosticar_bloque_b(
         movimientos_asociados = _construir_detalle_movimientos(
             r.filas_origen_mp, ids_op, ids_orden_mp, tipos,
             fechas_origen, fechas_aprobacion, fechas_liq, montos_neto,
-            clasificaciones,
+            clasificaciones, tratamientos,
         )
 
         grupos_con_dif.append(GrupoConDiferencia(
@@ -570,7 +589,7 @@ def diagnosticar_bloque_b(
             _construir_detalle_movimientos(
                 r.filas_origen_mp, ids_op, ids_orden_mp, tipos,
                 fechas_origen, fechas_aprobacion, fechas_liq, montos_neto,
-                clasificaciones,
+                clasificaciones, tratamientos,
             ),
         )
         for r in reporte.resultados

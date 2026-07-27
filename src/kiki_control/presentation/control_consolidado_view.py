@@ -17,6 +17,7 @@ from kiki_control.presentation.bloque_b_diagnostics import (
     GrupoConDiferencia,
     MovimientoMpSinVentaML,
 )
+from kiki_control.domain.financial_movement import TratamientoNetoComparable
 
 
 @dataclass(frozen=True)
@@ -660,19 +661,25 @@ def _fila_movimiento_mp(m: Any) -> dict[str, Any]:
             "ID orden": m.id_orden,
             "Tipo de movimiento": m.tipo_movimiento,
             "Clasificación normalizada": m.clasificacion_normalizada,
-            "Tratamiento en neto comparable": (
-                "Componente ya incluido; no se suma nuevamente"
-                if m.clasificacion_normalizada == "PAGO_ENVIO"
-                else "Movimiento de fondos separado"
-                if m.clasificacion_normalizada == "PAYOUT"
-                else "Modifica el neto comparable"
-            ),
+            "Tratamiento en neto comparable": texto_tratamiento_neto_comparable(m.tratamiento_neto_comparable),
             "Fecha de origen": m.fecha_origen,
             "Fecha de aprobación": m.fecha_aprobacion,
             "Fecha de liquidación": m.fecha_liquidacion,
             "Monto neto impactado": formato_importe(m.monto_neto_impactado),
             "Fila de origen": m.fila_origen,
         }
+
+
+def texto_tratamiento_neto_comparable(
+    tratamiento: TratamientoNetoComparable | None,
+) -> str:
+    """Traduce la semántica tipada del dominio a una etiqueta visible."""
+    etiquetas = {
+        TratamientoNetoComparable.COMPONENTE_YA_INCLUIDO: "Componente ya incluido; no se suma nuevamente",
+        TratamientoNetoComparable.MOVIMIENTO_DE_FONDOS: "Movimiento de fondos separado",
+        TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE: "Modifica el neto comparable",
+    }
+    return etiquetas.get(tratamiento, "Sin tratamiento informado")
 
 
 def filas_movimientos_bloque_b(diag: DiagnosticoBloqueB) -> list[dict[str, Any]]:

@@ -246,6 +246,8 @@ def consolidar_control_financiero(reporte_comercial: ReporteVinculacionComercial
     financieros_por_comercial: dict[str, list[ResultadoConciliacion]] = defaultdict(list)
     financieros_sueltos: list[tuple[ResultadoConciliacion, bool]] = []
     for f in financieros:
+        if f.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS:
+            financieros_sueltos.append((f, False)); continue
         if not f.id_orden:
             financieros_sueltos.append((f, False)); continue
         candidatos = comerciales_por_orden.get(f.id_orden, [])

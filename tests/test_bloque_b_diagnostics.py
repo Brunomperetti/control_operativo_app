@@ -21,7 +21,7 @@ from kiki_control.domain.control_consolidado import (
     ResultadoControlConsolidado,
     TipoMovimientoFinanciero,
 )
-from kiki_control.domain.financial_movement import TipoOperacionFinanciera
+from kiki_control.domain.financial_movement import TipoOperacionFinanciera, TratamientoNetoComparable
 from kiki_control.exporting.excel import (
     generar_bloque_b_mp_sin_venta_excel,
     generar_reporte_consolidado_excel,
@@ -34,6 +34,7 @@ from kiki_control.presentation.bloque_b_diagnostics import (
     diagnosticar_bloque_b,
     clasificacion_normalizada_movimiento_mp,
     clasificaciones_movimientos_mp_por_fila,
+    tratamientos_movimientos_mp_por_fila,
 )
 from kiki_control.presentation.control_consolidado_view import (
     TITULO_BLOQUE_B,
@@ -166,6 +167,10 @@ def test_pago_envio_conciliado_sigue_visible_en_ui_y_excel_como_incluido():
         clasificaciones_mp_por_fila={7: "PAGO_APROBADO", 8: "PAGO_ENVIO"},
         tipos_movimiento_mp_por_fila={7: "PAGO_APROBADO", 8: "PAGO_ENVIO"},
         montos_neto_mp_por_fila={7: D("8777.90"), 8: D("2449.46")},
+        tratamientos_mp_por_fila={
+            7: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE,
+            8: TratamientoNetoComparable.COMPONENTE_YA_INCLUIDO,
+        },
     )
 
     assert diag.grupos_con_diferencia == ()
@@ -577,6 +582,17 @@ def test_detalle_movimientos_y_hojas_separadas():
 def test_clasificacion_real_del_movimiento_mp(tipo, esperado):
     movimiento = SimpleNamespace(tipo_operacion=tipo)
     assert clasificacion_normalizada_movimiento_mp(movimiento) == esperado
+
+
+def test_tratamiento_financiero_se_propaga_tipado_por_fila():
+    movimientos = (
+        SimpleNamespace(numero_fila_origen=2, tratamiento_neto_comparable=TratamientoNetoComparable.COMPONENTE_YA_INCLUIDO),
+        SimpleNamespace(numero_fila_origen=3, tratamiento_neto_comparable=TratamientoNetoComparable.MOVIMIENTO_DE_FONDOS),
+    )
+    assert tratamientos_movimientos_mp_por_fila(movimientos) == {
+        2: TratamientoNetoComparable.COMPONENTE_YA_INCLUIDO,
+        3: TratamientoNetoComparable.MOVIMIENTO_DE_FONDOS,
+    }
 
 
 def test_clasificacion_movimiento_mp_solo_usa_fallback_si_esta_ausente():
