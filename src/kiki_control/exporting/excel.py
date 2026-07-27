@@ -264,7 +264,7 @@ TIPO_CONSOLIDADO_TRES_FUENTES = "Reporte consolidado de tres fuentes"
 TIPO_EXCEPCIONES_CONSOLIDADAS = "Excepciones del control consolidado"
 TIPO_REVISIONES_CONSOLIDADAS = "Revisiones consolidadas"
 COLUMNAS_CONTROL_CONSOLIDADO = (
-    "Grupo u orden", "Estado", "Neto ML", "Costo de productos Eccomapp", "Neto Eccomapp", "Neto aprobado MP", "Neto financiero total MP",
+    "Grupo u orden", "Estado", "Neto ML", "Costo de productos Eccomapp", "Neto Eccomapp", "Neto aprobado bruto MP", "Reclamos/disputas MP", "Devoluciones MP", "Envíos MP", "Otros impactos MP", "Neto financiero total MP",
     "Eccomapp − ML", "MP − Eccomapp", "MP − ML", "Utilidad preliminar", "Motivo principal", "Filas ML", "Filas Eccomapp", "Filas MP",
 )
 
@@ -368,8 +368,8 @@ def _escribir_puente_consolidado(ws: Worksheet, diag: Any) -> None:
 def _escribir_control_consolidado(ws: Worksheet, resultados: Iterable[ResultadoControlConsolidado]) -> None:
     ws.append(list(COLUMNAS_CONTROL_CONSOLIDADO))
     for r in resultados:
-        ws.append([_texto_seguro(r.id_grupo_canonico or ", ".join(r.ids_orden) or f"fila MP {', '.join(map(str, r.filas_origen_mp))}"), _texto_seguro(r.estado.value), _decimal_o_vacio(r.total_informado_ml), _decimal_o_vacio(r.costo_productos_eccomapp), _decimal_o_vacio(r.neto_mp_eccomapp_informado), _decimal_o_vacio(r.neto_aprobado_mp), _decimal_o_vacio(r.neto_financiero_total_mp), _decimal_o_vacio(r.diferencia_neto_ml_eccomapp), _decimal_o_vacio((r.neto_aprobado_mp - r.neto_mp_eccomapp_informado) if r.neto_aprobado_mp is not None and r.neto_mp_eccomapp_informado is not None else None), _decimal_o_vacio(r.diferencia_ml_mp), _decimal_o_vacio(r.utilidad_preliminar_control), _texto_seguro("; ".join(r.motivos)), _texto_seguro(", ".join(map(str, r.filas_origen_ml))), _texto_seguro(", ".join(map(str, r.filas_origen_eccomapp))), _texto_seguro(", ".join(map(str, r.filas_origen_mp)))])
-    _formatear_tabla(ws, moneda_columnas={3,4,5,6,7,8,9,10,11}, wrap_columnas={12}, freeze=True)
+        ws.append([_texto_seguro(r.id_grupo_canonico or ", ".join(r.ids_orden) or f"fila MP {', '.join(map(str, r.filas_origen_mp))}"), _texto_seguro(r.estado.value), _decimal_o_vacio(r.total_informado_ml), _decimal_o_vacio(r.costo_productos_eccomapp), _decimal_o_vacio(r.neto_mp_eccomapp_informado), _decimal_o_vacio(r.neto_aprobado_mp), _decimal_o_vacio(r.impacto_reclamos_disputas_mp), _decimal_o_vacio(r.impacto_devoluciones_mp), _decimal_o_vacio(r.impacto_pagos_envio_mp), _decimal_o_vacio(r.impacto_otros_mp), _decimal_o_vacio(r.neto_financiero_total_mp), _decimal_o_vacio(r.diferencia_neto_ml_eccomapp), _decimal_o_vacio((r.neto_aprobado_mp - r.neto_mp_eccomapp_informado) if r.neto_aprobado_mp is not None and r.neto_mp_eccomapp_informado is not None else None), _decimal_o_vacio(r.diferencia_ml_mp), _decimal_o_vacio(r.utilidad_preliminar_control), _texto_seguro("; ".join(r.motivos)), _texto_seguro(", ".join(map(str, r.filas_origen_ml))), _texto_seguro(", ".join(map(str, r.filas_origen_eccomapp))), _texto_seguro(", ".join(map(str, r.filas_origen_mp)))])
+    _formatear_tabla(ws, moneda_columnas=set(range(3, 16)), wrap_columnas={16}, freeze=True)
 
 
 def _escribir_temporal_consolidado(ws: Worksheet, diag: Any) -> None:
@@ -395,7 +395,7 @@ def _escribir_diccionario_consolidado(ws: Worksheet) -> None:
         ("Utilidad preliminar", "Total (ARS) ML - Costo Total (Con IVA) Eccomapp", "universo calculable de utilidad", "ML: Total (ARS); Eccomapp: Costo Total (Con IVA) ($)"),
         ("Formación del neto informado por Mercado Libre", "Ingresos por productos + Ingresos por envío + Cargo por venta e impuestos + Costos de envío + Anulaciones y reembolsos + Cupones de descuento + Otros conceptos pendientes de clasificación = Total (ARS)", "universo ML oficial con Bloque A auditable", "Total (ARS); Ingresos por productos (ARS); Ingresos por envío (ARS); Cargo por venta e impuestos (ARS); Costos de envío (ARS); Anulaciones y reembolsos (ARS); Descuentos y bonificaciones"),
         ("MP − ML", "Neto aprobado MP - Neto ML", "universo ML–Eccomapp–MP para puente triple", "Total (ARS); neto Eccomapp; movimientos aprobados MP"),
-        ("Diferencia ML–MP (Bloque B)", "neto_aprobado_mp − total_informado_ml", "universo comparable ML + MP", "Total (ARS) ML; MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO MP"),
+        ("Diferencia ML–MP (Bloque B)", "neto_financiero_total_mp − total_informado_ml", "universo comparable ML + MP", "Total (ARS) ML; todos los movimientos MP asociados"),
     ]
     for fila in filas: ws.append([_texto_seguro(x) for x in fila])
     _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2,3,4}, freeze=True)
@@ -409,8 +409,9 @@ _COLUMNAS_DIFERENCIAS_BLOQUE_B = (
     "ID de grupo u orden",
     "Fecha de venta ML",
     "Neto informado ML",
-    "Neto aprobado MP",
-    "Diferencia MP − ML",
+    "Neto aprobado bruto MP",
+    "Reclamos/disputas MP", "Devoluciones MP", "Envíos MP", "Otros impactos MP",
+    "Neto financiero total MP", "Diferencia financiera MP − ML",
     "Movimientos MP",
     "Origen MP desde",
     "Origen MP hasta",
@@ -422,7 +423,7 @@ _COLUMNAS_DIFERENCIAS_BLOQUE_B = (
     "Motivos secundarios",
     "Acción recomendada",
 )
-_COLS_MONETARIAS_DIF_B = {"Neto informado ML", "Neto aprobado MP", "Diferencia MP − ML"}
+_COLS_MONETARIAS_DIF_B = {"Neto informado ML", "Neto aprobado bruto MP", "Reclamos/disputas MP", "Devoluciones MP", "Envíos MP", "Otros impactos MP", "Neto financiero total MP", "Diferencia financiera MP − ML"}
 
 _COLUMNAS_MP_SIN_VENTA = (
     "ID de grupo u orden",
@@ -458,7 +459,7 @@ def _escribir_resumen_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
         ("Coinciden dentro de tolerancia", r.coincidencias),
         ("Grupos con diferencia", r.con_diferencia),
         ("Neto ML comparable", r.neto_ml_comparable),
-        ("Neto MP comparable", r.neto_mp_comparable),
+        ("Neto financiero total MP comparable", r.neto_mp_comparable),
         ("Diferencia universo comparable completo (MP − ML)", r.diferencia_universo_comparable),
         ("Diferencia operaciones fuera de tolerancia", r.diferencia_operaciones_fuera_tolerancia),
         ("Diferencia subuniverso conciliado", r.diferencia_subuniverso_conciliado),
@@ -467,7 +468,7 @@ def _escribir_resumen_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
         ("Cantidad MP sin venta ML", diag.cantidad_mp_sin_venta),
         ("Neto aprobado MP sin venta", diag.neto_aprobado_mp_sin_venta),
         ("Neto financiero total MP sin venta", diag.neto_financiero_total_mp_sin_venta),
-        ("Convención", "diferencia_ml_mp = neto_aprobado_mp − total_informado_ml"),
+        ("Convención", "diferencia_ml_mp = neto_financiero_total_mp − total_informado_ml"),
         ("Positiva", "MP informa más neto que ML"),
         ("Negativa", "MP informa menos neto que ML"),
         ("Aclaración", "Control operativo preliminar; no es resultado contable ni fiscal definitivo."),
@@ -489,6 +490,11 @@ def _escribir_diferencias_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> N
             _texto_seguro(g.fecha_venta_ml),
             _decimal_o_vacio(g.total_informado_ml),
             _decimal_o_vacio(g.neto_aprobado_mp),
+            _decimal_o_vacio(g.impacto_reclamos_disputas_mp),
+            _decimal_o_vacio(g.impacto_devoluciones_mp),
+            _decimal_o_vacio(g.impacto_pagos_envio_mp),
+            _decimal_o_vacio(g.impacto_otros_mp),
+            _decimal_o_vacio(g.neto_financiero_total_mp),
             _decimal_o_vacio(g.diferencia_ml_mp),
             g.cantidad_movimientos_mp,
             _texto_seguro(g.fecha_min_origen_mp),
@@ -502,7 +508,7 @@ def _escribir_diferencias_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> N
             _texto_seguro(g.accion_recomendada),
         ])
     mon_cols = {idx for idx, c in enumerate(_COLUMNAS_DIFERENCIAS_BLOQUE_B, start=1) if c in _COLS_MONETARIAS_DIF_B}
-    _formatear_tabla(ws, moneda_columnas=mon_cols, wrap_columnas={13, 14, 15}, freeze=True)
+    _formatear_tabla(ws, moneda_columnas=mon_cols, wrap_columnas={18, 19, 20}, freeze=True)
 
 
 def _escribir_mp_sin_venta_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:

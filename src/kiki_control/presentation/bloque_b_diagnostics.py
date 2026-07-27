@@ -84,6 +84,11 @@ class GrupoConDiferencia:
     fecha_venta_ml: str
     total_informado_ml: Decimal
     neto_aprobado_mp: Decimal
+    impacto_reclamos_disputas_mp: Decimal
+    impacto_devoluciones_mp: Decimal
+    impacto_pagos_envio_mp: Decimal
+    impacto_otros_mp: Decimal
+    neto_financiero_total_mp: Decimal
     diferencia_ml_mp: Decimal
     cantidad_movimientos_mp: int
     fecha_min_origen_mp: str
@@ -458,7 +463,7 @@ def diagnosticar_bloque_b(
     # --- Universo comparable (ML + MP) ---
     comparables = tuple(
         r for r in reporte.resultados
-        if r.total_informado_ml is not None and r.neto_aprobado_mp is not None
+        if r.total_informado_ml is not None and r.neto_financiero_total_mp is not None
     )
     diferencias_r = tuple(
         r for r in comparables
@@ -467,7 +472,7 @@ def diagnosticar_bloque_b(
     dentro_tolerancia_r = tuple(r for r in comparables if r not in set(diferencias_r))
 
     neto_ml = _sum_decimals(r.total_informado_ml for r in comparables)
-    neto_mp = _sum_decimals(r.neto_aprobado_mp for r in comparables)
+    neto_mp = _sum_decimals(r.neto_financiero_total_mp for r in comparables)
     diferencia_universo = neto_mp - neto_ml
 
     # Diferencia real del subuniverso conciliado (grupos dentro de tolerancia)
@@ -538,6 +543,11 @@ def diagnosticar_bloque_b(
             fecha_venta_ml=_fecha_str(fecha_venta_ml_val),
             total_informado_ml=r.total_informado_ml,  # type: ignore[arg-type]
             neto_aprobado_mp=r.neto_aprobado_mp,  # type: ignore[arg-type]
+            impacto_reclamos_disputas_mp=r.impacto_reclamos_disputas_mp or _ZERO,
+            impacto_devoluciones_mp=r.impacto_devoluciones_mp or _ZERO,
+            impacto_pagos_envio_mp=r.impacto_pagos_envio_mp or _ZERO,
+            impacto_otros_mp=r.impacto_otros_mp or _ZERO,
+            neto_financiero_total_mp=r.neto_financiero_total_mp,  # type: ignore[arg-type]
             diferencia_ml_mp=r.diferencia_ml_mp,  # type: ignore[arg-type]
             cantidad_movimientos_mp=len(r.filas_origen_mp),
             fecha_min_origen_mp=f_min_origen,

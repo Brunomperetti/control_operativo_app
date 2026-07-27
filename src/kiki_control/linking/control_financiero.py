@@ -140,7 +140,9 @@ def _resultado_desde(
     total_ml = ml_vals["total_informado_ml"]
     dif_venta = ml_vals["monto_venta_ml"] - monto_ec if ml_vals["monto_venta_ml"] is not None and monto_ec is not None else None
     dif_neto_ec = total_ml - neto_ec if total_ml is not None and neto_ec is not None else None
-    dif_ml_mp = neto_mp - total_ml if neto_mp is not None and total_ml is not None else None
+    # La conciliación usa el impacto algebraico completo de MP. El neto de
+    # pagos aprobados se conserva separado como métrica bruta de auditoría.
+    dif_ml_mp = neto_fin - total_ml if neto_fin is not None and total_ml is not None else None
     utilidad_control = total_ml - costo_prod if total_ml is not None and costo_prod is not None else None
     motivos = list(comercial.motivos if comercial else ())
     explicaciones = list(comercial.explicaciones if comercial else ())
@@ -275,6 +277,7 @@ def consolidar_control_financiero(reporte_comercial: ReporteVinculacionComercial
         total_duplicada_o_ambigua=cuenta(EstadoControlConsolidado.DUPLICADA_O_AMBIGUA),
         suma_total_informado_ml=sum((r.total_informado_ml or _ZERO for r in resultados_t), _ZERO),
         suma_neto_aprobado_mp=sum((r.neto_aprobado_mp or _ZERO for r in resultados_t), _ZERO),
+        suma_neto_financiero_total_mp=sum((r.neto_financiero_total_mp or _ZERO for r in resultados_t), _ZERO),
         suma_costo_productos_eccomapp=sum((r.costo_productos_eccomapp or _ZERO for r in resultados_t), _ZERO),
         total_total_ml_ausente=cuenta(EstadoControlConsolidado.TOTAL_ML_AUSENTE),
     )

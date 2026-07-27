@@ -9,7 +9,7 @@ from enum import StrEnum
 from kiki_control.domain.reconciliation import ResultadoConciliacion
 from kiki_control.domain.commercial_link import ResultadoVinculacionComercial
 
-VERSION_REGLA_CONTROL_CONSOLIDADO = "ML_OFICIAL_ECCOM_MP_V1"
+VERSION_REGLA_CONTROL_CONSOLIDADO = "ML_OFICIAL_ECCOM_MP_V2_NETO_FINANCIERO"
 
 
 class ErrorControlConsolidado(ValueError):
@@ -124,3 +124,4 @@ class ReporteControlConsolidado:
     suma_neto_aprobado_mp: Decimal
     suma_costo_productos_eccomapp: Decimal
     total_total_ml_ausente: int = 0
+    suma_neto_financiero_total_mp: Decimal = Decimal("0")
