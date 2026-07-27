@@ -492,28 +492,6 @@ def _enriq_fechas_venta_ml() -> dict[int, Any]:
     return st.session_state.get("enriq_fechas_venta_ml_por_fila", {})
 
 
-def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
-    return {
-        "Categoría temporal": nombre,
-        "Cantidad": item.cantidad,
-        "Neto aprobado MP": formato_importe(item.neto_aprobado_mp),
-        "Neto financiero total MP": formato_importe(item.neto_financiero_total_mp),
-    }
-
-
-def _mostrar_kpis_en_filas(titulo: str, kpis: list[Any], tamanos: tuple[int, ...]) -> None:
-    st.subheader(titulo)
-    indice = 0
-    for tamano in tamanos:
-        fila = kpis[indice:indice + tamano]
-        indice += tamano
-        if not fila:
-            continue
-        cols = st.columns(tamano)
-        for col, kpi in zip(cols, fila, strict=False):
-            col.metric(kpi.nombre, kpi.valor, help=kpi.ayuda)
-
-
 def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
     """Renderiza el Bloque B rediseñado."""
     st.subheader(TITULO_BLOQUE_B)
