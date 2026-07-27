@@ -403,8 +403,10 @@ def diagnosticar_residual_ml(reporte: ReporteControlConsolidado) -> ResidualMerc
         suma_cupones = suma_cupones_fuente
         metodo_cupones = "INFORMADO_POR_FUENTE"
     else:
-        # No se atribuye el residual a cupones sin evidencia explícita verificable.
-        # Se usa el importe informado por la fuente (puede ser cero si no existe columna).
+        # No existe evidencia verificable que permita atribuir el residual a cupones.
+        # Se usa el importe de la fuente tal como viene (puede ser cero si la columna
+        # "Descuentos y bonificaciones" está vacía o ausente). El residual no explicado
+        # permanece en "Otros conceptos pendientes de clasificación", sin forzar el cierre.
         suma_cupones = suma_cupones_fuente
         metodo_cupones = "INFORMADO_POR_FUENTE" if (filas_cupones > 0 and suma_cupones_fuente != _ZERO) else "SIN_EVIDENCIA"
     residual = suma_total - (suma_ingresos + suma_ingresos_envio + suma_cargos + suma_costos_envio + suma_anulaciones + suma_cupones)
