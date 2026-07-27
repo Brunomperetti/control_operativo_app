@@ -33,6 +33,7 @@ from kiki_control.presentation.bloque_b_diagnostics import (
     clasificar_diferencia,
     diagnosticar_bloque_b,
     estado_normalizado_movimiento_mp,
+    estados_movimientos_mp_por_fila,
 )
 from kiki_control.presentation.control_consolidado_view import (
     TITULO_BLOQUE_B,
@@ -557,6 +558,21 @@ def test_estado_real_del_movimiento_mp(tipo, esperado):
 
 def test_estado_movimiento_mp_solo_usa_fallback_si_esta_ausente():
     assert estado_normalizado_movimiento_mp(SimpleNamespace(tipo_operacion=None)) == "Sin estado"
+
+
+def test_enriquecimiento_indexa_estados_reales_por_fila():
+    movimientos = (
+        SimpleNamespace(numero_fila_origen=2, tipo_operacion=TipoOperacionFinanciera.PAGO_APROBADO),
+        SimpleNamespace(numero_fila_origen=3, tipo_operacion=TipoOperacionFinanciera.DEVOLUCION_DINERO),
+        SimpleNamespace(numero_fila_origen=4, tipo_operacion=TipoOperacionFinanciera.PAYOUT),
+        SimpleNamespace(numero_fila_origen=5, tipo_operacion=None),
+    )
+    assert estados_movimientos_mp_por_fila(movimientos) == {
+        2: "PAGO_APROBADO",
+        3: "DEVOLUCION_DINERO",
+        4: "PAYOUT",
+        5: "Sin estado",
+    }
 
 
 def test_ui_y_excel_conservan_estados_distintos():

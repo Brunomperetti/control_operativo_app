@@ -86,7 +86,7 @@ from kiki_control.presentation.control_consolidado_view import (
     tabla_consolidada,
     trazabilidad_tecnica,
 )
-from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b, estado_normalizado_movimiento_mp
+from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b, estados_movimientos_mp_por_fila
 from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
 from kiki_control.reconciliation import reconciliar
 from kiki_control.ui.session_cycle import (
@@ -321,11 +321,9 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
             for m in mercado_pago.movimientos
             if getattr(m, "numero_fila_origen", None) is not None
         }
-        st.session_state["enriq_estados_mp_por_fila"] = {
-            m.numero_fila_origen: estado_normalizado_movimiento_mp(m)
-            for m in mercado_pago.movimientos
-            if getattr(m, "numero_fila_origen", None) is not None
-        }
+        st.session_state["enriq_estados_mp_por_fila"] = estados_movimientos_mp_por_fila(
+            mercado_pago.movimientos
+        )
         st.session_state["enriq_netos_mp_por_fila"] = {
             m.numero_fila_origen: m.monto_neto_impactado
             for m in mercado_pago.movimientos

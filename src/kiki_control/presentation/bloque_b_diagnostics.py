@@ -30,7 +30,17 @@ def estado_normalizado_movimiento_mp(movimiento: Any) -> str:
     """
     tipo = getattr(movimiento, "tipo_operacion", None)
     valor = getattr(tipo, "value", tipo)
-    return str(valor).strip() if valor is not None and str(valor).strip() else "Sin estado"
+    texto = str(valor).strip() if valor is not None else ""
+    return texto or "Sin estado"
+
+
+def estados_movimientos_mp_por_fila(movimientos: Iterable[Any]) -> dict[int, str]:
+    """Indexa el estado normalizado real de cada movimiento por su fila fuente."""
+    return {
+        numero_fila: estado_normalizado_movimiento_mp(movimiento)
+        for movimiento in movimientos
+        if (numero_fila := getattr(movimiento, "numero_fila_origen", None)) is not None
+    }
 
 
 class EstadoExplicacionDiferencia(StrEnum):
