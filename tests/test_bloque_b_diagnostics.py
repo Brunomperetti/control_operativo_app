@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 from openpyxl import load_workbook
@@ -20,6 +21,7 @@ from kiki_control.domain.control_consolidado import (
     ResultadoControlConsolidado,
     TipoMovimientoFinanciero,
 )
+from kiki_control.domain.financial_movement import TipoOperacionFinanciera
 from kiki_control.exporting.excel import (
     generar_bloque_b_mp_sin_venta_excel,
     generar_reporte_consolidado_excel,
@@ -30,9 +32,11 @@ from kiki_control.presentation.bloque_b_diagnostics import (
     categoria_temporal_mp,
     clasificar_diferencia,
     diagnosticar_bloque_b,
+    estado_normalizado_movimiento_mp,
 )
 from kiki_control.presentation.control_consolidado_view import (
     TITULO_BLOQUE_B,
+    filas_movimientos_diferencia,
     texto_universo_comparable,
 )
 
@@ -536,3 +540,35 @@ def test_detalle_movimientos_y_hojas_separadas():
     wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(_rep([r]), diag_bloque_b=diag)))
     assert {"Bloque B — Movimientos", "Bloque B — Fondos y payouts"}.issubset(wb.sheetnames)
     assert wb["Bloque B — Movimientos"].max_row == 3
+
+
+@pytest.mark.parametrize(
+    ("tipo", "esperado"),
+    [
+        (TipoOperacionFinanciera.PAGO_APROBADO, "PAGO_APROBADO"),
+        (TipoOperacionFinanciera.RECLAMO, "RECLAMO"),
+        (TipoOperacionFinanciera.PAYOUT, "PAYOUT"),
+    ],
+)
+def test_estado_real_del_movimiento_mp(tipo, esperado):
+    movimiento = SimpleNamespace(tipo_operacion=tipo)
+    assert estado_normalizado_movimiento_mp(movimiento) == esperado
+
+
+def test_estado_movimiento_mp_solo_usa_fallback_si_esta_ausente():
+    assert estado_normalizado_movimiento_mp(SimpleNamespace(tipo_operacion=None)) == "Sin estado"
+
+
+def test_ui_y_excel_conservan_estados_distintos():
+    r = _r("dif-estados", ml=D("100"), mp=D("110"), dif=D("10"), filas_mp=(7, 8, 9))
+    diag = diagnosticar_bloque_b(
+        _rep([r]),
+        estados_mp_por_fila={7: "PAGO_APROBADO", 8: "RECLAMO", 9: "PAYOUT"},
+    )
+    grupo = diag.grupos_con_diferencia[0]
+    assert [fila["Estado normalizado"] for fila in filas_movimientos_diferencia(grupo)] == [
+        "PAGO_APROBADO", "RECLAMO", "PAYOUT"
+    ]
+    wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(_rep([r]), diag_bloque_b=diag)))
+    estados_excel = [celda.value for celda in wb["Bloque B — Movimientos"]["E"][1:]]
+    assert estados_excel == ["PAGO_APROBADO", "RECLAMO", "PAYOUT"]

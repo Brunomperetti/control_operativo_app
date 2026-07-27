@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 from kiki_control.domain.control_consolidado import (
     ReporteControlConsolidado,
@@ -19,6 +19,18 @@ from kiki_control.domain.control_consolidado import (
 )
 
 _ZERO = Decimal("0")
+
+
+def estado_normalizado_movimiento_mp(movimiento: Any) -> str:
+    """Devuelve el tipo normalizado real del movimiento MP como estado visible.
+
+    ``MovimientoFinanciero`` no tiene un campo de estado independiente: su
+    clasificación normalizada está en ``tipo_operacion``. Se evita inferir un
+    estado único a partir de la fecha de aprobación.
+    """
+    tipo = getattr(movimiento, "tipo_operacion", None)
+    valor = getattr(tipo, "value", tipo)
+    return str(valor).strip() if valor is not None and str(valor).strip() else "Sin estado"
 
 
 class EstadoExplicacionDiferencia(StrEnum):
