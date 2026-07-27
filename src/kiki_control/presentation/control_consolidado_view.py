@@ -250,7 +250,7 @@ def alcance_completo_consolidado(reporte: ReporteControlConsolidado, diagnostico
 
 def kpis_consolidados(reporte: ReporteControlConsolidado) -> dict[str, list[Kpi]]:
     resultados = reporte.resultados
-    comparables = [r for r in resultados if r.total_informado_ml is not None and r.neto_aprobado_mp is not None]
+    comparables = [r for r in resultados if r.total_informado_ml is not None and r.neto_financiero_total_mp is not None]
     utilidad_calc = [r for r in resultados if r.utilidad_preliminar_control is not None]
     ayuda_limite = " Limitación: control operativo preliminar, no es resultado contable o fiscal definitivo."
     return {
@@ -261,9 +261,9 @@ def kpis_consolidados(reporte: ReporteControlConsolidado) -> dict[str, list[Kpi]
             Kpi("Neto esperado ML", formato_importe(_sumar(r.total_informado_ml for r in resultados)), "Fuente: Mercado Libre oficial. Campo interno: total_informado_ml. Columna externa: Total (ARS). Universo: resultados con venta oficial. Fórmula: no se reconstruye; se usa el total informado." + ayuda_limite),
         ],
         "Bloque B — Comparación financiera": [
-            Kpi("Neto ML comparable", formato_importe(_sumar(r.total_informado_ml for r in comparables)), "Fuente: Mercado Libre oficial. Campo interno: total_informado_ml. Columna utilizada: Total (ARS). Universo: solo resultados donde también existe neto_aprobado_mp. Informado directamente por la fuente." + ayuda_limite),
-            Kpi("Neto MP comparable", formato_importe(_sumar(r.neto_aprobado_mp for r in comparables)), "Fuente: Mercado Pago. Campo: neto_aprobado_mp. Columna: MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO. Universo: mismos resultados comparables con ML." + ayuda_limite),
-            Kpi("Grupos con diferencia", str(diagnosticar_control_consolidado(reporte).diferencias.con_diferencia_ml_mp), "Cuenta resultados comparables donde Total (ARS) ML y neto aprobado MP existen y abs(diferencia_ml_mp) supera la tolerancia. No usa total_con_diferencia porque ese es un estado principal." + ayuda_limite),
+            Kpi("Neto ML comparable", formato_importe(_sumar(r.total_informado_ml for r in comparables)), "Fuente: Mercado Libre oficial. Campo interno: total_informado_ml. Universo: resultados donde también existe neto_financiero_total_mp." + ayuda_limite),
+            Kpi("Neto financiero total MP comparable", formato_importe(_sumar(r.neto_financiero_total_mp for r in comparables)), "Fuente: Mercado Pago. Suma algebraica de pagos, reclamos, devoluciones, disputas, envíos y otros impactos del grupo." + ayuda_limite),
+            Kpi("Grupos con diferencia", str(diagnosticar_control_consolidado(reporte).diferencias.con_diferencia_ml_mp), "Cuenta resultados comparables donde abs(neto_financiero_total_mp − total_informado_ml) supera la tolerancia." + ayuda_limite),
             Kpi("Diferencia total", formato_importe(diagnosticar_control_consolidado(reporte).diferencias.suma_diferencia_ml_mp), "Identidad validada: suma_diferencia_ml_mp = suma_neto_mp_comparable - suma_neto_ml_comparable." + ayuda_limite),
             Kpi("Neto MP sin venta ML", formato_importe(_sumar(r.neto_aprobado_mp for r in resultados if r.neto_aprobado_mp is not None and not r.tiene_mercado_libre_oficial)), "Fuente: Mercado Pago. Universo: movimientos no encontrados en el archivo de ventas oficiales cargado." + ayuda_limite),
         ],
@@ -527,7 +527,7 @@ def explicacion_resultado(r: ResultadoControlConsolidado) -> list[dict[str, str]
             "Valor": formato_importe(r.diferencia_ml_mp),
             "Archivo de origen": "Mercado Libre oficial + Mercado Pago",
             "Columna utilizada": "Total (ARS); MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO",
-            "Regla aplicada": "neto_aprobado_mp - total_informado_ml" if r.diferencia_ml_mp is not None else _motivo_no_calculado(r.diferencia_ml_mp, ("neto_aprobado_mp", "total_informado_ml")),
+            "Regla aplicada": "neto_financiero_total_mp - total_informado_ml" if r.diferencia_ml_mp is not None else _motivo_no_calculado(r.diferencia_ml_mp, ("neto_financiero_total_mp", "total_informado_ml")),
             "Filas de origen": _filas(("ML", r.filas_origen_ml), ("MP", r.filas_origen_mp)),
             "Limitación": prudencia,
         },
@@ -551,7 +551,7 @@ def trazabilidad_tecnica(r: ResultadoControlConsolidado, tolerancia: Decimal, ha
 # ---------------------------------------------------------------------------
 
 CONVENCION_DIFERENCIA_ML_MP = (
-    "Convención: diferencia_ml_mp = neto_aprobado_mp − total_informado_ml. "
+    "Convención: diferencia_financiera_ml_mp = neto_financiero_total_mp − total_informado_ml. "
     "Positiva: Mercado Pago informa más neto que Mercado Libre. "
     "Negativa: Mercado Pago informa menos neto que Mercado Libre."
 )
@@ -571,7 +571,7 @@ def resumen_bloque_b_tabla(diag: DiagnosticoBloqueB) -> list[dict[str, str]]:
         {"Indicador": "Coinciden dentro de tolerancia", "Valor": str(r.coincidencias)},
         {"Indicador": "Grupos con diferencia", "Valor": str(r.con_diferencia)},
         {"Indicador": "Neto ML comparable", "Valor": formato_importe(r.neto_ml_comparable)},
-        {"Indicador": "Neto MP comparable", "Valor": formato_importe(r.neto_mp_comparable)},
+        {"Indicador": "Neto financiero total MP comparable", "Valor": formato_importe(r.neto_mp_comparable)},
         {"Indicador": "Diferencia universo comparable (MP − ML)", "Valor": formato_importe(r.diferencia_universo_comparable)},
         {"Indicador": "Diferencia operaciones fuera de tolerancia", "Valor": formato_importe(r.diferencia_operaciones_fuera_tolerancia)},
         {"Indicador": "Diferencia subuniverso conciliado (dentro de tolerancia)", "Valor": formato_importe(r.diferencia_subuniverso_conciliado)},
@@ -585,8 +585,13 @@ def filas_grupos_con_diferencia(grupos: Iterable[GrupoConDiferencia]) -> list[di
             "ID de grupo u orden": g.id_grupo,
             "Fecha de venta ML": g.fecha_venta_ml,
             "Neto informado ML": formato_importe(g.total_informado_ml),
-            "Neto aprobado MP": formato_importe(g.neto_aprobado_mp),
-            "Diferencia MP − ML": formato_importe(g.diferencia_ml_mp),
+            "Neto aprobado bruto MP": formato_importe(g.neto_aprobado_mp),
+            "Reclamos/disputas MP": formato_importe(g.impacto_reclamos_disputas_mp),
+            "Devoluciones MP": formato_importe(g.impacto_devoluciones_mp),
+            "Envíos MP": formato_importe(g.impacto_pagos_envio_mp),
+            "Otros impactos MP": formato_importe(g.impacto_otros_mp),
+            "Neto financiero total MP": formato_importe(g.neto_financiero_total_mp),
+            "Diferencia financiera MP − ML": formato_importe(g.diferencia_ml_mp),
             "Movimientos MP": g.cantidad_movimientos_mp,
             "Origen MP desde": g.fecha_min_origen_mp,
             "Origen MP hasta": g.fecha_max_origen_mp,
@@ -684,7 +689,7 @@ def detalle_diferencia_mp(r: ResultadoControlConsolidado) -> list[dict[str, str]
     """Detalle de los datos MP para una operación con diferencia."""
     return [
         {"Concepto": "ID de orden", "Valor": ", ".join(r.ids_orden) if r.ids_orden else "—"},
-        {"Concepto": "Neto aprobado MP (utilizado en comparación)", "Valor": formato_importe(r.neto_aprobado_mp)},
+        {"Concepto": "Neto aprobado bruto MP (auditoría)", "Valor": formato_importe(r.neto_aprobado_mp)},
         {"Concepto": "Neto financiero total MP", "Valor": formato_importe(r.neto_financiero_total_mp)},
         {"Concepto": "Impactos de envío MP", "Valor": formato_importe(r.impacto_pagos_envio_mp)},
         {"Concepto": "Devoluciones MP", "Valor": formato_importe(r.impacto_devoluciones_mp)},
@@ -698,12 +703,13 @@ def detalle_conciliacion_diferencia(r: ResultadoControlConsolidado) -> list[dict
     """Tabla de construcción de la conciliación para una operación con diferencia."""
     return [
         {"Concepto": "Neto informado ML", "Valor": formato_importe(r.total_informado_ml), "Origen": "ML oficial — Total (ARS)"},
-        {"Concepto": "Neto aprobado MP", "Valor": formato_importe(r.neto_aprobado_mp), "Origen": "MP — MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO"},
-        {"Concepto": "Diferencia MP − ML", "Valor": formato_importe(r.diferencia_ml_mp), "Origen": "Calculado: neto_aprobado_mp − total_informado_ml"},
+        {"Concepto": "Neto aprobado bruto MP", "Valor": formato_importe(r.neto_aprobado_mp), "Origen": "MP — suma de pagos aprobados"},
         {"Concepto": "Devoluciones observadas", "Valor": formato_importe(r.impacto_devoluciones_mp), "Origen": "MP — impacto_devoluciones"},
         {"Concepto": "Reclamos/disputas observados", "Valor": formato_importe(r.impacto_reclamos_disputas_mp), "Origen": "MP — impacto_reclamos_disputas"},
         {"Concepto": "Envíos observados", "Valor": formato_importe(r.impacto_pagos_envio_mp), "Origen": "MP — impacto_pagos_envio"},
         {"Concepto": "Otros impactos observados", "Valor": formato_importe(r.impacto_otros_mp), "Origen": "MP — impacto_otros"},
+        {"Concepto": "Neto financiero total MP", "Valor": formato_importe(r.neto_financiero_total_mp), "Origen": "MP — suma algebraica de todos los movimientos"},
+        {"Concepto": "Diferencia financiera MP − ML", "Valor": formato_importe(r.diferencia_ml_mp), "Origen": "Calculado: neto_financiero_total_mp − total_informado_ml"},
     ]
 
 

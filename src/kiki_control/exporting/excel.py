@@ -395,7 +395,7 @@ def _escribir_diccionario_consolidado(ws: Worksheet) -> None:
         ("Utilidad preliminar", "Total (ARS) ML - Costo Total (Con IVA) Eccomapp", "universo calculable de utilidad", "ML: Total (ARS); Eccomapp: Costo Total (Con IVA) ($)"),
         ("Formación del neto informado por Mercado Libre", "Ingresos por productos + Ingresos por envío + Cargo por venta e impuestos + Costos de envío + Anulaciones y reembolsos + Cupones de descuento + Otros conceptos pendientes de clasificación = Total (ARS)", "universo ML oficial con Bloque A auditable", "Total (ARS); Ingresos por productos (ARS); Ingresos por envío (ARS); Cargo por venta e impuestos (ARS); Costos de envío (ARS); Anulaciones y reembolsos (ARS); Descuentos y bonificaciones"),
         ("MP − ML", "Neto aprobado MP - Neto ML", "universo ML–Eccomapp–MP para puente triple", "Total (ARS); neto Eccomapp; movimientos aprobados MP"),
-        ("Diferencia ML–MP (Bloque B)", "neto_aprobado_mp − total_informado_ml", "universo comparable ML + MP", "Total (ARS) ML; MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO MP"),
+        ("Diferencia financiera ML–MP (Bloque B)", "neto_financiero_total_mp − total_informado_ml", "universo comparable ML + MP", "Total (ARS) ML; suma algebraica de movimientos MP"),
     ]
     for fila in filas: ws.append([_texto_seguro(x) for x in fila])
     _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2,3,4}, freeze=True)
@@ -409,8 +409,13 @@ _COLUMNAS_DIFERENCIAS_BLOQUE_B = (
     "ID de grupo u orden",
     "Fecha de venta ML",
     "Neto informado ML",
-    "Neto aprobado MP",
-    "Diferencia MP − ML",
+    "Neto aprobado bruto MP",
+    "Reclamos/disputas MP",
+    "Devoluciones MP",
+    "Envíos MP",
+    "Otros impactos MP",
+    "Neto financiero total MP",
+    "Diferencia financiera MP − ML",
     "Movimientos MP",
     "Origen MP desde",
     "Origen MP hasta",
@@ -422,7 +427,7 @@ _COLUMNAS_DIFERENCIAS_BLOQUE_B = (
     "Motivos secundarios",
     "Acción recomendada",
 )
-_COLS_MONETARIAS_DIF_B = {"Neto informado ML", "Neto aprobado MP", "Diferencia MP − ML"}
+_COLS_MONETARIAS_DIF_B = {"Neto informado ML", "Neto aprobado bruto MP", "Reclamos/disputas MP", "Devoluciones MP", "Envíos MP", "Otros impactos MP", "Neto financiero total MP", "Diferencia financiera MP − ML"}
 
 _COLUMNAS_MP_SIN_VENTA = (
     "ID de grupo u orden",
@@ -458,7 +463,7 @@ def _escribir_resumen_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
         ("Coinciden dentro de tolerancia", r.coincidencias),
         ("Grupos con diferencia", r.con_diferencia),
         ("Neto ML comparable", r.neto_ml_comparable),
-        ("Neto MP comparable", r.neto_mp_comparable),
+        ("Neto financiero total MP comparable", r.neto_mp_comparable),
         ("Diferencia universo comparable completo (MP − ML)", r.diferencia_universo_comparable),
         ("Diferencia operaciones fuera de tolerancia", r.diferencia_operaciones_fuera_tolerancia),
         ("Diferencia subuniverso conciliado", r.diferencia_subuniverso_conciliado),
@@ -467,7 +472,7 @@ def _escribir_resumen_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
         ("Cantidad MP sin venta ML", diag.cantidad_mp_sin_venta),
         ("Neto aprobado MP sin venta", diag.neto_aprobado_mp_sin_venta),
         ("Neto financiero total MP sin venta", diag.neto_financiero_total_mp_sin_venta),
-        ("Convención", "diferencia_ml_mp = neto_aprobado_mp − total_informado_ml"),
+        ("Convención", "diferencia_financiera_ml_mp = neto_financiero_total_mp − total_informado_ml"),
         ("Positiva", "MP informa más neto que ML"),
         ("Negativa", "MP informa menos neto que ML"),
         ("Aclaración", "Control operativo preliminar; no es resultado contable ni fiscal definitivo."),
@@ -475,7 +480,7 @@ def _escribir_resumen_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
     for fila in filas:
         ws.append(list(fila))
     _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={2}, freeze=False)
-    monetarios = {"Neto ML comparable", "Neto MP comparable", "Diferencia universo comparable completo (MP − ML)", "Diferencia operaciones fuera de tolerancia", "Diferencia subuniverso conciliado", "Suma individual de diferencias", "Neto aprobado MP sin venta", "Neto financiero total MP sin venta"}
+    monetarios = {"Neto ML comparable", "Neto financiero total MP comparable", "Diferencia universo comparable completo (MP − ML)", "Diferencia operaciones fuera de tolerancia", "Diferencia subuniverso conciliado", "Suma individual de diferencias", "Neto aprobado MP sin venta", "Neto financiero total MP sin venta"}
     for row in ws.iter_rows(min_row=2):
         if row[0].value in monetarios and isinstance(row[1].value, Decimal):
             row[1].number_format = _FORMATO_MONEDA_ARS
@@ -489,6 +494,11 @@ def _escribir_diferencias_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> N
             _texto_seguro(g.fecha_venta_ml),
             _decimal_o_vacio(g.total_informado_ml),
             _decimal_o_vacio(g.neto_aprobado_mp),
+            _decimal_o_vacio(g.impacto_reclamos_disputas_mp),
+            _decimal_o_vacio(g.impacto_devoluciones_mp),
+            _decimal_o_vacio(g.impacto_pagos_envio_mp),
+            _decimal_o_vacio(g.impacto_otros_mp),
+            _decimal_o_vacio(g.neto_financiero_total_mp),
             _decimal_o_vacio(g.diferencia_ml_mp),
             g.cantidad_movimientos_mp,
             _texto_seguro(g.fecha_min_origen_mp),

@@ -234,10 +234,10 @@ def diagnosticar_particion(reporte: ReporteControlConsolidado) -> DiagnosticoPar
 
 
 def diagnosticar_diferencias(reporte: ReporteControlConsolidado) -> DiagnosticoDiferenciasFuentes:
-    comparables = tuple(r for r in reporte.resultados if r.total_informado_ml is not None and r.neto_aprobado_mp is not None)
+    comparables = tuple(r for r in reporte.resultados if r.total_informado_ml is not None and r.neto_financiero_total_mp is not None)
     diferencias = tuple(r for r in comparables if r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > reporte.tolerancia)
     suma_ml = _sum(r.total_informado_ml for r in comparables)
-    suma_mp = _sum(r.neto_aprobado_mp for r in comparables)
+    suma_mp = _sum(r.neto_financiero_total_mp for r in comparables)
     suma_dif = _sum(r.diferencia_ml_mp for r in comparables)
     cierra = suma_dif == (suma_mp - suma_ml)
     return DiagnosticoDiferenciasFuentes(
