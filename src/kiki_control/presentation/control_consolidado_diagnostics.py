@@ -398,32 +398,26 @@ def diagnosticar_residual_ml(reporte: ReporteControlConsolidado) -> ResidualMerc
     suma_cupones_fuente, filas_cupones = _sumar_y_contar(r.descuentos_bonificaciones_ml for r in candidatos_ml)
     residual_sin_cupon = suma_total - (suma_ingresos + suma_ingresos_envio + suma_cargos + suma_costos_envio + suma_anulaciones)
     diferencia_con_fuente = residual_sin_cupon - suma_cupones_fuente
-    puede_calcular_cupon_residual = len(excluidos) == 0
     usar_cupon_fuente = filas_cupones > 0 and suma_cupones_fuente != _ZERO and abs(diferencia_con_fuente) <= reporte.tolerancia
     if usar_cupon_fuente:
         suma_cupones = suma_cupones_fuente
         metodo_cupones = "INFORMADO_POR_FUENTE"
-    elif puede_calcular_cupon_residual:
-        suma_cupones = residual_sin_cupon
-        metodo_cupones = "CALCULADO_COMO_RESIDUAL"
     else:
+        # No se atribuye el residual a cupones sin evidencia explícita verificable.
+        # Se usa el importe informado por la fuente (puede ser cero si no existe columna).
         suma_cupones = suma_cupones_fuente
-        metodo_cupones = "INFORMADO_POR_FUENTE" if filas_cupones > 0 else "CALCULADO_COMO_RESIDUAL"
+        metodo_cupones = "INFORMADO_POR_FUENTE" if (filas_cupones > 0 and suma_cupones_fuente != _ZERO) else "SIN_EVIDENCIA"
     residual = suma_total - (suma_ingresos + suma_ingresos_envio + suma_cargos + suma_costos_envio + suma_anulaciones + suma_cupones)
+    cupon_origen = "Mercado Libre oficial" if metodo_cupones == "INFORMADO_POR_FUENTE" else "Sin evidencia adicional"
+    cupon_columna = "Descuentos y bonificaciones" if metodo_cupones == "INFORMADO_POR_FUENTE" else "Sin columna identificada"
+    cupon_filas = filas_cupones if metodo_cupones == "INFORMADO_POR_FUENTE" else 0
     componentes = (
         ComponenteFormacionNetoMl("Ingresos por productos", suma_ingresos, "Mercado Libre oficial", "Ingresos por productos (ARS)", "INFORMADO_POR_FUENTE", filas_ingresos),
         ComponenteFormacionNetoMl("Ingresos por envíos", suma_ingresos_envio, "Mercado Libre oficial", "Ingresos por envío (ARS)", "INFORMADO_POR_FUENTE", filas_ingresos_envio),
         ComponenteFormacionNetoMl("Cargos por venta e impuestos", suma_cargos, "Mercado Libre oficial", "Cargo por venta e impuestos (ARS)", "INFORMADO_POR_FUENTE", filas_cargos),
         ComponenteFormacionNetoMl("Costos de envío", suma_costos_envio, "Mercado Libre oficial", "Costos de envío (ARS)", "INFORMADO_POR_FUENTE", filas_costos_envio),
         ComponenteFormacionNetoMl("Anulaciones y reembolsos", suma_anulaciones, "Mercado Libre oficial", "Anulaciones y reembolsos (ARS)", "INFORMADO_POR_FUENTE", filas_anulaciones),
-        ComponenteFormacionNetoMl(
-            "Cupones de descuento",
-            suma_cupones,
-            "Mercado Libre oficial" if metodo_cupones == "INFORMADO_POR_FUENTE" else "Mercado Libre oficial (cálculo controlado)",
-            "Descuentos y bonificaciones" if metodo_cupones == "INFORMADO_POR_FUENTE" else "Total (ARS)",
-            metodo_cupones,
-            filas_cupones if metodo_cupones == "INFORMADO_POR_FUENTE" else filas_total,
-        ),
+        ComponenteFormacionNetoMl("Cupones de descuento", suma_cupones, cupon_origen, cupon_columna, metodo_cupones, cupon_filas),
         ComponenteFormacionNetoMl("Otros conceptos pendientes de clasificación", residual, "Mercado Libre oficial", "Sin columna identificada", "RESIDUAL_POST_CLASIFICACION", filas_total),
         ComponenteFormacionNetoMl("Neto informado por Mercado Libre", suma_total, "Mercado Libre oficial", "Total (ARS)", "INFORMADO_POR_FUENTE", filas_total),
     )

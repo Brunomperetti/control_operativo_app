@@ -200,7 +200,7 @@ def test_residual_ml_solo_calcula_grupos_con_cuatro_importes_e_identidad():
     assert residual.suma_anulaciones_reembolsos == D('0')
     assert residual.suma_cupones_descuento == D('0')
     assert not residual.identidad_cierra_exactamente
-    assert residual.metodo_cupones == 'CALCULADO_COMO_RESIDUAL'
+    assert residual.metodo_cupones == 'SIN_EVIDENCIA'
     assert residual.motivos_exclusion['falta Total (ARS)'] == 1
     assert residual.motivos_exclusion['falta Ingresos por productos (ARS)'] == 1
     assert residual.motivos_exclusion['falta Cargo por venta e impuestos (ARS)'] == 1
@@ -254,12 +254,14 @@ def test_cupon_explicito_se_respeta_cuando_cierra_dentro_de_tolerancia():
     assert residual.estado_conciliacion == 'CIERRA'
 
 
-def test_cupon_residual_se_calcula_si_fuente_esta_en_cero():
+def test_residual_sin_evidencia_cupon_queda_en_otros_conceptos():
+    """Si Descuentos y bonificaciones está en cero, el residual no se atribuye a cupones."""
     reporte = rep([replace(r('residual'), total_informado_ml=D('85'), monto_venta_ml=D('100'), ingresos_envio_ml=None, cargo_venta_impuestos_ml=D('-5'), costo_envio_ml=D('-5'), anulaciones_reembolsos_ml=D('0'), descuentos_bonificaciones_ml=D('0'))])
     residual = diagnosticar_control_consolidado(reporte).residual_ml
-    assert residual.metodo_cupones == 'CALCULADO_COMO_RESIDUAL'
-    assert residual.suma_cupones_descuento == D('-5')
-    assert residual.diferencia_final == D('0')
+    assert residual.metodo_cupones == 'SIN_EVIDENCIA'
+    assert residual.suma_cupones_descuento == D('0')
+    assert residual.diferencia_final == D('-5')
+    assert residual.estado_conciliacion == 'PENDIENTE'
 
 
 def test_diferencia_final_queda_pendiente_si_faltan_componentes_base():
@@ -287,3 +289,74 @@ def test_conclusion_con_diferencias_usa_diagnostico_no_estado_principal():
     assert "1 de 3 grupos comparables coinciden dentro de la tolerancia" in texto
     assert "2 presentan diferencias" in texto
     assert "$ 24,34" in texto
+
+
+# --- Pruebas obligatorias de clasificación del residual (req. 7) ---
+
+def test_residual_sin_evidencia_no_se_clasifica_como_cupon():
+    """Req. 7-1/7-4: sin evidencia explícita, el residual permanece en 'Otros conceptos'."""
+    reporte = rep([replace(r('sin-ev'), total_informado_ml=D('200'), monto_venta_ml=D('220'),
+                           ingresos_envio_ml=D('0'), cargo_venta_impuestos_ml=D('-10'),
+                           costo_envio_ml=D('-5'), anulaciones_reembolsos_ml=D('0'),
+                           descuentos_bonificaciones_ml=D('0'))])
+    residual = diagnosticar_control_consolidado(reporte).residual_ml
+    # El residual_sin_cupon = 200 - (220 + 0 + (-10) + (-5) + 0) = -5
+    # Sin evidencia de cupón: suma_cupones debe quedar en 0, residual en -5.
+    assert residual.metodo_cupones == 'SIN_EVIDENCIA'
+    assert residual.suma_cupones_descuento == D('0')
+    assert residual.diferencia_final == D('-5')
+    assert residual.estado_conciliacion == 'PENDIENTE'
+    # El componente "Otros conceptos" refleja el residual, no el cupón.
+    otros = next(c for c in residual.componentes if c.concepto == 'Otros conceptos pendientes de clasificación')
+    assert otros.importe == D('-5')
+
+
+def test_cupon_explicito_valido_usa_informado_por_fuente():
+    """Req. 7-2: un cupón explícito que cierra la identidad usa INFORMADO_POR_FUENTE."""
+    reporte = rep([replace(r('con-cupon'), total_informado_ml=D('80'),
+                           monto_venta_ml=D('100'), ingresos_envio_ml=D('0'),
+                           cargo_venta_impuestos_ml=D('-10'), costo_envio_ml=D('-5'),
+                           anulaciones_reembolsos_ml=D('0'), descuentos_bonificaciones_ml=D('-5'))])
+    residual = diagnosticar_control_consolidado(reporte).residual_ml
+    # residual_sin_cupon = 80 - (100 + 0 + (-10) + (-5) + 0) = -5; cupon_fuente = -5 → cierra
+    assert residual.metodo_cupones == 'INFORMADO_POR_FUENTE'
+    assert residual.suma_cupones_descuento == D('-5')
+    assert residual.diferencia_final == D('0')
+    assert residual.estado_conciliacion == 'CIERRA'
+
+
+def test_cupon_parcial_no_cierra_identidad_residual_queda_pendiente():
+    """Req. 7-3/7-4: un cupón que no cierra la identidad deja residual en 'Otros conceptos'."""
+    reporte = rep([replace(r('cupon-parcial'), total_informado_ml=D('75'),
+                           monto_venta_ml=D('100'), ingresos_envio_ml=D('0'),
+                           cargo_venta_impuestos_ml=D('-10'), costo_envio_ml=D('-5'),
+                           anulaciones_reembolsos_ml=D('0'), descuentos_bonificaciones_ml=D('-3'))])
+    residual = diagnosticar_control_consolidado(reporte).residual_ml
+    # residual_sin_cupon = 75 - (100 + 0 + (-10) + (-5) + 0) = -10; cupon_fuente = -3
+    # diferencia_con_fuente = -10 - (-3) = -7 > tolerancia → no cierra → SIN_EVIDENCIA, suma_cupones=0 (fuente=-3 != 0 pero no cierra)
+    # Wait: metodo_cupones = "INFORMADO_POR_FUENTE" if (filas_cupones > 0 and suma_cupones_fuente != 0) else "SIN_EVIDENCIA"
+    # Here filas_cupones > 0 and suma = -3 != 0, so metodo = "INFORMADO_POR_FUENTE"
+    # suma_cupones = -3; residual = 75 - (100 + 0 + (-10) + (-5) + 0 + (-3)) = 75 - 82 = -7
+    assert residual.metodo_cupones == 'INFORMADO_POR_FUENTE'
+    assert residual.suma_cupones_descuento == D('-3')
+    assert residual.diferencia_final == D('-7')
+    assert residual.estado_conciliacion == 'PENDIENTE'
+    otros = next(c for c in residual.componentes if c.concepto == 'Otros conceptos pendientes de clasificación')
+    assert otros.importe == D('-7')
+
+
+def test_nunca_se_fuerza_residual_a_cupon_para_cerrar_identidad():
+    """Req. 7-4: con todos los componentes presentes pero sin cupón explícito, la identidad no cierra artificialmente."""
+    reporte = rep([replace(r('no-cierre'), total_informado_ml=D('90'),
+                           monto_venta_ml=D('100'), ingresos_envio_ml=D('0'),
+                           cargo_venta_impuestos_ml=D('-5'), costo_envio_ml=D('-5'),
+                           anulaciones_reembolsos_ml=D('0'), descuentos_bonificaciones_ml=D('0'))])
+    residual = diagnosticar_control_consolidado(reporte).residual_ml
+    # residual_sin_cupon = 90 - (100 + 0 + (-5) + (-5) + 0) = 0
+    # cupon_fuente = 0 → SIN_EVIDENCIA; suma_cupones = 0; diferencia_final = 0 (pero por fórmula, no por forzar)
+    # El residual es 0 porque la suma de componentes ya coincide con el total, sin necesidad de cupón.
+    assert residual.metodo_cupones == 'SIN_EVIDENCIA'
+    assert residual.suma_cupones_descuento == D('0')
+    # La identidad cierra naturalmente (no se forzó cupón).
+    assert residual.diferencia_final == D('0')
+    assert residual.estado_conciliacion == 'CIERRA'

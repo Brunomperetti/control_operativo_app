@@ -107,10 +107,10 @@ def test_bloque_a_muestra_formacion_completa_metodo_cupon_y_cierre():
         "Otros conceptos pendientes de clasificación",
         "Neto informado por Mercado Libre",
     ]
-    assert filas[5]["Método"] == "CALCULADO_COMO_RESIDUAL"
+    assert filas[5]["Método"] == "SIN_EVIDENCIA"
     assert filas[6]["Importe"] == "$ 0,00"
     assert mensaje_conciliacion_bloque_a(reporte) == "La conciliación cierra"
-    assert auditoria[5]["Columna de origen"] == "Total (ARS)"
+    assert auditoria[5]["Columna de origen"] == "Sin columna identificada"
     assert auditoria[5]["Diferencia final"] == "$ 0,00"
 
 
@@ -339,7 +339,7 @@ def test_excel_residual_muestra_universo_sumas_y_no_formatea_cantidades_como_mon
     wb = load_workbook(BytesIO(generar_reporte_consolidado_excel(reporte)))
     ws = wb['Puente de fuentes']
     filas = {row[0].value: row[1] for row in ws.iter_rows(min_row=2, values_only=False)}
-    assert filas['Método cupón Bloque A'].value in {'INFORMADO_POR_FUENTE', 'CALCULADO_COMO_RESIDUAL'}
+    assert filas['Método cupón Bloque A'].value in {'INFORMADO_POR_FUENTE', 'CALCULADO_COMO_RESIDUAL', 'SIN_EVIDENCIA'}
     assert filas['Diferencia final Bloque A'].value == D('0')
     assert filas['Universo ML oficial'].value == 1
     assert '$' not in filas['Universo ML oficial'].number_format
