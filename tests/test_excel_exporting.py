@@ -83,7 +83,7 @@ def test_resumen_contiene_contexto_kpis_aclaraciones_y_no_filtra_pii():
     assert resumen["Tipo de reporte"] == "Reporte completo"
     assert resumen["Fecha y hora del procesamiento (zona operativa)"].hour == 21
     assert resumen["Zona horaria operativa"] == "America/Argentina/Cordoba"
-    assert resumen["Versión de la regla de conciliación"] == "ML_MP_ID_ORDER_NETO_V1"
+    assert resumen["Versión de la regla de conciliación"] == "ML_MP_ID_ORDER_NETO_V2"
     assert Decimal(str(resumen["Tolerancia aplicada"])) == Decimal("0.01")
     assert resumen["Cobertura de ventas ML"] == "01/01/2026 a 02/01/2026"
     assert "Se compararon" in resumen["Conclusión ejecutiva"]

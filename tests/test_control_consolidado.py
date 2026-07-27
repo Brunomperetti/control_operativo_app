@@ -167,6 +167,19 @@ def test_bloque_b_multiples_movimientos_suma_el_neto_financiero_total():
     assert (r.neto_aprobado_mp, r.neto_financiero_total_mp, r.diferencia_ml_mp) == (D("100"), D("80"), D("0"))
 
 
+def test_payout_con_id_order_no_se_asigna_como_impacto_de_la_venta():
+    rep = reporte([venta("O1", total=D("80"))], [op("O1")], [
+        fin("O1", 1, D("80")),
+        fin("O1", 2, D("0"), neto_financiero=D("0"), payout=True),
+    ])
+    venta_r = next(r for r in rep.resultados if r.tiene_mercado_libre_oficial)
+    payout_r = next(r for r in rep.resultados if r.tipo_movimiento_financiero == TipoMovimientoFinanciero.MOVIMIENTO_DE_FONDOS)
+
+    assert venta_r.neto_financiero_total_mp == D("80")
+    assert venta_r.impacto_otros_mp == D("0")
+    assert payout_r.tiene_mercado_libre_oficial is False
+
+
 def test_bloque_b_conciliacion_exacta_se_mantiene_dentro_de_tolerancia():
     r = unico(reporte([venta("O1", total=D("80"))], [op("O1")], [fin("O1", neto=D("100"), neto_financiero=D("80"))]))
     assert r.diferencia_ml_mp == D("0")

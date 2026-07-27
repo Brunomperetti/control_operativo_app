@@ -269,7 +269,7 @@ def test_claves_bloque_b_nuevas_se_limpian_e_invalidan():
     claves = {
         "enriq_fechas_liq_mp_por_fila", "enriq_tipos_mp_por_fila",
         "enriq_ids_op_mp_por_fila", "enriq_fechas_venta_ml_por_fila",
-        "enriq_clasificaciones_mp_por_fila", "enriq_fechas_aprobacion_mp_por_fila",
+        "enriq_clasificaciones_mp_por_fila", "enriq_tratamientos_mp_por_fila", "enriq_fechas_aprobacion_mp_por_fila",
         "enriq_netos_mp_por_fila", "detalle_diferencia_bloque_b",
         "bloque_b_buscar_id_mp", "bloque_b_filtro_tipo", "bloque_b_filtro_cat",
     }

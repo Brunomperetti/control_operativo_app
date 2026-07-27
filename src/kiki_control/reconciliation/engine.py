@@ -33,8 +33,10 @@ def reconciliar(
     validar_tolerancia(tolerancia)
     operaciones = tuple(operaciones_comerciales)
     movimientos = tuple(movimientos_financieros)
+    movimientos_fondos = tuple(m for m in movimientos if m.tipo_operacion == TipoOperacionFinanciera.PAYOUT)
+    movimientos_conciliables = tuple(m for m in movimientos if m.tipo_operacion != TipoOperacionFinanciera.PAYOUT)
     fecha = datetime.now(UTC)
-    grupos = agrupar_por_id_orden(operaciones, movimientos)
+    grupos = agrupar_por_id_orden(operaciones, movimientos_conciliables)
     resultados = [
         _resultado_para_orden(
             id_orden,
@@ -45,6 +47,7 @@ def reconciliar(
         )
         for id_orden in grupos.ids_orden
     ]
+    resultados.extend(_resultado_para_movimiento_sin_orden(m, tolerancia, fecha) for m in movimientos_fondos)
     resultados.extend(_resultado_para_movimiento_sin_orden(m, tolerancia, fecha) for m in grupos.movimientos_sin_orden)
     return ReporteConciliacion(
         resultados=tuple(resultados),
@@ -123,9 +126,14 @@ def _agregar_componentes(movimientos: tuple[MovimientoFinanciero, ...], motivos:
 def _resultado_para_movimiento_sin_orden(movimiento: MovimientoFinanciero, tolerancia: Decimal, fecha: datetime) -> ResultadoConciliacion:
     es_payout = movimiento.tipo_operacion == TipoOperacionFinanciera.PAYOUT
     estado = EstadoConciliacion.MOVIMIENTO_DE_FONDOS if es_payout else EstadoConciliacion.MOVIMIENTO_SIN_OPERACION_COMERCIAL
-    motivos = (MotivoConciliacion.PAYOUT_SIN_ORDEN,) if es_payout else (MotivoConciliacion.ORDEN_AUSENTE,)
-    explicacion = "PAYOUT sin ID Order tratado como movimiento de fondos, no como pérdida comercial." if es_payout else "Movimiento financiero sin ID Order; se conserva individualmente sin contraparte comercial."
-    return _crear_resultado(None, (), (movimiento,), fecha, tolerancia, estado, motivos, (explicacion,), not es_payout, False, None, None, None, None)
+    if es_payout:
+        motivo_payout = MotivoConciliacion.PAYOUT_CON_ORDEN_SEPARADO if movimiento.id_orden else MotivoConciliacion.PAYOUT_SIN_ORDEN
+        motivos = (motivo_payout,)
+    else:
+        motivos = (MotivoConciliacion.ORDEN_AUSENTE,)
+    explicacion = "PAYOUT tratado como movimiento de fondos separado, no como impacto financiero de una venta." if es_payout else "Movimiento financiero sin ID Order; se conserva individualmente sin contraparte comercial."
+    id_orden = movimiento.id_orden if es_payout else None
+    return _crear_resultado(id_orden, (), (movimiento,), fecha, tolerancia, estado, motivos, (explicacion,), not es_payout, False, None, None, None, None)
 
 
 def _crear_resultado(id_orden: str | None, operaciones: tuple[OperacionComercial, ...], movimientos: tuple[MovimientoFinanciero, ...], fecha: datetime, tolerancia: Decimal, estado: EstadoConciliacion, motivos: tuple[MotivoConciliacion, ...], explicaciones: tuple[str, ...], requiere_revision: bool, es_pago_dividido: bool, neto_comercial: Decimal | None, neto_pagos: Decimal | None, diferencia: Decimal | None, utilidad: Decimal | None) -> ResultadoConciliacion:
@@ -151,8 +159,14 @@ def _crear_resultado(id_orden: str | None, operaciones: tuple[OperacionComercial
         impacto_pagos_envio=_sumar(m for m in movimientos if m.tipo_operacion == TipoOperacionFinanciera.PAGO_ENVIO),
         impacto_devoluciones=_sumar(m for m in movimientos if m.tipo_operacion in DEVOLUCIONES),
         impacto_reclamos_disputas=_sumar(m for m in movimientos if m.tipo_operacion in RECLAMOS_DISPUTAS),
-        impacto_otros=_sumar(m for m in movimientos if m.tipo_operacion not in CONTROL_PRINCIPAL),
-        neto_financiero_total=_sumar(movimientos),
+        impacto_otros=_sumar(
+            m for m in movimientos
+            if m.tipo_operacion not in CONTROL_PRINCIPAL and m.modifica_neto_comparable
+        ),
+        # PAGO_ENVIO es un componente del pago aprobado, no un segundo ingreso.
+        # PAYOUT se informa en el universo de fondos. Los restantes movimientos
+        # (incluidos reclamos y devoluciones) sí conservan su signo algebraico.
+        neto_financiero_total=_sumar(m for m in movimientos if m.modifica_neto_comparable),
         utilidad_neta_informada=utilidad,
         tolerancia_aplicada=tolerancia,
         tiene_devolucion=any(m.tipo_operacion in DEVOLUCIONES for m in movimientos),

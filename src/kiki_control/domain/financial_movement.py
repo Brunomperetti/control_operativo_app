@@ -20,6 +20,14 @@ class TipoOperacionFinanciera(StrEnum):
     DESCONOCIDA = "DESCONOCIDA"
 
 
+class TratamientoNetoComparable(StrEnum):
+    """Semántica contable explícita de un movimiento para el neto ML–MP."""
+
+    MODIFICA_NETO_COMPARABLE = "MODIFICA_NETO_COMPARABLE"
+    COMPONENTE_YA_INCLUIDO = "COMPONENTE_YA_INCLUIDO"
+    MOVIMIENTO_DE_FONDOS = "MOVIMIENTO_DE_FONDOS"
+
+
 @dataclass(frozen=True)
 class DetalleImpuesto:
     """Detalle inmutable de un impuesto informado por la fuente financiera."""
@@ -77,3 +85,22 @@ class MovimientoFinanciero:
     impuestos_desagregados: tuple[DetalleImpuesto, ...]
     datos_extra_original: str | None
     operation_tags_original: str | None
+
+    @property
+    def tratamiento_neto_comparable(self) -> TratamientoNetoComparable:
+        """Clasifica el movimiento sin inferir impacto por estar asociado a una orden.
+
+        El reporte MP presenta ``Pago de envío`` como desglose del pago aprobado:
+        su importe queda visible, pero ya está contenido en el neto aprobado bruto.
+        Un PAYOUT mueve fondos y pertenece a un universo separado.
+        """
+        if self.tipo_operacion == TipoOperacionFinanciera.PAGO_ENVIO:
+            return TratamientoNetoComparable.COMPONENTE_YA_INCLUIDO
+        if self.tipo_operacion == TipoOperacionFinanciera.PAYOUT:
+            return TratamientoNetoComparable.MOVIMIENTO_DE_FONDOS
+        return TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE
+
+    @property
+    def modifica_neto_comparable(self) -> bool:
+        """Indica si el importe integra algebraicamente el neto comparable."""
+        return self.tratamiento_neto_comparable == TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE

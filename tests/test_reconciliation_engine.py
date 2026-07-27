@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from kiki_control.domain.commercial_operation import OperacionComercial
-from kiki_control.domain.financial_movement import MovimientoFinanciero, TipoOperacionFinanciera
+from kiki_control.domain.financial_movement import MovimientoFinanciero, TipoOperacionFinanciera, TratamientoNetoComparable
 from kiki_control.domain.reconciliation import EstadoConciliacion, MotivoConciliacion, ReporteConciliacion, ResultadoConciliacion
 from kiki_control.reconciliation import reconciliar
 
@@ -88,13 +88,64 @@ def test_movimientos_sin_orden_payout_otros_y_no_se_mezclan():
     assert reporte.resultados[1].motivos == (MotivoConciliacion.ORDEN_AUSENTE,)
 
 
+def test_payout_con_id_orden_permanece_como_fondo_separado():
+    payout = mov(id_orden="1", monto="-250", tipo=TipoOperacionFinanciera.PAYOUT, id_mp="payout")
+    reporte = reconciliar([op(id_orden="1")], [mov(id_orden="1"), payout])
+    venta = next(r for r in reporte.resultados if r.estado != EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
+    fondos = next(r for r in reporte.resultados if r.estado == EstadoConciliacion.MOVIMIENTO_DE_FONDOS)
+
+    assert payout.tratamiento_neto_comparable == TratamientoNetoComparable.MOVIMIENTO_DE_FONDOS
+    assert venta.neto_financiero_total == Decimal("100")
+    assert venta.impacto_otros == Decimal("0")
+    assert fondos.id_orden == "1"
+    assert fondos.neto_financiero_total == Decimal("0")
+    assert fondos.impacto_otros == Decimal("0")
+
+
 def test_liquidacion_pendiente_envio_y_componentes_total():
     r = único(reconciliar([op(neto="100")], [mov(monto="100", liquidado=False), mov(monto="-10", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="e", fila=11)]))
     assert r.estado == EstadoConciliacion.PENDIENTE_ACREDITACION
     assert r.tiene_liquidacion_pendiente and r.tiene_pago_envio
     assert r.impacto_pagos_envio == Decimal("-10")
-    assert r.neto_financiero_total == Decimal("90")
+    assert r.neto_financiero_total == Decimal("100")
     assert r.diferencia_control == Decimal("0")
+
+
+def test_pago_envio_es_componente_incluido_y_no_se_contabiliza_dos_veces():
+    pago = mov(monto="8777.90", id_mp="pago")
+    envio = mov(monto="2449.46", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="envio", fila=11)
+    r = único(reconciliar([op(neto="8777.90")], [pago, envio]))
+
+    assert envio.tratamiento_neto_comparable == TratamientoNetoComparable.COMPONENTE_YA_INCLUIDO
+    assert envio.modifica_neto_comparable is False
+    assert r.neto_pagos_aprobados == Decimal("8777.90")
+    assert r.impacto_pagos_envio == Decimal("2449.46")
+    assert r.neto_financiero_total == Decimal("8777.90")
+    assert r.diferencia_control == Decimal("0")
+
+
+def test_multiples_pagos_envios_y_ajustes_independientes_conservan_semantica():
+    movimientos = [
+        mov(monto="500", id_mp="p1"),
+        mov(monto="500", id_mp="p2", fila=11),
+        mov(monto="200", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="e1", fila=12),
+        mov(monto="50", tipo=TipoOperacionFinanciera.PAGO_ENVIO, id_mp="e2", fila=13),
+        mov(monto="-100.08", tipo=TipoOperacionFinanciera.DEVOLUCION_ENVIO, id_mp="d", fila=14),
+        mov(monto="-8.35", tipo=TipoOperacionFinanciera.DISPUTA_ENVIO, id_mp="r", fila=15),
+    ]
+    r = único(reconciliar([op(neto="891.57")], movimientos))
+
+    assert movimientos[4].tratamiento_neto_comparable == TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE
+    assert r.impacto_pagos_envio == Decimal("250")
+    assert r.impacto_devoluciones == Decimal("-100.08")
+    assert r.impacto_reclamos_disputas == Decimal("-8.35")
+    assert r.neto_financiero_total == Decimal("891.57")
+
+
+@pytest.mark.parametrize("tipo", [TipoOperacionFinanciera.RECLAMO, TipoOperacionFinanciera.DEVOLUCION_DINERO])
+def test_reclamo_o_devolucion_total_siguen_anulando_el_pago(tipo):
+    r = único(reconciliar([op(neto="0")], [mov(monto="100"), mov(monto="-100", tipo=tipo, id_mp="ajuste", fila=11)]))
+    assert r.neto_financiero_total == Decimal("0")
 
 
 def test_devoluciones_reclamos_disputas_y_mismo_id_distinto_tipo():
@@ -139,7 +190,7 @@ def test_impactos_utilidad_decimales_inmutabilidad_orden_totales_y_sin_dataframe
     assert a.impacto_devoluciones == Decimal("-30")
     assert a.impacto_reclamos_disputas == Decimal("-7")
     assert a.impacto_otros == Decimal("2")
-    assert a.neto_financiero_total == Decimal("53")
+    assert a.neto_financiero_total == Decimal("65")
     assert a.utilidad_neta_informada == Decimal("33")
     assert isinstance(a.motivos, tuple)
     assert not any(isinstance(v, float) for v in asdict(a).values())

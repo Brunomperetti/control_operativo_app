@@ -63,6 +63,7 @@ from kiki_control.presentation.control_consolidado_view import (
     filas_grupos_excluidos,
     filas_grupos_involucrados,
     filas_mp_sin_venta,
+    filas_movimientos_bloque_b,
     filas_movimientos_diferencia,
     filas_resumen_revisiones,
     filas_tabla_consolidada,
@@ -86,7 +87,11 @@ from kiki_control.presentation.control_consolidado_view import (
     tabla_consolidada,
     trazabilidad_tecnica,
 )
-from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b, clasificaciones_movimientos_mp_por_fila
+from kiki_control.presentation.bloque_b_diagnostics import (
+    clasificaciones_movimientos_mp_por_fila,
+    diagnosticar_bloque_b,
+    tratamientos_movimientos_mp_por_fila,
+)
 from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
 from kiki_control.reconciliation import reconciliar
 from kiki_control.ui.session_cycle import (
@@ -324,6 +329,9 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
         st.session_state["enriq_clasificaciones_mp_por_fila"] = clasificaciones_movimientos_mp_por_fila(
             mercado_pago.movimientos
         )
+        st.session_state["enriq_tratamientos_mp_por_fila"] = tratamientos_movimientos_mp_por_fila(
+            mercado_pago.movimientos
+        )
         st.session_state["enriq_netos_mp_por_fila"] = {
             m.numero_fila_origen: m.monto_neto_impactado
             for m in mercado_pago.movimientos
@@ -528,6 +536,10 @@ def _enriq_clasificaciones_mp() -> dict[int, Any]:
     return st.session_state.get("enriq_clasificaciones_mp_por_fila", {})
 
 
+def _enriq_tratamientos_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_tratamientos_mp_por_fila", {})
+
+
 def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
     return {
         "Categoría temporal": nombre,
@@ -566,6 +578,13 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
 
     # Universo explícito
     st.info(texto_universo_comparable(diag_bloque_b))
+
+    st.subheader("Movimientos MP asociados")
+    st.caption(
+        "PAGO_ENVIO permanece visible para trazabilidad como componente ya incluido en el pago aprobado; "
+        "no se suma nuevamente al neto comparable."
+    )
+    st.dataframe(filas_movimientos_bloque_b(diag_bloque_b), use_container_width=True, hide_index=True)
 
     # Operaciones con diferencia
     st.subheader("Operaciones con diferencia ML–MP")
@@ -695,6 +714,7 @@ def _mostrar_resultados() -> None:
         fechas_aprobacion_mp_por_fila=_enriq_fechas_aprobacion_mp(),
         montos_neto_mp_por_fila=_enriq_montos_neto_mp(),
         clasificaciones_mp_por_fila=_enriq_clasificaciones_mp(),
+        tratamientos_mp_por_fila=_enriq_tratamientos_mp(),
     )
     tab_resumen, tab_operacion, tab_auditoria = st.tabs(["Resumen ejecutivo", "Control por operación", "Auditoría y descargas"])
 
