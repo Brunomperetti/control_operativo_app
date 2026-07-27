@@ -140,7 +140,10 @@ def _resultado_desde(
     total_ml = ml_vals["total_informado_ml"]
     dif_venta = ml_vals["monto_venta_ml"] - monto_ec if ml_vals["monto_venta_ml"] is not None and monto_ec is not None else None
     dif_neto_ec = total_ml - neto_ec if total_ml is not None and neto_ec is not None else None
-    dif_ml_mp = neto_mp - total_ml if neto_mp is not None and total_ml is not None else None
+    # Bloque B concilia el efecto financiero completo. ``neto_mp`` se conserva
+    # como métrica bruta de pagos aprobados, pero reclamos, devoluciones,
+    # envíos y demás impactos forman parte del importe realmente comparable.
+    dif_ml_mp = neto_fin - total_ml if neto_fin is not None and total_ml is not None else None
     utilidad_control = total_ml - costo_prod if total_ml is not None and costo_prod is not None else None
     motivos = list(comercial.motivos if comercial else ())
     explicaciones = list(comercial.explicaciones if comercial else ())

@@ -74,7 +74,7 @@ def test_kpis_comparables_utilidad_parcial_y_mp_sin_ml():
     bloques = kpis_consolidados(reporte)
     b = {k.nombre: k.valor for ks in bloques.values() for k in ks}
     assert b["Neto ML comparable"] == "$ 100,00"
-    assert b["Neto MP comparable"] == "$ 90,00"
+    assert b["Neto financiero total MP comparable"] == "$ 90,00"
     assert b["Diferencia total"] == "$ -10,00"
     assert b["Neto MP sin venta ML"] == "$ 30,00"
     assert b["Utilidad preliminar calculable"] == "$ 60,00"
@@ -220,7 +220,7 @@ def test_integral_tres_fuentes_sintetico_en_memoria_presentacion_y_cobertura():
     assert explicaciones["Neto esperado ML"]["Columna utilizada"] == "Total (ARS)"
     assert explicaciones["Costo de productos"]["Columna utilizada"] == "Costo Total (Con IVA) ($)"
     assert explicaciones["Neto aprobado MP"]["Columna utilizada"] == "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO"
-    assert explicaciones["Diferencia ML–MP"]["Regla aplicada"] == "neto_aprobado_mp - total_informado_ml"
+    assert explicaciones["Diferencia ML–MP"]["Regla aplicada"] == "neto_financiero_total_mp - total_informado_ml"
     assert explicaciones["Utilidad preliminar"]["Regla aplicada"] == "total_informado_ml - costo_productos_eccomapp"
 
     cobertura = cobertura_tres_fuentes(ventas_ml.ventas, eccomapp.operaciones, mercado_pago.movimientos)

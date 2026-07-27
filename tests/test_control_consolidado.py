@@ -59,6 +59,7 @@ def fin(
     cantidad_movimientos: int = 1,
     hashes_financieros=("hash-mp",),
     filas_financieras: tuple[int, ...] | None = None,
+    financiero_total: Decimal | None = None,
     **flags,
 ):
     filas = tuple(filas_financieras if filas_financieras is not None else ((fila,) if cantidad_movimientos > 0 else ()))
@@ -70,7 +71,7 @@ def fin(
         D("4") if flags.get("pago_envio", False) else D("0"),
         D("-5") if flags.get("devolucion", False) else D("0"),
         D("-6") if flags.get("reclamo", False) or flags.get("disputa", False) else D("0"),
-        D("0"), neto or D("0"), None, D("0.50"), flags.get("devolucion", False),
+        D("0"), financiero_total if financiero_total is not None else (neto or D("0")), None, D("0.50"), flags.get("devolucion", False),
         flags.get("reclamo", False), flags.get("disputa", False), flags.get("pago_envio", False),
         flags.get("desconocido", False), flags.get("pendiente", False), flags.get("duplicados", False),
     )
@@ -129,6 +130,35 @@ def test_diferencias_positiva_negativa_cero_y_tolerancia():
     assert unico(reporte([venta("O1")], [op("O1")], [fin("O1", neto=D("79"))])).diferencia_ml_mp == D("-1")
     assert unico(reporte([venta("O1")], [op("O1")], [fin("O1", neto=D("80.25"))])).estado == EstadoControlConsolidado.COMPLETA
     assert unico(reporte([venta("O1")], [op("O1")], [fin("O1", neto=D("80.75"))])).estado == EstadoControlConsolidado.CON_DIFERENCIA
+
+
+@pytest.mark.parametrize(
+    ("id_operacion", "total_ml", "aprobado", "impactos", "esperada"),
+    [
+        ("PAGO-SIMPLE", "10928.07", "10928.07", (), "0"),
+        ("2000017510734430", "0", "10928.07", ("-10928.07",), "0"),
+        ("2000017512093380", "0", "13116.27", ("-13116.27",), "0"),
+        ("DEVOLUCION-TOTAL", "0", "100", ("-100",), "0"),
+        ("REVERSA-PARCIAL", "40", "100", ("-60",), "0"),
+        ("MULTIPLES", "85", "100", ("-20", "5"), "0"),
+        ("FUERA-TOLERANCIA", "80", "100", ("-10",), "10"),
+    ],
+)
+def test_bloque_b_usa_suma_financiera_y_conserva_aprobado_bruto(
+    id_operacion, total_ml, aprobado, impactos, esperada
+):
+    """Cubre pagos, reclamos/devoluciones, reversas y múltiples impactos sin datos productivos."""
+    movimientos = [fin(id_operacion, 1, D(aprobado), financiero_total=D(aprobado))]
+    movimientos.extend(
+        fin(id_operacion, fila, neto=None, financiero_total=D(impacto), estado=EstadoConciliacion.EN_REVISION)
+        for fila, impacto in enumerate(impactos, start=2)
+    )
+    r = unico(reporte([venta(id_operacion, total=D(total_ml))], [op(id_operacion)], movimientos))
+
+    assert r.neto_aprobado_mp == D(aprobado)
+    assert r.neto_financiero_total_mp == D(aprobado) + sum(map(D, impactos), D("0"))
+    assert r.diferencia_financiera_ml_mp == D(esperada)
+    assert (abs(r.diferencia_financiera_ml_mp) <= r.tolerancia) == (D(esperada) == 0)
 
 
 def test_utilidad_eccomapp_conservada_separada_y_costo_agregado():

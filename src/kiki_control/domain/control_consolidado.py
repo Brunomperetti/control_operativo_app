@@ -100,6 +100,15 @@ class ResultadoControlConsolidado:
     claves_resultados_comerciales: tuple[str, ...]
     claves_resultados_financieros: tuple[str, ...]
 
+    @property
+    def diferencia_financiera_ml_mp(self) -> Decimal | None:
+        """Diferencia final de Bloque B: neto financiero total MP menos ML.
+
+        ``diferencia_ml_mp`` se mantiene como alias persistido por
+        compatibilidad con consumidores existentes.
+        """
+        return self.diferencia_ml_mp
+
 
 @dataclass(frozen=True)
 class ReporteControlConsolidado:
