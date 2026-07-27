@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Iterable, Any
 
 from kiki_control.domain.control_consolidado import EstadoControlConsolidado, ReporteControlConsolidado, ResultadoControlConsolidado
-from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado, motivos_datos_criticos_faltantes, tiene_datos_criticos_faltantes
+from kiki_control.presentation.control_consolidado_diagnostics import DiagnosticoControlConsolidado, diagnosticar_control_consolidado, motivos_datos_criticos_faltantes, tiene_datos_criticos_faltantes
 from kiki_control.presentation.formatters import formato_pesos_argentino
 
 
@@ -49,7 +49,7 @@ def nombre_archivo_descarga(prefijo: str, fecha: str) -> str:
     return f"{prefijo}{fecha}.xlsx" if prefijo.endswith("_") else f"{prefijo}_{fecha}.xlsx"
 
 
-def filas_bloque_a(reporte: ReporteControlConsolidado, diagnostico: Any | None = None) -> list[dict[str, str]]:
+def filas_bloque_a(reporte: ReporteControlConsolidado, diagnostico: DiagnosticoControlConsolidado | None = None) -> list[dict[str, str]]:
     diag = diagnostico or diagnosticar_control_consolidado(reporte)
     return [
         {
@@ -62,7 +62,7 @@ def filas_bloque_a(reporte: ReporteControlConsolidado, diagnostico: Any | None =
     ]
 
 
-def auditoria_bloque_a(reporte: ReporteControlConsolidado, diagnostico: Any | None = None) -> list[dict[str, str]]:
+def auditoria_bloque_a(reporte: ReporteControlConsolidado, diagnostico: DiagnosticoControlConsolidado | None = None) -> list[dict[str, str]]:
     diag = diagnostico or diagnosticar_control_consolidado(reporte)
     return [
         {
@@ -78,7 +78,7 @@ def auditoria_bloque_a(reporte: ReporteControlConsolidado, diagnostico: Any | No
     ]
 
 
-def mensaje_conciliacion_bloque_a(reporte: ReporteControlConsolidado, diagnostico: Any | None = None) -> str:
+def mensaje_conciliacion_bloque_a(reporte: ReporteControlConsolidado, diagnostico: DiagnosticoControlConsolidado | None = None) -> str:
     diag = diagnostico or diagnosticar_control_consolidado(reporte)
     if abs(diag.residual_ml.diferencia_final) <= reporte.tolerancia:
         return "La conciliación cierra"

@@ -350,7 +350,7 @@ def _escribir_puente_consolidado(ws: Worksheet, diag: Any) -> None:
             filas_monetarias.add(ws.max_row)
     ws.append(["Advertencia", "No comparar importes de universos distintos sin revisar Cobertura y universos.", "", ""])
     ws.append(["Aclaración temporal", "Si se genera sin diagnóstico de sesión, la distribución temporal no puede clasificar contra período ML ni fechas MP y queda sin fecha.", "", ""])
-    _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={3,4}, freeze=False)
+    _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={3, 4}, freeze=False)
     for row_idx in filas_monetarias:
         ws.cell(row=row_idx, column=2).number_format = _FORMATO_MONEDA_ARS
     for row in range(2, ws.max_row + 1):
@@ -369,14 +369,14 @@ def _escribir_temporal_consolidado(ws: Worksheet, diag: Any) -> None:
     ws.append(["Categoría", "Cantidad", "Neto aprobado MP", "Neto financiero total MP", "Aclaración"])
     for nombre, item in (("Anteriores", diag.temporal_mp_sin_venta.anteriores), ("Dentro", diag.temporal_mp_sin_venta.dentro), ("Posteriores", diag.temporal_mp_sin_venta.posteriores), ("Sin fecha", diag.temporal_mp_sin_venta.sin_fecha), ("Fechas mixtas", diag.temporal_mp_sin_venta.fechas_mixtas)):
         ws.append([nombre, item.cantidad, item.neto_aprobado_mp, item.neto_financiero_total_mp, _texto_seguro(diag.temporal_mp_sin_venta.aclaracion)])
-    _formatear_tabla(ws, moneda_columnas={3,4}, wrap_columnas={5}, freeze=True)
+    _formatear_tabla(ws, moneda_columnas={3, 4}, wrap_columnas={5}, freeze=True)
 
 
 def _escribir_revisiones_consolidadas(ws: Worksheet, diag: Any) -> None:
     ws.append(["Motivo", "Cantidad", "Importe afectado", "Acción", "Grupos"])
     for r in diag.revisiones.revisiones_multietiqueta:
         ws.append([_texto_seguro(r.motivo_visible), r.cantidad, _decimal_o_vacio(r.importe_afectado), _texto_seguro(r.accion_recomendada), _texto_seguro(", ".join(r.grupos_involucrados))])
-    _formatear_tabla(ws, moneda_columnas={3}, wrap_columnas={4,5}, freeze=True)
+    _formatear_tabla(ws, moneda_columnas={3}, wrap_columnas={4, 5}, freeze=True)
 
 
 def _escribir_diccionario_consolidado(ws: Worksheet) -> None:

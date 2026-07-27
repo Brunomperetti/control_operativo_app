@@ -44,7 +44,7 @@ def test_streamlit_no_duplica_formulas_financieras_y_usa_apis_existentes():
     assert "Diferencia =" not in source
     assert "Auditoría de conciliación Eccomapp–Mercado Pago" in source
     assert "Histórico Eccomapp–MP: descargar reporte completo" in source
-    assert "TITULO_BLOQUE_A" in source
+    assert TITULO_BLOQUE_A == "Bloque A — Formación del neto informado por Mercado Libre"
 
 
 def test_presentacion_sin_float_y_negativos_con_signo():
