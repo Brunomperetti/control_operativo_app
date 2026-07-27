@@ -13,7 +13,6 @@ from enum import StrEnum
 from typing import Iterable, Mapping
 
 from kiki_control.domain.control_consolidado import (
-    EstadoControlConsolidado,
     ReporteControlConsolidado,
     ResultadoControlConsolidado,
     TipoMovimientoFinanciero,
@@ -40,6 +39,21 @@ ESTADOS_EXPLICACION_VISIBLES: dict[EstadoExplicacionDiferencia, str] = {
 
 
 @dataclass(frozen=True)
+class DetalleMovimientoMP:
+    """Detalle inmutable de un movimiento MP individual asociado a un grupo con diferencia."""
+
+    id_movimiento_mp: str
+    id_orden: str
+    tipo_movimiento: str
+    estado_normalizado: str
+    fecha_origen: str
+    fecha_aprobacion: str
+    fecha_liquidacion: str
+    monto_neto_impactado: Decimal | None
+    fila_origen: int
+
+
+@dataclass(frozen=True)
 class GrupoConDiferencia:
     """Grupo comparable con diferencia ML–MP que supera la tolerancia."""
 
@@ -59,11 +73,12 @@ class GrupoConDiferencia:
     motivo_visible: str
     motivos_secundarios: tuple[str, ...]
     accion_recomendada: str
+    movimientos_asociados: tuple[DetalleMovimientoMP, ...]
 
 
 @dataclass(frozen=True)
 class MovimientoMpSinVentaML:
-    """Grupo MP sin venta ML encontrada (SOLO_MOVIMIENTO_FINANCIERO)."""
+    """Grupo MP con Mercado Pago presente y sin venta oficial ML (excluye payouts y fondos)."""
 
     id_grupo: str
     ids_movimiento_mp: tuple[str, ...]
@@ -86,7 +101,12 @@ class ResumenBloqueB:
     con_diferencia: int
     neto_ml_comparable: Decimal
     neto_mp_comparable: Decimal
-    diferencia_total: Decimal
+    diferencia_universo_comparable: Decimal
+    """Diferencia neto_mp − neto_ml para TODOS los grupos comparables (incluye los dentro de tolerancia)."""
+    diferencia_operaciones_fuera_tolerancia: Decimal
+    """Suma de diferencia_ml_mp solo para los grupos cuya diferencia absoluta supera la tolerancia."""
+    diferencia_subuniverso_conciliado: Decimal
+    """Diferencia agregada real de los grupos dentro de tolerancia (puede ser distinta de cero)."""
 
 
 @dataclass(frozen=True)
@@ -96,11 +116,18 @@ class DiagnosticoBloqueB:
     resumen: ResumenBloqueB
     grupos_con_diferencia: tuple[GrupoConDiferencia, ...]
     cantidad_mp_sin_venta: int
+    """Operaciones/movimientos MP sin venta oficial ML (excluye payouts y movimientos de fondos)."""
     neto_aprobado_mp_sin_venta: Decimal
     neto_financiero_total_mp_sin_venta: Decimal
     movimientos_mp_sin_venta: tuple[MovimientoMpSinVentaML, ...]
+    cantidad_movimientos_fondos: int
+    """Payouts y movimientos de fondos: no son ventas faltantes."""
+    neto_aprobado_mp_fondos: Decimal
+    neto_financiero_total_mp_fondos: Decimal
+    movimientos_fondos: tuple[MovimientoMpSinVentaML, ...]
     suma_diferencias_individuales: Decimal
     coherencia_suma_diferencias: bool
+    """Verifica que suma_diferencias_individuales == diferencia_operaciones_fuera_tolerancia."""
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +357,34 @@ def _ids_operacion_para_filas(
     return tuple(ids) if ids else ()
 
 
+def _construir_detalle_movimientos(
+    filas_mp: tuple[int, ...],
+    ids_op: Mapping[int, str],
+    ids_orden: Mapping[int, str | None],
+    tipos: Mapping[int, str],
+    fechas_origen: Mapping[int, date | datetime | None],
+    fechas_aprobacion: Mapping[int, date | datetime | None],
+    fechas_liq: Mapping[int, date | datetime | None],
+    montos_neto: Mapping[int, Decimal | None],
+) -> tuple[DetalleMovimientoMP, ...]:
+    """Construye la tupla de detalle de movimientos MP para las filas dadas."""
+    detalles: list[DetalleMovimientoMP] = []
+    for fila in filas_mp:
+        tipo_mov = tipos.get(fila, "Sin tipo")
+        detalles.append(DetalleMovimientoMP(
+            id_movimiento_mp=ids_op.get(fila, "—"),
+            id_orden=ids_orden.get(fila) or "—",
+            tipo_movimiento=tipo_mov,
+            estado_normalizado=tipo_mov,
+            fecha_origen=_fecha_str(_as_date(fechas_origen.get(fila))),
+            fecha_aprobacion=_fecha_str(_as_date(fechas_aprobacion.get(fila))),
+            fecha_liquidacion=_fecha_str(_as_date(fechas_liq.get(fila))),
+            monto_neto_impactado=montos_neto.get(fila),
+            fila_origen=fila,
+        ))
+    return tuple(detalles)
+
+
 # ---------------------------------------------------------------------------
 # Función principal de diagnóstico
 # ---------------------------------------------------------------------------
@@ -343,15 +398,26 @@ def diagnosticar_bloque_b(
     tipos_movimiento_mp_por_fila: Mapping[int, str] | None = None,
     ids_operacion_mp_por_fila: Mapping[int, str] | None = None,
     fechas_venta_ml_por_fila: Mapping[int, date | datetime | None] | None = None,
+    ids_orden_mp_por_fila: Mapping[int, str | None] | None = None,
+    fechas_aprobacion_mp_por_fila: Mapping[int, date | datetime | None] | None = None,
+    montos_neto_mp_por_fila: Mapping[int, Decimal | None] | None = None,
 ) -> DiagnosticoBloqueB:
     """Genera el diagnóstico completo de Bloque B.
+
+    Universo MP sin venta ML: resultados donde tiene_mercado_pago == True y
+    tiene_mercado_libre_oficial == False. Los resultados con
+    tipo_movimiento_financiero == MOVIMIENTO_DE_FONDOS se segregan en el bucket
+    de fondos/payouts y nunca se presentan como ventas faltantes.
 
     Parámetros de enriquecimiento opcionales:
     - fechas_origen_mp_por_fila: fila MP → fecha de origen
     - fechas_liquidacion_mp_por_fila: fila MP → fecha de liquidación
-    - tipos_movimiento_mp_por_fila: fila MP → tipo de movimiento (str)
+    - tipos_movimiento_mp_por_fila: fila MP → tipo normalizado de movimiento (str)
     - ids_operacion_mp_por_fila: fila MP → ID de operación MP
     - fechas_venta_ml_por_fila: fila ML → fecha de venta
+    - ids_orden_mp_por_fila: fila MP → ID de orden ML asociado (puede ser None)
+    - fechas_aprobacion_mp_por_fila: fila MP → fecha de aprobación
+    - montos_neto_mp_por_fila: fila MP → monto neto impactado
     """
     inicio = _as_date(inicio_ml)
     fin = _as_date(fin_ml)
@@ -360,6 +426,9 @@ def diagnosticar_bloque_b(
     tipos = tipos_movimiento_mp_por_fila or {}
     ids_op = ids_operacion_mp_por_fila or {}
     fechas_ml = fechas_venta_ml_por_fila or {}
+    ids_orden_mp = ids_orden_mp_por_fila or {}
+    fechas_aprobacion = fechas_aprobacion_mp_por_fila or {}
+    montos_neto = montos_neto_mp_por_fila or {}
 
     # --- Universo comparable (ML + MP) ---
     comparables = tuple(
@@ -370,17 +439,31 @@ def diagnosticar_bloque_b(
         r for r in comparables
         if r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > reporte.tolerancia
     )
+    dentro_tolerancia_r = tuple(r for r in comparables if r not in set(diferencias_r))
+
     neto_ml = _sum_decimals(r.total_informado_ml for r in comparables)
     neto_mp = _sum_decimals(r.neto_aprobado_mp for r in comparables)
-    diferencia_total = neto_mp - neto_ml
+    diferencia_universo = neto_mp - neto_ml
+
+    # Diferencia real del subuniverso conciliado (grupos dentro de tolerancia)
+    dif_conciliado = _sum_decimals(
+        r.diferencia_ml_mp for r in dentro_tolerancia_r if r.diferencia_ml_mp is not None
+    )
+
+    # Diferencia de las operaciones fuera de tolerancia
+    dif_fuera_tolerancia = _sum_decimals(
+        r.diferencia_ml_mp for r in diferencias_r if r.diferencia_ml_mp is not None
+    )
 
     resumen = ResumenBloqueB(
         comparables_totales=len(comparables),
-        coincidencias=len(comparables) - len(diferencias_r),
+        coincidencias=len(dentro_tolerancia_r),
         con_diferencia=len(diferencias_r),
         neto_ml_comparable=neto_ml,
         neto_mp_comparable=neto_mp,
-        diferencia_total=diferencia_total,
+        diferencia_universo_comparable=diferencia_universo,
+        diferencia_operaciones_fuera_tolerancia=dif_fuera_tolerancia,
+        diferencia_subuniverso_conciliado=dif_conciliado,
     )
 
     # --- Grupos con diferencia ---
@@ -418,6 +501,11 @@ def diagnosticar_bloque_b(
             ),
         )
 
+        movimientos_asociados = _construir_detalle_movimientos(
+            r.filas_origen_mp, ids_op, ids_orden_mp, tipos,
+            fechas_origen, fechas_aprobacion, fechas_liq, montos_neto,
+        )
+
         grupos_con_dif.append(GrupoConDiferencia(
             id_grupo=id_g,
             ids_orden=r.ids_orden,
@@ -435,13 +523,25 @@ def diagnosticar_bloque_b(
             motivo_visible=motivo_vis,
             motivos_secundarios=motivos_sec,
             accion_recomendada=_accion_recomendada_diferencia(estado_expl),
+            movimientos_asociados=movimientos_asociados,
         ))
 
-    # --- MP sin venta ML ---
-    solo_mp = tuple(
+    # --- Universo MP sin venta ML (por presencia real de fuentes) ---
+    # Incluye SOLO_MOVIMIENTO_FINANCIERO, SIN_VENTA_OFICIAL y cualquier estado
+    # donde tiene_mercado_pago == True y tiene_mercado_libre_oficial == False.
+    mp_sin_ml_todos = tuple(
         r for r in reporte.resultados
-        if r.estado == EstadoControlConsolidado.SOLO_MOVIMIENTO_FINANCIERO
+        if r.tiene_mercado_pago and not r.tiene_mercado_libre_oficial
     )
+
+    # Separar fondos/payouts de ventas faltantes
+    fondos_r = tuple(
+        r for r in mp_sin_ml_todos
+        if r.tipo_movimiento_financiero == TipoMovimientoFinanciero.MOVIMIENTO_DE_FONDOS
+    )
+    solo_mp = tuple(r for r in mp_sin_ml_todos if r not in set(fondos_r))
+
+    # --- Métricas y listas de ventas faltantes (excluye fondos) ---
     neto_ap_sin_venta = _sum_decimals(r.neto_aprobado_mp for r in solo_mp)
     neto_fin_sin_venta = _sum_decimals(r.neto_financiero_total_mp for r in solo_mp)
 
@@ -467,9 +567,33 @@ def diagnosticar_bloque_b(
             accion_recomendada=accion,
         ))
 
-    # Coherencia: suma de diferencias individuales == diferencia total del resumen
+    # --- Métricas y listas de fondos/payouts ---
+    neto_ap_fondos = _sum_decimals(r.neto_aprobado_mp for r in fondos_r)
+    neto_fin_fondos = _sum_decimals(r.neto_financiero_total_mp for r in fondos_r)
+
+    movimientos_fondos: list[MovimientoMpSinVentaML] = []
+    for r in fondos_r:
+        id_g = _id_grupo(r)
+        f_min_orig, _ = _fechas_rango(r.filas_origen_mp, fechas_origen)
+        _, f_max_liq_mv = _fechas_rango(r.filas_origen_mp, fechas_liq)
+        cat_temp = categoria_temporal_mp(r.filas_origen_mp, fechas_origen, inicio, fin)
+
+        movimientos_fondos.append(MovimientoMpSinVentaML(
+            id_grupo=id_g,
+            ids_movimiento_mp=_ids_operacion_para_filas(r.filas_origen_mp, ids_op),
+            tipos_movimiento=_tipos_movimiento_para_filas(r.filas_origen_mp, tipos),
+            fecha_min_origen=f_min_orig,
+            fecha_max_liquidacion=f_max_liq_mv,
+            neto_aprobado_mp=r.neto_aprobado_mp,
+            neto_financiero_total_mp=r.neto_financiero_total_mp,
+            categoria_temporal=cat_temp,
+            motivo_sin_venta=_motivo_sin_venta_ml(r),
+            accion_recomendada=_accion_recomendada_sin_venta(r),
+        ))
+
+    # Coherencia: suma_diferencias_individuales debe igualar diferencia_operaciones_fuera_tolerancia
     suma_ind = _sum_decimals(g.diferencia_ml_mp for g in grupos_con_dif)
-    coherencia = abs(suma_ind - diferencia_total) <= reporte.tolerancia
+    coherencia = abs(suma_ind - dif_fuera_tolerancia) <= reporte.tolerancia
 
     return DiagnosticoBloqueB(
         resumen=resumen,
@@ -478,6 +602,10 @@ def diagnosticar_bloque_b(
         neto_aprobado_mp_sin_venta=neto_ap_sin_venta,
         neto_financiero_total_mp_sin_venta=neto_fin_sin_venta,
         movimientos_mp_sin_venta=tuple(movs_sin_venta),
+        cantidad_movimientos_fondos=len(fondos_r),
+        neto_aprobado_mp_fondos=neto_ap_fondos,
+        neto_financiero_total_mp_fondos=neto_fin_fondos,
+        movimientos_fondos=tuple(movimientos_fondos),
         suma_diferencias_individuales=suma_ind,
         coherencia_suma_diferencias=coherencia,
     )

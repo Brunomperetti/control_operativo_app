@@ -10,6 +10,7 @@ from kiki_control.domain.control_consolidado import EstadoControlConsolidado, Re
 from kiki_control.presentation.control_consolidado_diagnostics import DiagnosticoControlConsolidado, diagnosticar_control_consolidado, motivos_datos_criticos_faltantes, tiene_datos_criticos_faltantes
 from kiki_control.presentation.formatters import formato_pesos_argentino
 from kiki_control.presentation.bloque_b_diagnostics import (
+    DetalleMovimientoMP,
     DiagnosticoBloqueB,
     EstadoExplicacionDiferencia,
     ESTADOS_EXPLICACION_VISIBLES,
@@ -571,7 +572,9 @@ def resumen_bloque_b_tabla(diag: DiagnosticoBloqueB) -> list[dict[str, str]]:
         {"Indicador": "Grupos con diferencia", "Valor": str(r.con_diferencia)},
         {"Indicador": "Neto ML comparable", "Valor": formato_importe(r.neto_ml_comparable)},
         {"Indicador": "Neto MP comparable", "Valor": formato_importe(r.neto_mp_comparable)},
-        {"Indicador": "Diferencia total (MP − ML)", "Valor": formato_importe(r.diferencia_total)},
+        {"Indicador": "Diferencia universo comparable (MP − ML)", "Valor": formato_importe(r.diferencia_universo_comparable)},
+        {"Indicador": "Diferencia operaciones fuera de tolerancia", "Valor": formato_importe(r.diferencia_operaciones_fuera_tolerancia)},
+        {"Indicador": "Diferencia subuniverso conciliado (dentro de tolerancia)", "Valor": formato_importe(r.diferencia_subuniverso_conciliado)},
     ]
 
 
@@ -639,7 +642,30 @@ def filtrar_mp_sin_venta(
     return tuple(result)
 
 
-def detalle_diferencia_ml(r: ResultadoControlConsolidado) -> list[dict[str, str]]:
+def filas_movimientos_diferencia(grupo: GrupoConDiferencia) -> list[dict[str, Any]]:
+    """Devuelve una fila por cada movimiento MP individual asociado a un grupo con diferencia."""
+    return [
+        {
+            "ID movimiento MP": m.id_movimiento_mp,
+            "ID orden": m.id_orden,
+            "Tipo de movimiento": m.tipo_movimiento,
+            "Estado normalizado": m.estado_normalizado,
+            "Fecha de origen": m.fecha_origen,
+            "Fecha de aprobación": m.fecha_aprobacion,
+            "Fecha de liquidación": m.fecha_liquidacion,
+            "Monto neto impactado": formato_importe(m.monto_neto_impactado),
+            "Fila de origen": m.fila_origen,
+        }
+        for m in grupo.movimientos_asociados
+    ]
+
+
+def filas_fondos_mp(movs: Iterable[MovimientoMpSinVentaML]) -> list[dict[str, Any]]:
+    """Transforma movimientos de fondos/payouts MP en filas de presentación."""
+    return filas_mp_sin_venta(movs)
+
+
+(r: ResultadoControlConsolidado) -> list[dict[str, str]]:
     """Detalle de los datos ML para una operación con diferencia."""
     return [
         {"Concepto": "ID de venta o grupo", "Valor": ", ".join(r.ids_orden) if r.ids_orden else r.clave_resultado},
@@ -685,9 +711,10 @@ def texto_universo_comparable(diag_bloque_b: DiagnosticoBloqueB) -> str:
     """Texto explícito del universo comparable para evitar la contradicción del puente."""
     r = diag_bloque_b.resumen
     return (
-        f"Las {r.coincidencias} operaciones conciliadas cierran dentro de la tolerancia. "
+        f"Las {r.coincidencias} operaciones conciliadas cierran dentro de la tolerancia "
+        f"(diferencia agregada del subuniverso conciliado: {formato_importe(r.diferencia_subuniverso_conciliado)}). "
         f"Quedan {r.con_diferencia} operaciones por analizar, "
-        f"con una diferencia total de {formato_importe(r.diferencia_total)}."
+        f"con una diferencia total fuera de tolerancia de {formato_importe(r.diferencia_operaciones_fuera_tolerancia)}."
     )
 
 
@@ -697,6 +724,7 @@ def texto_universo_comparable_puente(diag_bloque_b: DiagnosticoBloqueB, universo
     return (
         f"Universo comparable total (ML + MP): {r.comparables_totales} grupos "
         f"({r.coincidencias} coincidentes y {r.con_diferencia} con diferencia, "
-        f"diferencia total {formato_importe(r.diferencia_total)}). "
+        f"diferencia universo comparable {formato_importe(r.diferencia_universo_comparable)}, "
+        f"de los cuales {formato_importe(r.diferencia_operaciones_fuera_tolerancia)} corresponden a operaciones fuera de tolerancia). "
         f"Universo del puente triple (ML + Eccomapp + MP): {universo_triple} grupos."
     )

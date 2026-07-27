@@ -40,6 +40,19 @@ SESSION_KEYS_TO_CLEAR = (
     "motivo_grupo_excluido_puente",
     "motivo_grupos_revision",
     "buscar_grupo_revision",
+    # Enriquecimiento de Bloque B
+    "enriq_fechas_liq_mp_por_fila",
+    "enriq_tipos_mp_por_fila",
+    "enriq_ids_op_mp_por_fila",
+    "enriq_fechas_venta_ml_por_fila",
+    "enriq_ids_orden_mp_por_fila",
+    "enriq_fechas_aprobacion_mp_por_fila",
+    "enriq_montos_neto_mp_por_fila",
+    # Filtros y selectores de Bloque B
+    "detalle_diferencia_bloque_b",
+    "bloque_b_buscar_id_mp",
+    "bloque_b_filtro_tipo",
+    "bloque_b_filtro_cat",
 )
 
 RESULT_KEYS_TO_CLEAR = (
@@ -68,6 +81,19 @@ RESULT_KEYS_TO_CLEAR = (
     "motivo_grupo_excluido_puente",
     "motivo_grupos_revision",
     "buscar_grupo_revision",
+    # Enriquecimiento de Bloque B
+    "enriq_fechas_liq_mp_por_fila",
+    "enriq_tipos_mp_por_fila",
+    "enriq_ids_op_mp_por_fila",
+    "enriq_fechas_venta_ml_por_fila",
+    "enriq_ids_orden_mp_por_fila",
+    "enriq_fechas_aprobacion_mp_por_fila",
+    "enriq_montos_neto_mp_por_fila",
+    # Filtros y selectores de Bloque B
+    "detalle_diferencia_bloque_b",
+    "bloque_b_buscar_id_mp",
+    "bloque_b_filtro_tipo",
+    "bloque_b_filtro_cat",
 )
 
 VIEW_FILTER_KEYS_TO_CLEAR = (

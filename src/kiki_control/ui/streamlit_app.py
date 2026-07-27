@@ -58,10 +58,12 @@ from kiki_control.presentation.control_consolidado_view import (
     detalle_conciliacion_diferencia,
     explicacion_resultado,
     filas_bloque_a,
+    filas_fondos_mp,
     filas_grupos_con_diferencia,
     filas_grupos_excluidos,
     filas_grupos_involucrados,
     filas_mp_sin_venta,
+    filas_movimientos_diferencia,
     filas_resumen_revisiones,
     filas_tabla_consolidada,
     filas_cobertura_presentacion,
@@ -309,6 +311,21 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
             for v in ventas_ml.ventas
             if getattr(v, "fila_origen", None) is not None and getattr(v, "fecha_venta", None) is not None
         }
+        st.session_state["enriq_ids_orden_mp_por_fila"] = {
+            m.numero_fila_origen: m.id_orden
+            for m in mercado_pago.movimientos
+            if getattr(m, "numero_fila_origen", None) is not None
+        }
+        st.session_state["enriq_fechas_aprobacion_mp_por_fila"] = {
+            m.numero_fila_origen: m.fecha_aprobacion_local
+            for m in mercado_pago.movimientos
+            if getattr(m, "numero_fila_origen", None) is not None
+        }
+        st.session_state["enriq_montos_neto_mp_por_fila"] = {
+            m.numero_fila_origen: m.monto_neto_impactado
+            for m in mercado_pago.movimientos
+            if getattr(m, "numero_fila_origen", None) is not None
+        }
         st.success("Control consolidado finalizado.")
 
 def _mostrar_normalizacion(nombre: str, resultado: Any) -> None:
@@ -492,6 +509,18 @@ def _enriq_fechas_venta_ml() -> dict[int, Any]:
     return st.session_state.get("enriq_fechas_venta_ml_por_fila", {})
 
 
+def _enriq_ids_orden_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_ids_orden_mp_por_fila", {})
+
+
+def _enriq_fechas_aprobacion_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_fechas_aprobacion_mp_por_fila", {})
+
+
+def _enriq_montos_neto_mp() -> dict[int, Any]:
+    return st.session_state.get("enriq_montos_neto_mp_por_fila", {})
+
+
 def _fila_temporal(nombre: str, item: Any) -> dict[str, Any]:
     return {
         "Categoría temporal": nombre,
@@ -647,6 +676,9 @@ def _mostrar_resultados() -> None:
         tipos_movimiento_mp_por_fila=_enriq_tipos_mp(),
         ids_operacion_mp_por_fila=_enriq_ids_op_mp(),
         fechas_venta_ml_por_fila=_enriq_fechas_venta_ml(),
+        ids_orden_mp_por_fila=_enriq_ids_orden_mp(),
+        fechas_aprobacion_mp_por_fila=_enriq_fechas_aprobacion_mp(),
+        montos_neto_mp_por_fila=_enriq_montos_neto_mp(),
     )
     tab_resumen, tab_operacion, tab_auditoria = st.tabs(["Resumen ejecutivo", "Control por operación", "Auditoría y descargas"])
 
