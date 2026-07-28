@@ -1052,7 +1052,7 @@ def _mostrar_resultados() -> None:
         d1, d2, d3 = st.columns(3)
         d1.download_button("Descargar control consolidado de 3 fuentes", data=generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico, diag_bloque_b=diag_bloque_b, diagnostico_ml_eccomapp=diagnostico_ml_ec), file_name=_nombre_exportacion("kiki_control_consolidado_3_fuentes_", reporte), mime=mime)
         d2.download_button("Descargar excepciones del control consolidado", data=generar_excepciones_consolidadas_excel(reporte), file_name=_nombre_exportacion("kiki_control_excepciones_consolidadas_", reporte), mime=mime)
-        d3.download_button("Descargar revisiones del control consolidado", data=generar_revisiones_consolidadas_excel(reporte), file_name=_nombre_exportacion("kiki_control_revisiones_consolidadas_", reporte), mime=mime)
+        d3.download_button("Descargar revisiones del control consolidado", data=generar_revisiones_consolidadas_excel(reporte, diagnostico=diagnostico, diag_bloque_b=diag_bloque_b), file_name=_nombre_exportacion("kiki_control_revisiones_consolidadas_", reporte), mime=mime)
         st.download_button("Descargar diagnóstico ML oficial vs. Eccomapp", data=generar_diagnostico_ml_eccomapp_excel(diagnostico_ml_ec), file_name=_nombre_exportacion("kiki_ml_eccomapp_", reporte), mime=mime)
         with st.expander("Auditoría histórica Eccomapp–Mercado Pago (Auditoría de conciliación Eccomapp–Mercado Pago)", expanded=False):
             st.warning("Este informe no es el control consolidado actual de tres fuentes.")

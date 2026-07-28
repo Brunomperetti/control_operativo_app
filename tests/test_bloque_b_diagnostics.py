@@ -26,6 +26,7 @@ from kiki_control.domain.financial_movement import TipoOperacionFinanciera, Trat
 from kiki_control.exporting.excel import (
     generar_bloque_b_mp_sin_venta_excel,
     generar_reporte_consolidado_excel,
+    generar_revisiones_consolidadas_excel,
 )
 from kiki_control.presentation.bloque_b_diagnostics import (
     DiagnosticoBloqueB,
@@ -47,8 +48,30 @@ from kiki_control.presentation.control_consolidado_view import (
     filas_movimientos_diferencia,
     texto_universo_comparable,
 )
+from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
 
 D = Decimal
+
+_MOTIVOS_TEMPORALES = (
+    "MP sin venta anterior al período ML",
+    "MP sin venta dentro del período ML",
+    "MP sin venta posterior al período ML",
+    "MP sin venta sin fecha de origen",
+)
+
+
+def _resumen_temporal_revisiones(contenido: bytes) -> dict[str, tuple[int, Decimal]]:
+    wb = load_workbook(BytesIO(contenido), data_only=False)
+    assert not any(
+        isinstance(c.value, str) and c.value.startswith("=")
+        for ws in wb.worksheets for row in ws.iter_rows() for c in row
+    )
+    ws = wb["Revisiones"]
+    filas = {row[0].value: row for row in ws.iter_rows(min_row=2)}
+    return {
+        motivo: (filas[motivo][1].value, D(str(filas[motivo][2].value)))
+        for motivo in _MOTIVOS_TEMPORALES
+    }
 
 
 def _enriq(fila, id_mov, tipo, monto):
@@ -1210,3 +1233,47 @@ def test_pago_coherente_cero_es_no_candidato_pero_no_inconsistente():
     assert pagos.inconsistentes == ()
     assert [m.id_grupo for m in pagos.no_candidatos_importe_no_positivo] == ["pago-cero"]
     assert pagos.importe_valido_candidatos == D("0")
+
+
+def _diagnostico_temporal_exportacion(importes: list[Decimal], fechas: list[date | None]):
+    resultados = [
+        _r(f"fin:temporal-{i}", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=importe,
+           neto_fin=importe, tiene_ml=False, filas_mp=(i,))
+        for i, importe in enumerate(importes, start=1)
+    ]
+    filas = range(1, len(resultados) + 1)
+    diag = diagnosticar_bloque_b(
+        _rep(resultados), date(2026, 7, 10), date(2026, 7, 20),
+        fechas_origen_mp_por_fila=dict(zip(filas, fechas)),
+        tipos_movimiento_mp_por_fila={i: "PAGO_APROBADO" for i in filas},
+        montos_neto_mp_por_fila=dict(zip(filas, importes)),
+        tratamientos_mp_por_fila={i: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE for i in filas},
+    )
+    return _rep(resultados), diag
+
+
+def test_revisiones_consolidadas_exporta_distribucion_productiva_desde_bloque_b():
+    importes = [D("-171324.11"), *([D("0")] * 24), D("-1348526.96"), *([D("0")] * 167)]
+    fechas = [date(2026, 7, 1)] * 25 + [date(2026, 7, 15)] * 168
+    reporte, diag_b = _diagnostico_temporal_exportacion(importes, fechas)
+
+    esperado = {
+        _MOTIVOS_TEMPORALES[0]: (25, D("-171324.11")),
+        _MOTIVOS_TEMPORALES[1]: (168, D("-1348526.96")),
+        _MOTIVOS_TEMPORALES[2]: (0, D("0")),
+        _MOTIVOS_TEMPORALES[3]: (0, D("0")),
+    }
+    diagnostico = diagnosticar_control_consolidado(reporte)
+    revisiones = generar_revisiones_consolidadas_excel(reporte, diagnostico, diag_b)
+    consolidado = generar_reporte_consolidado_excel(reporte, diagnostico, diag_b)
+    assert _resumen_temporal_revisiones(revisiones) == esperado
+    assert _resumen_temporal_revisiones(consolidado) == esperado
+
+
+def test_revisiones_consolidadas_clasifica_cuatro_casos_individuales_desde_bloque_b():
+    importes = [D("-1.01"), D("-2.02"), D("-3.03"), D("-4.04")]
+    fechas = [date(2026, 7, 1), date(2026, 7, 15), date(2026, 7, 30), None]
+    reporte, diag_b = _diagnostico_temporal_exportacion(importes, fechas)
+
+    resumen = _resumen_temporal_revisiones(generar_revisiones_consolidadas_excel(reporte, diag_bloque_b=diag_b))
+    assert list(resumen.values()) == [(1, importe) for importe in importes]
