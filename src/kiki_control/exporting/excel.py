@@ -468,7 +468,7 @@ _REVISION_TEMPORAL_MP = {
 
 
 def _filas_revision_temporal_mp_sin_venta(diag: DiagnosticoBloqueB) -> tuple[DiagnosticoRevision, ...]:
-    """Construye el resumen exportable desde las categorías ya resueltas por Bloque B."""
+    """Construye el resumen administrativo con el agregado temporal original."""
     movimientos_por_categoria = {
         categoria: tuple(m for m in diag.movimientos_mp_sin_venta if m.categoria_principal == categoria)
         for categoria in CategoriaPrincipalMpSinVenta
@@ -477,7 +477,7 @@ def _filas_revision_temporal_mp_sin_venta(diag: DiagnosticoBloqueB) -> tuple[Dia
         DiagnosticoRevision(
             motivo_visible=_REVISION_TEMPORAL_MP[resumen.categoria],
             cantidad=resumen.cantidad_grupos,
-            importe_afectado=resumen.neto_financiero_total,
+            importe_afectado=resumen.neto_financiero_temporal_original,
             accion_recomendada=resumen.accion_recomendada,
             grupos_involucrados=tuple(m.id_grupo for m in movimientos_por_categoria[resumen.categoria]),
         )
