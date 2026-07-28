@@ -727,8 +727,12 @@ def test_resumen_operativo_posible_venta_faltante_filtros_bloque_d_y_excel():
     assert posibles == ["pago"]
     assert [m.id_grupo for m in filtrar_mp_sin_venta(diag.movimientos_mp_sin_venta, solo_prioritarios=True)] == ["pago"]
     assert [m.id_grupo for m in filtrar_mp_sin_venta(diag.movimientos_mp_sin_venta, filtro_combinacion="PAGO + DEVOLUCIÓN")] == ["mixto"]
-    bloque_d = {k.nombre: k for k in kpis_consolidados(_rep(casos), diag)["Bloque D — Calidad y pendientes"]}
-    assert {"Pagos aprobados sin venta ML", "Grupos financieros mixtos", "Componentes de envío", "Otros movimientos no asociados a venta"} <= bloque_d.keys()
+    bloques = kpis_consolidados(_rep(casos), diag)
+    bloque_d = {k.nombre: k for k in bloques["Bloque D — Calidad y pendientes"]}
+    assert not ({"Pagos aprobados sin venta ML", "Grupos financieros mixtos", "Componentes de envío", "Otros movimientos no asociados a venta"} & bloque_d.keys())
+    operativos = {k.nombre: k for k in bloques["Diagnóstico operativo MP sin venta dentro del período"]}
+    assert {"Pagos aprobados sin venta ML", "Grupos financieros mixtos", "Componentes de envío", "Otros movimientos no asociados a venta"} == operativos.keys()
+    assert operativos["Pagos aprobados sin venta ML"].valor == "1 · $ 100,00"
     wb = load_workbook(BytesIO(generar_bloque_b_mp_sin_venta_excel(diag)))
     headers = [c.value for c in wb["MP sin venta ML"][1]]
     for esperado in ("Prioridad operativa", "Combinación resumida", "Interpretación", "posible_venta_faltante"):

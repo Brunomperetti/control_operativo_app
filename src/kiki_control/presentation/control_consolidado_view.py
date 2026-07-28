@@ -283,27 +283,33 @@ def kpis_consolidados(
             Kpi("Sin costo", str(reporte.total_sin_costo_producto), "Resultados sin costo de producto Eccomapp encontrado."),
             Kpi("Sin MP", str(reporte.total_sin_movimiento_financiero), "Resultados sin movimiento Mercado Pago encontrado."),
             Kpi("Sin venta oficial", str(reporte.total_sin_venta_oficial), "Resultados sin venta oficial ML encontrada."),
-            Kpi("Duplicados o ambiguos", str(reporte.total_duplicada_o_ambigua), "Resultados con ambigüedad o duplicados según reglas de dominio."),
         ],
     }
     if diag_bloque_b is not None:
-        nombres = {
-            "PAGO_APROBADO": ("Pagos aprobados sin venta ML", "Revisar prioritariamente la venta oficial y su vinculación."),
-            "MULTIPLES_TIPOS": ("Grupos financieros mixtos", "Revisar el ciclo financiero completo."),
-            "ENVIO": ("Componentes de envío", "Buscar el pago principal; no tratar como venta faltante."),
-        }
-        filas = bloques["Bloque D — Calidad y pendientes"]
-        for r in diag_bloque_b.resumen_operativo_dentro_periodo:
-            if r.subclasificacion_financiera.value in nombres:
-                nombre, accion = nombres[r.subclasificacion_financiera.value]
-                filas.append(Kpi(nombre, f"{r.cantidad_grupos} · {formato_importe(r.neto_financiero_total)}", accion))
-        no_ventas = [r for r in diag_bloque_b.resumen_operativo_dentro_periodo if r.prioridad_operativa.value == "NO_ES_VENTA"]
-        filas.append(Kpi(
-            "Otros movimientos no asociados a venta",
-            f"{sum(r.cantidad_grupos for r in no_ventas)} · {formato_importe(_sumar(r.neto_financiero_total for r in no_ventas))}",
-            "No presentar cashback, promociones, reclamos o devoluciones aisladas como ventas omitidas.",
-        ))
+        bloques["Diagnóstico operativo MP sin venta dentro del período"] = kpis_diagnostico_operativo_mp(diag_bloque_b)
     return bloques
+
+
+def kpis_diagnostico_operativo_mp(diag_bloque_b: DiagnosticoBloqueB) -> list[Kpi]:
+    """Construye los cuatro KPI operativos exclusivamente desde su resumen tipado."""
+    resumen = diag_bloque_b.resumen_operativo_dentro_periodo
+    por_subclasificacion = {r.subclasificacion_financiera.value: r for r in resumen}
+    especificos = (
+        ("PAGO_APROBADO", "Pagos aprobados sin venta ML", "Revisar prioritariamente la venta oficial y su vinculación."),
+        ("MULTIPLES_TIPOS", "Grupos financieros mixtos", "Revisar el ciclo financiero completo."),
+        ("ENVIO", "Componentes de envío", "Buscar el pago principal; no tratar como venta faltante."),
+    )
+    kpis = [
+        Kpi(nombre, f"{por_subclasificacion[sub].cantidad_grupos} · {formato_importe(por_subclasificacion[sub].neto_financiero_total)}", accion)
+        for sub, nombre, accion in especificos
+    ]
+    no_ventas = [r for r in resumen if r.prioridad_operativa.value == "NO_ES_VENTA"]
+    kpis.append(Kpi(
+        "Otros movimientos no asociados a venta",
+        f"{sum(r.cantidad_grupos for r in no_ventas)} · {formato_importe(_sumar(r.neto_financiero_total for r in no_ventas))}",
+        "No presentar cashback, promociones, reclamos o devoluciones aisladas como ventas omitidas.",
+    ))
+    return kpis
 
 
 def cobertura_tres_fuentes(ventas_ml: Iterable[Any], operaciones: Iterable[Any], movimientos: Iterable[Any]) -> tuple[CoberturaFuente, ...]:

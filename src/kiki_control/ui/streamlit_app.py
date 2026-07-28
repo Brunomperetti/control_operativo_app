@@ -806,6 +806,11 @@ def _mostrar_resultados() -> None:
         _mostrar_bloque_b(reporte, diag_bloque_b)
         _mostrar_kpis_en_filas("Bloque C — Costos y utilidad", bloques["Bloque C — Costos y utilidad"], (3,))
         _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", bloques["Bloque D — Calidad y pendientes"], (3, 3))
+        _mostrar_kpis_en_filas(
+            "Diagnóstico operativo MP sin venta dentro del período",
+            bloques["Diagnóstico operativo MP sin venta dentro del período"],
+            (4,),
+        )
         st.subheader("Resumen compacto de revisiones")
         st.caption(diagnostico.revisiones.aclaracion)
         st.table(filas_resumen_revisiones(diagnostico.revisiones.revisiones_multietiqueta))
