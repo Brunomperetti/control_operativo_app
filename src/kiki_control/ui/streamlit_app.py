@@ -11,7 +11,7 @@ from kiki_control.adapters.mercado_libre_ventas import normalizar_ventas_mercado
 from kiki_control.adapters.mercado_pago import normalizar_mercado_pago
 from kiki_control.domain.enums import TipoFuente
 from kiki_control.domain.control_consolidado import ErrorControlConsolidado
-from kiki_control.exporting import generar_excepciones_consolidadas_excel, generar_reporte_completo_excel, generar_reporte_consolidado_excel, generar_reporte_excepciones_excel, generar_revisiones_consolidadas_excel, generar_revisiones_pendientes_excel
+from kiki_control.exporting import generar_diagnostico_ml_eccomapp_excel, generar_excepciones_consolidadas_excel, generar_reporte_completo_excel, generar_reporte_consolidado_excel, generar_reporte_excepciones_excel, generar_revisiones_consolidadas_excel, generar_revisiones_pendientes_excel
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
 from kiki_control.presentation.explanations import (
     COLUMNAS_TABLA,
@@ -42,6 +42,8 @@ from kiki_control.presentation.reconciliation_view import (
     tabla_principal,
 )
 from kiki_control.linking.commercial import vincular_ventas_oficiales_con_eccomapp
+from kiki_control.linking.ml_eccomapp_diagnostic import diagnosticar_ml_eccomapp
+from kiki_control.presentation.ml_eccomapp_view import conclusion_ejecutiva_ml_eccomapp, filas_casos_ml_eccomapp, resumen_estados_ml_eccomapp
 from kiki_control.linking.control_financiero import consolidar_control_financiero
 from kiki_control.presentation.control_consolidado_view import (
     TITULO_BLOQUE_A,
@@ -298,6 +300,7 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
         st.session_state["reporte_financiero"] = reporte_financiero
         st.session_state["reporte"] = reporte_financiero
         st.session_state["reporte_consolidado"] = reporte_consolidado
+        st.session_state["diagnostico_ml_eccomapp"] = diagnosticar_ml_eccomapp(ventas_ml.ventas, eccomapp.operaciones)
         st.session_state["cobertura_consolidada"] = cobertura_tres_fuentes(ventas_ml.ventas, eccomapp.operaciones, mercado_pago.movimientos)
         st.session_state["cobertura"] = cobertura_archivos(eccomapp.operaciones, mercado_pago.movimientos)
         st.session_state["firma_procesamiento"] = firma
@@ -834,8 +837,48 @@ def _buscar_resultado_para_grupo(grupo: Any, reporte: Any) -> Any:
     return None
 
 
+def _mostrar_cruce_ml_eccomapp(diag) -> None:
+    st.subheader("Cruce Mercado Libre oficial vs. Eccomapp")
+    st.caption("Unidad de comparación: grupo comercial por carrito u orden. Las filas de origen y ventas individuales se informan por separado.")
+    cols = st.columns(7)
+    metricas = (("Operaciones únicas ML", diag.cantidad_ventas_unicas_ml), ("Operaciones únicas Eccomapp", diag.cantidad_operaciones_unicas_eccomapp),
+                ("Coincidencias", diag.cantidad_coincidencias), ("ML sin Eccomapp", diag.cantidad_solo_ml),
+                ("Eccomapp sin ML", diag.cantidad_solo_eccomapp), ("Ambiguas/incompletas", diag.cantidad_ambiguas + diag.cantidad_identificador_incompleto + diag.cantidad_duplicadas),
+                ("Aptas para utilidad", diag.cantidad_apta_utilidad))
+    for col, (label, value) in zip(cols, metricas, strict=True): col.metric(label, value)
+    st.info(conclusion_ejecutiva_ml_eccomapp(diag))
+    st.table(resumen_estados_ml_eccomapp(diag))
+    c1, c2, c3, c4, c5 = st.columns(5)
+    estados = c1.multiselect("Estado de vinculación", sorted({c.estado.value for c in diag.casos}), key="ml_ec_estado")
+    aptitudes = c2.multiselect("Aptitud para utilidad", sorted({c.aptitud_utilidad.value for c in diag.casos}), key="ml_ec_aptitud")
+    buscar = c3.text_input("Buscar por ID", key="ml_ec_busqueda").strip().lower()
+    costo = c4.selectbox("Costo", ("Todos", "Con costo", "Sin costo"), key="ml_ec_con_costo")
+    prioritarios = c5.checkbox("Solo casos prioritarios", key="ml_ec_prioritarios")
+    f1, f2 = st.columns(2)
+    fecha_desde = f1.date_input("Fecha desde", value=None, key="ml_ec_fecha_desde")
+    fecha_hasta = f2.date_input("Fecha hasta", value=None, key="ml_ec_fecha_hasta")
+    casos = tuple(c for c in diag.casos if (not estados or c.estado.value in estados) and (not aptitudes or c.aptitud_utilidad.value in aptitudes)
+                  and (not buscar or buscar in " ".join((c.id_grupo or "", *c.ids_venta_ml, *c.ids_orden_eccomapp)).lower())
+                  and (costo == "Todos" or (costo == "Con costo") == (c.costo_eccomapp is not None)) and (not prioritarios or c.requiere_revision)
+                  and (fecha_desde is None or (c.fecha is not None and c.fecha.date() >= fecha_desde))
+                  and (fecha_hasta is None or (c.fecha is not None and c.fecha.date() <= fecha_hasta)))
+    grupos = (("Ventas ML sin Eccomapp", tuple(c for c in casos if c.estado.value == "SOLO_ML")),
+              ("Operaciones Eccomapp sin ML", tuple(c for c in casos if c.estado.value == "SOLO_ECCOMAPP")),
+              ("Coincidencias agrupadas o ambiguas", tuple(c for c in casos if c.estado.value not in {"SOLO_ML", "SOLO_ECCOMAPP"})))
+    for titulo, subset in grupos:
+        st.markdown(f"**{titulo}**")
+        st.dataframe(filas_casos_ml_eccomapp(subset), use_container_width=True, hide_index=True)
+    if casos:
+        selected = st.selectbox("Seleccionar operación del cruce", [c.clave for c in casos], key="ml_ec_detalle")
+        case = next(c for c in casos if c.clave == selected)
+        st.table(filas_casos_ml_eccomapp((case,)))
+        with st.expander("Filas originales de ambas fuentes", expanded=False):
+            st.write({"ML": case.filas_origen_ml if hasattr(case, "filas_origen_ml") else tuple(v.fila_origen for v in case.ventas_ml), "Eccomapp": tuple(o.numero_fila_origen for o in case.operaciones_eccomapp)})
+
+
 def _mostrar_resultados() -> None:
     reporte = st.session_state["reporte_consolidado"]
+    diagnostico_ml_ec = st.session_state["diagnostico_ml_eccomapp"]
     inicio_ml, fin_ml = _periodo_ventas_ml_normalizadas()
     diagnostico = diagnosticar_control_consolidado(reporte, inicio_ml, fin_ml, _fechas_mp_por_fila_normalizadas())
     diag_bloque_b = diagnosticar_bloque_b(
@@ -894,6 +937,7 @@ def _mostrar_resultados() -> None:
         else:
             st.warning(mensaje_conciliacion_bloque_a(reporte, diagnostico))
         _mostrar_bloque_b(reporte, diag_bloque_b)
+        _mostrar_cruce_ml_eccomapp(diagnostico_ml_ec)
         _mostrar_kpis_en_filas("Bloque C — Costos y utilidad", bloques["Bloque C — Costos y utilidad"], (3,))
         _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", bloques["Bloque D — Calidad y pendientes"], (3, 3, 1))
         _mostrar_kpis_en_filas(
@@ -994,9 +1038,10 @@ def _mostrar_resultados() -> None:
         st.header("Descargas consolidadas")
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         d1, d2, d3 = st.columns(3)
-        d1.download_button("Descargar control consolidado de 3 fuentes", data=generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico, diag_bloque_b=diag_bloque_b), file_name=_nombre_exportacion("kiki_control_consolidado_3_fuentes_", reporte), mime=mime)
+        d1.download_button("Descargar control consolidado de 3 fuentes", data=generar_reporte_consolidado_excel(reporte, diagnostico=diagnostico, diag_bloque_b=diag_bloque_b, diagnostico_ml_eccomapp=diagnostico_ml_ec), file_name=_nombre_exportacion("kiki_control_consolidado_3_fuentes_", reporte), mime=mime)
         d2.download_button("Descargar excepciones del control consolidado", data=generar_excepciones_consolidadas_excel(reporte), file_name=_nombre_exportacion("kiki_control_excepciones_consolidadas_", reporte), mime=mime)
         d3.download_button("Descargar revisiones del control consolidado", data=generar_revisiones_consolidadas_excel(reporte), file_name=_nombre_exportacion("kiki_control_revisiones_consolidadas_", reporte), mime=mime)
+        st.download_button("Descargar diagnóstico ML oficial vs. Eccomapp", data=generar_diagnostico_ml_eccomapp_excel(diagnostico_ml_ec), file_name=_nombre_exportacion("kiki_ml_eccomapp_", reporte), mime=mime)
         with st.expander("Auditoría histórica Eccomapp–Mercado Pago (Auditoría de conciliación Eccomapp–Mercado Pago)", expanded=False):
             st.warning("Este informe no es el control consolidado actual de tres fuentes.")
             if "reporte" in st.session_state:
