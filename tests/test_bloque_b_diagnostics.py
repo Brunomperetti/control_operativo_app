@@ -36,6 +36,7 @@ from kiki_control.presentation.bloque_b_diagnostics import (
     clasificacion_normalizada_movimiento_mp,
     clasificaciones_movimientos_mp_por_fila,
     tratamientos_movimientos_mp_por_fila,
+    EnriquecimientoMovimientoMpPorFila,
 )
 from kiki_control.presentation.control_consolidado_view import (
     TITULO_BLOQUE_B,
@@ -45,6 +46,15 @@ from kiki_control.presentation.control_consolidado_view import (
 )
 
 D = Decimal
+
+
+def _enriq(fila, id_mov, tipo, monto):
+    return EnriquecimientoMovimientoMpPorFila(
+        fila, id_mov, "orden-1", tipo, D(monto),
+        (TratamientoNetoComparable.COMPONENTE_YA_INCLUIDO if tipo == "PAGO_ENVIO"
+         else TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE),
+        date(2026, 7, 2), date(2026, 7, 2), None, monto,
+    )
 IND = IndicadoresFinancieros(False, False, False, False, False, False, False, False)
 IND_DEV = IndicadoresFinancieros(False, True, False, False, False, False, False, False)
 IND_REC = IndicadoresFinancieros(False, False, True, False, False, False, False, False)
@@ -881,3 +891,38 @@ def test_mp_sin_venta_detalle_completo_sin_agregado_es_no_verificable():
     assert ws.cell(2, headers.index("Suma reconstruida desde movimientos") + 1).value == 100
     assert ws.cell(2, headers.index("Estado de coherencia") + 1).value == "NO_VERIFICABLE"
     assert ws.cell(2, headers.index("Motivo de coherencia") + 1).value == motivo
+
+
+def test_enriquecimiento_atomico_conserva_fila_excel_tipo_id_importe_y_envio_excluido():
+    r = _r("orden-1", tiene_ml=False, ml=None, mp=D("90"), neto_fin=D("90"),
+           filas_mp=(2, 3, 4), tipo=TipoMovimientoFinanciero.ORDEN_FINANCIERA)
+    enriquecimientos = {
+        2: _enriq(2, "pago", "PAGO_APROBADO", "100"),
+        3: _enriq(3, "devolucion", "DEVOLUCION_DINERO", "-10"),
+        4: _enriq(4, "envio", "PAGO_ENVIO", "7"),
+    }
+    diag = diagnosticar_bloque_b(_rep([r]), date(2026, 7, 1), date(2026, 7, 31),
+                                 enriquecimientos_mp_por_fila=enriquecimientos)
+    grupo = diag.movimientos_mp_sin_venta[0]
+    assert [(d.fila_origen, d.id_movimiento_mp, d.tipo_movimiento, d.monto_neto_impactado)
+            for d in grupo.movimientos_asociados] == [
+                (2, "pago", "PAGO_APROBADO", D("100")),
+                (3, "devolucion", "DEVOLUCION_DINERO", D("-10")),
+                (4, "envio", "PAGO_ENVIO", D("7")),
+            ]
+    assert grupo.neto_aprobado_mp == D("100")
+    assert grupo.neto_financiero_total_mp == D("90")
+
+
+def test_clave_desplazada_y_pago_aprobado_negativo_son_inconsistentes_y_no_prioritarios():
+    r = _r("orden-1", tiene_ml=False, ml=None, mp=D("-50"), neto_fin=D("-50"),
+           filas_mp=(2,), tipo=TipoMovimientoFinanciero.ORDEN_FINANCIERA)
+    diag = diagnosticar_bloque_b(_rep([r]), date(2026, 7, 1), date(2026, 7, 31),
+                                 enriquecimientos_mp_por_fila={2: _enriq(3, "pago-3", "PAGO_APROBADO", "-50")})
+    grupo = diag.movimientos_mp_sin_venta[0]
+    detalle = grupo.movimientos_asociados[0]
+    assert detalle.estado_correspondencia_fila.startswith("ESTADO_DATO_INCONSISTENTE")
+    assert grupo.neto_aprobado_mp is None
+    assert grupo.neto_financiero_total_mp is None
+    assert not grupo.posible_venta_faltante
+    assert not grupo.coherencia_grupo

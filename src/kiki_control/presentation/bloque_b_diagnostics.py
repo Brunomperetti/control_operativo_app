@@ -19,6 +19,8 @@ from kiki_control.domain.control_consolidado import (
 )
 from kiki_control.domain.financial_movement import TratamientoNetoComparable
 
+_COLUMNA_MONTO_MP = "MONTO NETO DE LA OPERACIÓN QUE IMPACTÓ TU DINERO"
+
 _ZERO = Decimal("0")
 
 
@@ -128,6 +130,42 @@ class DetalleMovimientoMp:
     fecha_liquidacion: str
     monto_neto_impactado: Decimal | None
     fila_origen: int
+    importe_crudo: str = ""
+    columna_fuente_importe: str = _COLUMNA_MONTO_MP
+    estado_correspondencia_fila: str = "CORRESPONDENCIA_OK"
+
+
+@dataclass(frozen=True)
+class EnriquecimientoMovimientoMpPorFila:
+    """Instantánea atómica de los campos que necesariamente pertenecen a una fila MP."""
+
+    fila_origen: int
+    id_movimiento: str
+    id_orden: str | None
+    tipo_operacion: str
+    monto_neto_impactado: Decimal
+    tratamiento: TratamientoNetoComparable
+    fecha_origen: date | datetime | None
+    fecha_aprobacion: date | datetime | None
+    fecha_liquidacion: date | datetime | None
+    importe_crudo: str
+    columna_fuente_importe: str = _COLUMNA_MONTO_MP
+
+
+def enriquecimientos_movimientos_mp_por_fila(movimientos: Iterable[Any]) -> dict[int, EnriquecimientoMovimientoMpPorFila]:
+    """Crea un único índice por número de fila Excel y rechaza filas duplicadas."""
+    resultado: dict[int, EnriquecimientoMovimientoMpPorFila] = {}
+    for m in movimientos:
+        fila = m.numero_fila_origen
+        if fila in resultado:
+            raise ValueError(f"Fila MP duplicada en el enriquecimiento: {fila}")
+        resultado[fila] = EnriquecimientoMovimientoMpPorFila(
+            fila, m.id_operacion_mercado_pago, m.id_orden, m.tipo_operacion.value,
+            m.monto_neto_impactado, m.tratamiento_neto_comparable, m.fecha_origen_local,
+            m.fecha_aprobacion_local, m.fecha_liquidacion_local,
+            m.monto_neto_impactado_original or str(m.monto_neto_impactado),
+        )
+    return resultado
 
 
 @dataclass(frozen=True)
@@ -601,10 +639,30 @@ def _construir_detalle_movimientos(
     montos_neto: Mapping[int, Decimal | None],
     clasificaciones: Mapping[int, str],
     tratamientos: Mapping[int, TratamientoNetoComparable],
+    enriquecimientos: Mapping[int, EnriquecimientoMovimientoMpPorFila] | None = None,
 ) -> tuple[DetalleMovimientoMp, ...]:
     """Construye la tupla de detalle de movimientos MP para las filas dadas."""
     detalles: list[DetalleMovimientoMp] = []
     for fila in filas_mp:
+        if enriquecimientos is not None:
+            e = enriquecimientos.get(fila)
+            if e is None:
+                detalles.append(DetalleMovimientoMp("—", "—", "Sin tipo", "Sin clasificación", None,
+                    "Sin fecha", "Sin fecha", "Sin fecha", None, fila,
+                    estado_correspondencia_fila="ESTADO_DATO_INCONSISTENTE: fila ausente"))
+                continue
+            estado = "CORRESPONDENCIA_OK"
+            if e.fila_origen != fila:
+                estado = "ESTADO_DATO_INCONSISTENTE: clave y fila original no coinciden"
+            if e.tipo_operacion == "PAGO_APROBADO" and e.monto_neto_impactado < _ZERO:
+                estado = "ESTADO_DATO_INCONSISTENTE: PAGO_APROBADO negativo"
+            detalles.append(DetalleMovimientoMp(
+                e.id_movimiento, e.id_orden or "—", e.tipo_operacion, e.tipo_operacion,
+                e.tratamiento, _fecha_str(_as_date(e.fecha_origen)),
+                _fecha_str(_as_date(e.fecha_aprobacion)), _fecha_str(_as_date(e.fecha_liquidacion)),
+                e.monto_neto_impactado, fila, e.importe_crudo, e.columna_fuente_importe, estado,
+            ))
+            continue
         tipo_mov = tipos.get(fila, "Sin tipo")
         detalles.append(DetalleMovimientoMp(
             id_movimiento_mp=ids_op.get(fila, "—"),
@@ -651,6 +709,11 @@ def _importes_desde_detalle(
     if not detalles:
         return (None, None, EstadoCoherenciaGrupo.NO_VERIFICABLE,
                 "No hay movimientos asociados para reconstruir los importes del grupo.")
+    inconsistentes = tuple(d for d in detalles if d.estado_correspondencia_fila != "CORRESPONDENCIA_OK")
+    if inconsistentes:
+        return (None, None, EstadoCoherenciaGrupo.INCOHERENTE,
+                "Enriquecimiento MP inconsistente en filas: "
+                + ", ".join(str(d.fila_origen) for d in inconsistentes) + ".")
     filas_sin_importe = tuple(d.fila_origen for d in detalles if d.monto_neto_impactado is None)
     if filas_sin_importe:
         return (None, None, EstadoCoherenciaGrupo.NO_VERIFICABLE,
@@ -692,6 +755,7 @@ def diagnosticar_bloque_b(
     montos_neto_mp_por_fila: Mapping[int, Decimal | None] | None = None,
     clasificaciones_mp_por_fila: Mapping[int, str] | None = None,
     tratamientos_mp_por_fila: Mapping[int, TratamientoNetoComparable] | None = None,
+    enriquecimientos_mp_por_fila: Mapping[int, EnriquecimientoMovimientoMpPorFila] | None = None,
 ) -> DiagnosticoBloqueB:
     """Genera el diagnóstico completo de Bloque B.
 
@@ -723,6 +787,19 @@ def diagnosticar_bloque_b(
     montos_neto = montos_neto_mp_por_fila or {}
     clasificaciones = clasificaciones_mp_por_fila or {}
     tratamientos = tratamientos_mp_por_fila or {}
+    enriquecimientos = enriquecimientos_mp_por_fila
+    if enriquecimientos is not None:
+        # Una sola fuente atómica evita que posición, índice interno y fila Excel
+        # se desplacen independientemente entre diccionarios paralelos.
+        fechas_origen = {f: e.fecha_origen for f, e in enriquecimientos.items()}
+        fechas_liq = {f: e.fecha_liquidacion for f, e in enriquecimientos.items()}
+        fechas_aprobacion = {f: e.fecha_aprobacion for f, e in enriquecimientos.items()}
+        tipos = {f: e.tipo_operacion for f, e in enriquecimientos.items()}
+        ids_op = {f: e.id_movimiento for f, e in enriquecimientos.items()}
+        ids_orden_mp = {f: e.id_orden for f, e in enriquecimientos.items()}
+        montos_neto = {f: e.monto_neto_impactado for f, e in enriquecimientos.items()}
+        clasificaciones = dict(tipos)
+        tratamientos = {f: e.tratamiento for f, e in enriquecimientos.items()}
 
     # --- Universo comparable (ML + MP) ---
     comparables = tuple(
@@ -798,7 +875,7 @@ def diagnosticar_bloque_b(
         movimientos_asociados = _construir_detalle_movimientos(
             r.filas_origen_mp, ids_op, ids_orden_mp, tipos,
             fechas_origen, fechas_aprobacion, fechas_liq, montos_neto,
-            clasificaciones, tratamientos,
+            clasificaciones, tratamientos, enriquecimientos,
         )
 
         grupos_con_dif.append(GrupoConDiferencia(
@@ -832,7 +909,7 @@ def diagnosticar_bloque_b(
             _construir_detalle_movimientos(
                 r.filas_origen_mp, ids_op, ids_orden_mp, tipos,
                 fechas_origen, fechas_aprobacion, fechas_liq, montos_neto,
-                clasificaciones, tratamientos,
+                clasificaciones, tratamientos, enriquecimientos,
             ),
         )
         for r in reporte.resultados
@@ -866,7 +943,7 @@ def diagnosticar_bloque_b(
         ids_grupo = _ids_operacion_para_filas(r.filas_origen_mp, ids_op)
         detalles = _construir_detalle_movimientos(
             r.filas_origen_mp, ids_op, ids_orden_mp, tipos, fechas_origen,
-            fechas_aprobacion, fechas_liq, montos_neto, clasificaciones, tratamientos,
+            fechas_aprobacion, fechas_liq, montos_neto, clasificaciones, tratamientos, enriquecimientos,
         )
         neto_aprobado_detalle, neto_financiero_detalle, estado_coherencia, motivo_coherencia = _importes_desde_detalle(
             detalles, r.neto_financiero_total_mp,
