@@ -664,6 +664,9 @@ def _importes_desde_detalle(
         d.monto_neto_impactado for d in detalles
         if _tratamiento_detalle(d) == TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE
     )
+    if neto_financiero_respaldo is None:
+        return (neto_aprobado, reconstruido, EstadoCoherenciaGrupo.NO_VERIFICABLE,
+                "El detalle monetario pudo reconstruirse, pero no existe agregado financiero original para verificar la coincidencia.")
     if reconstruido == neto_financiero_respaldo:
         return (neto_aprobado, reconstruido, EstadoCoherenciaGrupo.COHERENTE,
                 "El agregado coincide con la suma reconstruida del detalle.")

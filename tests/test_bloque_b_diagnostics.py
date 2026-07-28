@@ -6,6 +6,7 @@ No utiliza archivos reales ni hardcodea valores de los archivos de producción.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
@@ -840,3 +841,43 @@ def test_mp_sin_venta_sin_evidencia_monetaria_es_no_verificable(filas, montos, m
     assert ws.cell(2, headers.index("Estado de coherencia") + 1).value == "NO_VERIFICABLE"
     assert motivo in ws.cell(2, headers.index("Motivo de coherencia") + 1).value
     assert ws.cell(2, headers.index("Suma reconstruida desde movimientos") + 1).value is None
+
+
+def test_mp_sin_venta_detalle_completo_sin_agregado_es_no_verificable():
+    from kiki_control.presentation.control_consolidado_view import filas_mp_sin_venta
+
+    motivo = ("El detalle monetario pudo reconstruirse, pero no existe agregado "
+              "financiero original para verificar la coincidencia.")
+    r = replace(
+        _r("sin-agregado", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("100"),
+           tiene_ml=False, filas_mp=(1,)),
+        neto_financiero_total_mp=None,
+    )
+    diag = diagnosticar_bloque_b(
+        _rep([r]), inicio_ml=date(2026, 7, 1), fin_ml=date(2026, 7, 31),
+        fechas_origen_mp_por_fila={1: date(2026, 7, 2)},
+        tipos_movimiento_mp_por_fila={1: "PAGO_APROBADO"},
+        montos_neto_mp_por_fila={1: D("100")},
+        tratamientos_mp_por_fila={1: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE},
+    )
+    grupo = diag.movimientos_mp_sin_venta[0]
+    assert grupo.neto_aprobado_mp == D("100")
+    assert grupo.neto_financiero_total_mp == D("100")
+    assert grupo.suma_reconstruida_movimientos_mp == D("100")
+    assert grupo.neto_financiero_agregado_original_mp is None
+    assert grupo.diferencia_agregado_detalle_mp is None
+    assert grupo.estado_coherencia.value == "NO_VERIFICABLE"
+    assert not grupo.coherencia_grupo and not grupo.posible_venta_faltante
+    assert grupo.motivo_coherencia == motivo
+
+    fila_ui = filas_mp_sin_venta((grupo,))[0]
+    assert fila_ui["Agregado financiero original"] == "No calculado"
+    assert fila_ui["Motivo de coherencia"] == motivo
+    wb = load_workbook(BytesIO(generar_bloque_b_mp_sin_venta_excel(diag)))
+    ws = wb["MP sin venta ML"]
+    headers = [cell.value for cell in ws[1]]
+    assert ws.cell(2, headers.index("Agregado financiero original") + 1).value is None
+    assert ws.cell(2, headers.index("Diferencia agregado − detalle") + 1).value is None
+    assert ws.cell(2, headers.index("Suma reconstruida desde movimientos") + 1).value == 100
+    assert ws.cell(2, headers.index("Estado de coherencia") + 1).value == "NO_VERIFICABLE"
+    assert ws.cell(2, headers.index("Motivo de coherencia") + 1).value == motivo
