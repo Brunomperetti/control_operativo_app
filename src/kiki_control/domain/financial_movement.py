@@ -85,6 +85,7 @@ class MovimientoFinanciero:
     impuestos_desagregados: tuple[DetalleImpuesto, ...]
     datos_extra_original: str | None
     operation_tags_original: str | None
+    monto_neto_impactado_original: str | None = None
 
     @property
     def tratamiento_neto_comparable(self) -> TratamientoNetoComparable:

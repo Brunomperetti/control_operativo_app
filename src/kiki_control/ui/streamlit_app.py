@@ -92,6 +92,7 @@ from kiki_control.presentation.control_consolidado_view import (
 from kiki_control.presentation.bloque_b_diagnostics import (
     clasificaciones_movimientos_mp_por_fila,
     diagnosticar_bloque_b,
+    enriquecimientos_movimientos_mp_por_fila,
     tratamientos_movimientos_mp_por_fila,
 )
 from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
@@ -298,6 +299,9 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
         st.session_state["cobertura"] = cobertura_archivos(eccomapp.operaciones, mercado_pago.movimientos)
         st.session_state["firma_procesamiento"] = firma
         # Datos de enriquecimiento para Bloque B
+        st.session_state["enriq_movimientos_mp_por_fila"] = enriquecimientos_movimientos_mp_por_fila(
+            mercado_pago.movimientos
+        )
         st.session_state["enriq_fechas_liq_mp_por_fila"] = {
             m.numero_fila_origen: m.fecha_liquidacion_local
             for m in mercado_pago.movimientos
@@ -716,10 +720,13 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
             st.table({"Clasificación": grupo.categoria_principal.value, "Justificación": grupo.motivo_sin_venta,
                       "Cobertura ML utilizada": f"{getattr(st.session_state.get('cobertura_consolidada'), 'periodo_ventas_ml', 'Cobertura de la sesión')}",
                       "Acción recomendada": grupo.accion_recomendada})
-            st.dataframe([{"ID movimiento MP": x.id_movimiento_mp, "Tipo": x.tipo_movimiento,
+            st.dataframe([{"Fila original MP": x.fila_origen, "ID movimiento MP": x.id_movimiento_mp, "Tipo": x.tipo_movimiento,
                            "Tratamiento en neto comparable": str(getattr(x.tratamiento_neto_comparable, 'value', 'Sin tratamiento')),
                            "Fecha de origen": x.fecha_origen, "Fecha de liquidación": x.fecha_liquidacion,
-                           "Importe": formato_importe(x.monto_neto_impactado), "Fila de origen": x.fila_origen}
+                           "Importe crudo": x.importe_crudo,
+                           "Importe normalizado": formato_importe(x.monto_neto_impactado),
+                           "Columna fuente del importe": x.columna_fuente_importe,
+                           "Estado correspondencia de fila": x.estado_correspondencia_fila}
                           for x in grupo.movimientos_asociados], use_container_width=True, hide_index=True)
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         from kiki_control.exporting.excel import generar_bloque_b_mp_sin_venta_excel
@@ -780,7 +787,13 @@ def _mostrar_resultados() -> None:
         montos_neto_mp_por_fila=_enriq_montos_neto_mp(),
         clasificaciones_mp_por_fila=_enriq_clasificaciones_mp(),
         tratamientos_mp_por_fila=_enriq_tratamientos_mp(),
+        enriquecimientos_mp_por_fila=st.session_state.get("enriq_movimientos_mp_por_fila"),
     )
+    if any(
+        d.estado_correspondencia_fila != "CORRESPONDENCIA_OK"
+        for _, detalles in diag_bloque_b.grupos_movimientos_asociados for d in detalles
+    ):
+        st.error("Advertencia global: existe al menos un movimiento MP con correspondencia de fila o signo inconsistente. Sus importes quedan fuera de KPI confiables.")
     tab_resumen, tab_operacion, tab_auditoria = st.tabs(["Resumen ejecutivo", "Control por operación", "Auditoría y descargas"])
 
     with tab_resumen:

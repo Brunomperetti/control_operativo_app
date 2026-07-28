@@ -760,6 +760,9 @@ def _fila_movimiento_mp(m: Any) -> dict[str, Any]:
             "Fecha de liquidación": m.fecha_liquidacion,
             "Monto neto impactado": formato_importe(m.monto_neto_impactado),
             "Fila de origen": m.fila_origen,
+            "Importe crudo": m.importe_crudo,
+            "Columna fuente del importe": m.columna_fuente_importe,
+            "Estado correspondencia de fila": m.estado_correspondencia_fila,
         }
 
 
