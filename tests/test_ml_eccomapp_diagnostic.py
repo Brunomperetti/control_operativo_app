@@ -9,7 +9,14 @@ import pytest
 from kiki_control.domain.ml_eccomapp_diagnostic import EstadoAptitudUtilidad as Apt, EstadoCruceMlEccomapp as Estado
 from kiki_control.exporting.excel import generar_diagnostico_ml_eccomapp_excel, generar_reporte_consolidado_excel
 from kiki_control.linking.ml_eccomapp_diagnostic import diagnosticar_ml_eccomapp
-from kiki_control.presentation.ml_eccomapp_view import conclusion_ejecutiva_ml_eccomapp
+from kiki_control.presentation.ml_eccomapp_view import (
+    ETIQUETAS_APTITUD,
+    ETIQUETAS_ESTADO,
+    conclusion_ejecutiva_ml_eccomapp,
+    filas_casos_ml_eccomapp,
+    motivo_visible_ml_eccomapp,
+    secciones_casos_ml_eccomapp,
+)
 from tests.test_commercial_linking import op, venta
 from tests.test_control_consolidado import reporte
 
@@ -165,7 +172,86 @@ def test_rotulos_excel_explicitan_unidades_sin_alterar_metricas():
 def test_conclusion_ejecutiva_distingue_ventas_operaciones_y_grupos():
     diag = diagnosticar_ml_eccomapp([venta("A"), venta("B", fila=2)], [op("A")])
     conclusion = conclusion_ejecutiva_ml_eccomapp(diag)
-    assert f"{diag.cantidad_ventas_unicas_ml} ventas únicas ML" in conclusion
-    assert f"{diag.cantidad_operaciones_unicas_eccomapp} operaciones únicas Eccomapp" in conclusion
-    assert f"{diag.cantidad_coincidencias} grupos comerciales con coincidencia" in conclusion
-    assert "una coincidencia agrupada puede contener varias filas o ventas ML" in conclusion
+    assert f"{diag.cantidad_ventas_unicas_ml} ventas únicas de Mercado Libre" in conclusion
+    assert f"{diag.cantidad_operaciones_unicas_eccomapp} operaciones únicas de Eccomapp" in conclusion
+    assert f"{diag.cantidad_coincidencias} grupos coincidentes" in conclusion
+    assert f"{diag.cantidad_apta_utilidad} pueden utilizarse para calcular utilidad" in conclusion
+    assert f"{diag.cantidad_no_apta_utilidad} requieren revisión o información adicional" in conclusion
+    assert "Una coincidencia agrupada puede contener varias ventas o filas de Mercado Libre y una o más operaciones de Eccomapp" in conclusion
+
+
+def test_presentacion_traduce_todos_los_estados_sin_modificar_enums():
+    assert set(ETIQUETAS_ESTADO) == set(Estado)
+    assert set(ETIQUETAS_APTITUD) == set(Apt)
+    assert Estado.SOLO_ML.value == "SOLO_ML"
+    assert Apt.SIN_VINCULO_ECCOMAPP.value == "SIN_VINCULO_ECCOMAPP"
+    assert ETIQUETAS_ESTADO[Estado.COINCIDENCIA_POR_GRUPO] == "Coincidencia agrupada por carrito u orden"
+    assert ETIQUETAS_APTITUD[Apt.UTILIDAD_CALCULABLE] == "Apta para calcular utilidad"
+
+
+def test_filas_visibles_formatean_fecha_y_reemplazan_faltantes_y_tecnicismos():
+    c = replace(caso([venta("")], []), fecha=datetime(2026, 7, 20, 11, 40))
+    fila = filas_casos_ml_eccomapp((c,))[0]
+    assert fila["Fecha"] == "20/07/2026 11:40"
+    assert fila["Grupo u orden"] == "Sin ID informado"
+    assert fila["Costo Eccomapp"] == "Sin costo informado"
+    assert not any("None" in str(valor) or "empty" in str(valor).lower() for valor in fila.values())
+
+
+def test_solo_ml_muestra_explicacion_comercial_y_cero_con_anulacion_es_conservador():
+    normal = filas_casos_ml_eccomapp((caso([venta("A")], []),))[0]
+    assert normal["Motivo"] == "No se encontró una operación correspondiente en Eccomapp utilizando el ID de carrito o el ID de orden."
+    assert normal["Acción recomendada"] == "Verificar si la operación fue cancelada, devuelta o excluida del archivo Eccomapp."
+    venta_anulada = replace(venta("B", total=Decimal("0")), anulaciones_reembolsos=Decimal("-100"))
+    anulada = filas_casos_ml_eccomapp((caso([venta_anulada], []),))[0]
+    assert "No debe considerarse automáticamente una venta faltante" in anulada["Motivo"]
+
+
+def test_excel_agrega_rotulos_legibles_y_conserva_valores_tecnicos_auditables():
+    d = diagnosticar_ml_eccomapp([venta("A")], [])
+    wb = load_workbook(BytesIO(generar_diagnostico_ml_eccomapp_excel(d)))
+    ws = wb["ML sin Eccomapp"]
+    assert ws["D2"].value == "Solo en Mercado Libre"
+    assert ws["U2"].value == "SOLO_ML"
+    assert ws["V2"].value == "SIN_VINCULO_ECCOMAPP"
+
+
+def test_motivos_visibles_de_seis_estados_son_administrativos():
+    base = caso([venta("A")], [op("A")])
+    esperados = {
+        Estado.COINCIDENCIA_EXACTA: "correspondencia directa",
+        Estado.COINCIDENCIA_POR_GRUPO: "mismo carrito u orden comercial",
+        Estado.IDENTIFICADOR_AMBIGUO: "más de una operación",
+        Estado.IDENTIFICADOR_INCOMPLETO: "información suficiente",
+        Estado.DUPLICADO_ML: "registros repetidos en Mercado Libre",
+        Estado.DUPLICADO_ECCOMAPP: "registros repetidos en Eccomapp",
+    }
+    for estado, fragmento in esperados.items():
+        visible = motivo_visible_ml_eccomapp(replace(
+            base, estado=estado, motivo="Clasificación derivada del vinculador comercial canónico."
+        ))
+        assert fragmento in visible
+        assert "vinculador comercial canónico" not in visible
+
+
+def test_secciones_separan_coincidencias_de_identificaciones_a_revisar():
+    base = caso([venta("A")], [op("A")])
+    casos = tuple(replace(base, clave=estado.value, estado=estado) for estado in Estado)
+    secciones = {titulo: (subset, vacio) for titulo, subset, vacio in secciones_casos_ml_eccomapp(casos)}
+    coincidencias, _ = secciones["Coincidencias agrupadas por carrito u orden"]
+    revisiones, mensaje_vacio = secciones["Identificaciones que requieren revisión"]
+    assert {c.estado for c in coincidencias} == {Estado.COINCIDENCIA_EXACTA, Estado.COINCIDENCIA_POR_GRUPO}
+    assert {c.estado for c in revisiones} == {
+        Estado.IDENTIFICADOR_AMBIGUO, Estado.IDENTIFICADOR_INCOMPLETO,
+        Estado.DUPLICADO_ML, Estado.DUPLICADO_ECCOMAPP,
+    }
+    assert mensaje_vacio == "No se encontraron identificaciones ambiguas, incompletas ni duplicadas."
+
+
+def test_excel_preserva_motivo_tecnico_solo_en_columna_auditable():
+    tecnico = "Clasificación derivada del vinculador comercial canónico."
+    base = diagnosticar_ml_eccomapp([venta("A")], [op("A")])
+    diag = replace(base, casos=(replace(base.casos[0], motivo=tecnico),))
+    ws = load_workbook(BytesIO(generar_diagnostico_ml_eccomapp_excel(diag)))["ML-Eccomapp — Coincidencias"]
+    assert tecnico not in ws["S2"].value
+    assert ws["W2"].value == tecnico

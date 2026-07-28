@@ -26,6 +26,13 @@ from kiki_control.presentation.bloque_b_diagnostics import (
 )
 from kiki_control.presentation.control_consolidado_diagnostics import DiagnosticoControlConsolidado, diagnosticar_control_consolidado
 from kiki_control.presentation.control_consolidado_view import texto_tratamiento_neto_comparable
+from kiki_control.presentation.ml_eccomapp_view import (
+    accion_visible_ml_eccomapp,
+    conclusion_ejecutiva_ml_eccomapp,
+    etiqueta_aptitud_ml_eccomapp,
+    etiqueta_estado_ml_eccomapp,
+    motivo_visible_ml_eccomapp,
+)
 from kiki_control.presentation.review_cases import caso_a_fila, clasificar_revisiones
 from kiki_control.presentation.reconciliation_view import (
     CoberturaArchivosPresentacion,
@@ -334,6 +341,7 @@ def _agregar_hojas_ml_eccomapp(wb: Workbook, diag: DiagnosticoMlEccomapp) -> Non
                 ("Grupos ambiguos o incompletos", diag.cantidad_ambiguas + diag.cantidad_identificador_incompleto + diag.cantidad_duplicadas),
                 ("Grupos aptos para utilidad", diag.cantidad_apta_utilidad), ("No aptas", diag.cantidad_no_apta_utilidad)):
         ws.append(row)
+    ws.append(("Conclusión ejecutiva", conclusion_ejecutiva_ml_eccomapp(diag)))
     _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas=set(), freeze=True)
     exactas = {EstadoCruceMlEccomapp.COINCIDENCIA_EXACTA, EstadoCruceMlEccomapp.COINCIDENCIA_POR_GRUPO}
     ambiguas = {EstadoCruceMlEccomapp.IDENTIFICADOR_INCOMPLETO, EstadoCruceMlEccomapp.IDENTIFICADOR_AMBIGUO, EstadoCruceMlEccomapp.DUPLICADO_ML, EstadoCruceMlEccomapp.DUPLICADO_ECCOMAPP}
@@ -345,12 +353,15 @@ def _agregar_hojas_ml_eccomapp(wb: Workbook, diag: DiagnosticoMlEccomapp) -> Non
 
 
 def _escribir_casos_ml_eccomapp(ws: Worksheet, cases) -> None:
-    ws.append(["Grupo u orden", "IDs venta ML", "IDs orden Eccomapp", "Estado", "Aptitud utilidad", "Fecha", "Filas originales ML", "Filas originales Eccomapp", "Ingresos productos ML", "Ingresos envío ML", "Cargos e impuestos ML", "Costos envío ML", "Anulaciones/reembolsos ML", "Total informado ML", "SKU/publicación ML", "Importe venta Eccomapp", "Costo Eccomapp", "Utilidad informada Eccomapp", "Motivo", "Acción recomendada"])
+    ws.append(["Grupo u orden", "IDs venta ML", "IDs orden Eccomapp", "Estado", "Aptitud utilidad", "Fecha", "Filas originales ML", "Filas originales Eccomapp", "Ingresos productos ML", "Ingresos envío ML", "Cargos e impuestos ML", "Costos envío ML", "Anulaciones/reembolsos ML", "Total informado ML", "SKU/publicación ML", "Importe venta Eccomapp", "Costo Eccomapp", "Utilidad informada Eccomapp", "Motivo", "Acción recomendada", "Estado técnico", "Aptitud técnica", "Motivo técnico original"])
     for c in cases:
         sum_ml = lambda attr: _decimal_o_vacio(sum((getattr(v, attr) for v in c.ventas_ml if getattr(v, attr) is not None), Decimal("0"))) if any(getattr(v, attr) is not None for v in c.ventas_ml) else ""
         sum_ec = lambda attr: _decimal_o_vacio(sum((getattr(o, attr) for o in c.operaciones_eccomapp if getattr(o, attr) is not None), Decimal("0"))) if any(getattr(o, attr) is not None for o in c.operaciones_eccomapp) else ""
-        ws.append([_texto_seguro(c.id_grupo), _texto_seguro(", ".join(c.ids_venta_ml)), _texto_seguro(", ".join(c.ids_orden_eccomapp)), c.estado.value, c.aptitud_utilidad.value, c.fecha, _texto_seguro(", ".join(str(v.fila_origen) for v in c.ventas_ml)), _texto_seguro(", ".join(str(o.numero_fila_origen) for o in c.operaciones_eccomapp)), sum_ml("ingresos_productos"), sum_ml("ingresos_envio"), sum_ml("cargo_venta_impuestos"), sum_ml("costos_envio"), sum_ml("anulaciones_reembolsos"), _decimal_o_vacio(c.total_ml), _texto_seguro(", ".join(filter(None, (f"{v.sku or ''}/{v.id_publicacion or ''}" for v in c.ventas_ml)))), sum_ec("monto_venta"), _decimal_o_vacio(c.costo_eccomapp), sum_ec("utilidad_neta_informada"), _texto_seguro(c.motivo), _texto_seguro(c.accion_recomendada)])
-    _formatear_tabla(ws, moneda_columnas=set(range(9, 19)), wrap_columnas={19, 20}, freeze=True)
+        ws.append([_texto_seguro(c.id_grupo), _texto_seguro(", ".join(c.ids_venta_ml)), _texto_seguro(", ".join(c.ids_orden_eccomapp)), etiqueta_estado_ml_eccomapp(c.estado), etiqueta_aptitud_ml_eccomapp(c.aptitud_utilidad), c.fecha, _texto_seguro(", ".join(str(v.fila_origen) for v in c.ventas_ml)), _texto_seguro(", ".join(str(o.numero_fila_origen) for o in c.operaciones_eccomapp)), sum_ml("ingresos_productos"), sum_ml("ingresos_envio"), sum_ml("cargo_venta_impuestos"), sum_ml("costos_envio"), sum_ml("anulaciones_reembolsos"), _decimal_o_vacio(c.total_ml), _texto_seguro(", ".join(filter(None, (f"{v.sku or ''}/{v.id_publicacion or ''}" for v in c.ventas_ml)))), sum_ec("monto_venta"), _decimal_o_vacio(c.costo_eccomapp), sum_ec("utilidad_neta_informada"), _texto_seguro(motivo_visible_ml_eccomapp(c)), _texto_seguro(accion_visible_ml_eccomapp(c)), c.estado.value, c.aptitud_utilidad.value, _texto_seguro(c.motivo)])
+    _formatear_tabla(ws, moneda_columnas=set(range(9, 19)), wrap_columnas={19, 20, 23}, freeze=True)
+    for cell in ws["F"][1:]:
+        if cell.value is not None:
+            cell.number_format = _FORMATO_FECHA
 
 
 def generar_excepciones_consolidadas_excel(reporte: ReporteControlConsolidado) -> bytes:
