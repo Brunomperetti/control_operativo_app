@@ -239,6 +239,10 @@ class ResumenCategoriaMpSinVenta:
     cantidad_movimientos: int
     neto_aprobado_bruto: Decimal
     neto_financiero_total: Decimal
+    neto_financiero_temporal_original: Decimal | None
+    """Agregado original del grupo, usado para representar el universo temporal."""
+    neto_financiero_reconstruido_confiable: Decimal | None
+    """Suma del detalle reconstruido; se conserva separada para controles operativos."""
     con_id_orden: int
     sin_id_orden: int
     accion_recomendada: str
@@ -1090,12 +1094,20 @@ def diagnosticar_bloque_b(
     resumen_categorias: list[ResumenCategoriaMpSinVenta] = []
     for categoria in CategoriaPrincipalMpSinVenta:
         items = tuple(m for m in movs_sin_venta if m.categoria_principal == categoria)
+        originales = tuple(m.neto_financiero_agregado_original_mp for m in items)
+        reconstruidos = tuple(m.neto_financiero_total_mp for m in items)
         resumen_categorias.append(ResumenCategoriaMpSinVenta(
             categoria=categoria,
             cantidad_grupos=len(items),
             cantidad_movimientos=sum(m.cantidad_movimientos for m in items),
             neto_aprobado_bruto=_sum_decimals(m.neto_aprobado_mp for m in items),
-            neto_financiero_total=_sum_decimals(m.neto_financiero_total_mp for m in items),
+            neto_financiero_total=_sum_decimals(reconstruidos),
+            neto_financiero_temporal_original=(
+                _sum_decimals(originales) if all(v is not None for v in originales) else None
+            ),
+            neto_financiero_reconstruido_confiable=(
+                _sum_decimals(reconstruidos) if all(v is not None for v in reconstruidos) else None
+            ),
             con_id_orden=sum(m.tiene_id_orden_utilizable for m in items),
             sin_id_orden=sum(not m.tiene_id_orden_utilizable for m in items),
             accion_recomendada=_accion_categoria(categoria),

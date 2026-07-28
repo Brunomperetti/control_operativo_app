@@ -1235,18 +1235,23 @@ def test_pago_coherente_cero_es_no_candidato_pero_no_inconsistente():
     assert pagos.importe_valido_candidatos == D("0")
 
 
-def _diagnostico_temporal_exportacion(importes: list[Decimal], fechas: list[date | None]):
+def _diagnostico_temporal_exportacion(
+    importes: list[Decimal],
+    fechas: list[date | None],
+    importes_reconstruidos: list[Decimal] | None = None,
+):
     resultados = [
         _r(f"fin:temporal-{i}", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=importe,
            neto_fin=importe, tiene_ml=False, filas_mp=(i,))
         for i, importe in enumerate(importes, start=1)
     ]
     filas = range(1, len(resultados) + 1)
+    reconstruidos = importes if importes_reconstruidos is None else importes_reconstruidos
     diag = diagnosticar_bloque_b(
         _rep(resultados), date(2026, 7, 10), date(2026, 7, 20),
         fechas_origen_mp_por_fila=dict(zip(filas, fechas)),
         tipos_movimiento_mp_por_fila={i: "PAGO_APROBADO" for i in filas},
-        montos_neto_mp_por_fila=dict(zip(filas, importes)),
+        montos_neto_mp_por_fila=dict(zip(filas, reconstruidos)),
         tratamientos_mp_por_fila={i: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE for i in filas},
     )
     return _rep(resultados), diag
@@ -1268,6 +1273,49 @@ def test_revisiones_consolidadas_exporta_distribucion_productiva_desde_bloque_b(
     consolidado = generar_reporte_consolidado_excel(reporte, diagnostico, diag_b)
     assert _resumen_temporal_revisiones(revisiones) == esperado
     assert _resumen_temporal_revisiones(consolidado) == esperado
+
+
+def test_importe_temporal_original_no_es_reemplazado_por_neto_reconstruido():
+    originales = [D("-171324.11"), *([D("0")] * 24), D("-1348526.96"), *([D("0")] * 167)]
+    reconstruidos = [D("-171324.11"), *([D("0")] * 24), D("386983.50"), *([D("0")] * 167)]
+    fechas = [date(2026, 7, 1)] * 25 + [date(2026, 7, 15)] * 168
+    reporte, diag_b = _diagnostico_temporal_exportacion(originales, fechas, reconstruidos)
+    diagnostico = diagnosticar_control_consolidado(
+        reporte, date(2026, 7, 10), date(2026, 7, 20),
+        dict(enumerate(fechas, start=1)),
+    )
+    esperado = {
+        _MOTIVOS_TEMPORALES[0]: (25, D("-171324.11")),
+        _MOTIVOS_TEMPORALES[1]: (168, D("-1348526.96")),
+        _MOTIVOS_TEMPORALES[2]: (0, D("0")),
+        _MOTIVOS_TEMPORALES[3]: (0, D("0")),
+    }
+
+    libros = [
+        load_workbook(BytesIO(generar_revisiones_consolidadas_excel(reporte, diagnostico, diag_b)), data_only=False),
+        load_workbook(BytesIO(generar_reporte_consolidado_excel(reporte, diagnostico, diag_b)), data_only=False),
+    ]
+    for libro in libros:
+        filas_revision = {
+            row[0].value: (row[1].value, D(str(row[2].value)))
+            for row in libro["Revisiones"].iter_rows(min_row=2)
+            if row[0].value in esperado
+        }
+        assert filas_revision == esperado
+        assert all(cell.data_type != "f" and cell.data_type != "e" for ws in libro for row in ws for cell in row)
+
+    temporal = {
+        row[0].value: (row[1].value, D(str(row[3].value)))
+        for row in libros[1]["Distribución temporal MP"].iter_rows(min_row=2)
+    }
+    assert [temporal[nombre] for nombre in ("Anteriores", "Dentro", "Posteriores", "Sin fecha")] == list(esperado.values())
+    resumen_dentro = next(
+        r for r in diag_b.resumen_mp_sin_venta
+        if r.categoria == CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA
+    )
+    assert resumen_dentro.neto_financiero_temporal_original == D("-1348526.96")
+    assert resumen_dentro.neto_financiero_reconstruido_confiable == D("386983.50")
+    assert sum(r.neto_financiero_total for r in diag_b.resumen_operativo_dentro_periodo) == D("386983.50")
 
 
 def test_revisiones_consolidadas_clasifica_cuatro_casos_individuales_desde_bloque_b():
