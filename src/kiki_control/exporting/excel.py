@@ -16,6 +16,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from kiki_control.domain.control_consolidado import ReporteControlConsolidado, ResultadoControlConsolidado
 from kiki_control.domain.reconciliation import ReporteConciliacion, ResultadoConciliacion
+from kiki_control.domain.ml_eccomapp_diagnostic import DiagnosticoMlEccomapp, EstadoCruceMlEccomapp
 from kiki_control.presentation.bloque_b_diagnostics import (
     CategoriaPrincipalMpSinVenta,
     DiagnosticoBloqueB,
@@ -276,7 +277,7 @@ COLUMNAS_CONTROL_CONSOLIDADO = (
 )
 
 
-def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagnostico: DiagnosticoControlConsolidado | None = None, diag_bloque_b: DiagnosticoBloqueB | None = None) -> bytes:
+def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagnostico: DiagnosticoControlConsolidado | None = None, diag_bloque_b: DiagnosticoBloqueB | None = None, diagnostico_ml_eccomapp: DiagnosticoMlEccomapp | None = None) -> bytes:
     wb = Workbook(); ws = wb.active; ws.title = "Resumen"
     diag = diagnostico or diagnosticar_control_consolidado(reporte)
     _escribir_resumen_consolidado(ws, reporte, TIPO_CONSOLIDADO_TRES_FUENTES)
@@ -294,8 +295,46 @@ def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagno
         _escribir_fondos_bloque_b(wb.create_sheet("Bloque B — Fondos y payouts"), diag_bloque_b)
         _escribir_candidatos_venta_faltante(wb.create_sheet("Candidatos venta faltante"), diag_bloque_b)
         _escribir_pagos_inconsistentes(wb.create_sheet("Pagos MP inconsistentes"), diag_bloque_b)
+    if diagnostico_ml_eccomapp is not None:
+        _agregar_hojas_ml_eccomapp(wb, diagnostico_ml_eccomapp)
     _escribir_diccionario_consolidado(wb.create_sheet("Diccionario de cálculos"))
     salida = BytesIO(); wb.save(salida); return salida.getvalue()
+
+
+def generar_diagnostico_ml_eccomapp_excel(diag: DiagnosticoMlEccomapp) -> bytes:
+    """Genera las cinco hojas auditables del cruce comercial, sin PII."""
+    wb = Workbook(); wb.remove(wb.active); _agregar_hojas_ml_eccomapp(wb, diag)
+    salida = BytesIO(); wb.save(salida); return salida.getvalue()
+
+
+def _agregar_hojas_ml_eccomapp(wb: Workbook, diag: DiagnosticoMlEccomapp) -> None:
+    ws = wb.create_sheet("ML-Eccomapp — Resumen")
+    ws.append(["Métrica", "Cantidad"])
+    for row in (("Filas ML", diag.cantidad_filas_ml), ("Ventas únicas ML", diag.cantidad_ventas_unicas_ml),
+                ("Grupos ML", diag.cantidad_grupos_ml), ("Filas Eccomapp", diag.cantidad_filas_eccomapp),
+                ("Operaciones únicas Eccomapp", diag.cantidad_operaciones_unicas_eccomapp), ("Grupos Eccomapp", diag.cantidad_grupos_eccomapp),
+                ("Coincidencias exactas", diag.cantidad_coincidencias_exactas), ("Coincidencias por grupo", diag.cantidad_coincidencias_por_grupo),
+                ("Solo ML", diag.cantidad_solo_ml), ("Solo Eccomapp", diag.cantidad_solo_eccomapp),
+                ("Incompletas", diag.cantidad_identificador_incompleto), ("Ambiguas", diag.cantidad_ambiguas),
+                ("Duplicadas", diag.cantidad_duplicadas), ("Aptas para utilidad", diag.cantidad_apta_utilidad), ("No aptas", diag.cantidad_no_apta_utilidad)):
+        ws.append(row)
+    _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas=set(), freeze=True)
+    exactas = {EstadoCruceMlEccomapp.COINCIDENCIA_EXACTA, EstadoCruceMlEccomapp.COINCIDENCIA_POR_GRUPO}
+    ambiguas = {EstadoCruceMlEccomapp.IDENTIFICADOR_INCOMPLETO, EstadoCruceMlEccomapp.IDENTIFICADOR_AMBIGUO, EstadoCruceMlEccomapp.DUPLICADO_ML, EstadoCruceMlEccomapp.DUPLICADO_ECCOMAPP}
+    for name, cases in (("ML sin Eccomapp", (c for c in diag.casos if c.estado == EstadoCruceMlEccomapp.SOLO_ML)),
+                        ("Eccomapp sin ML", (c for c in diag.casos if c.estado == EstadoCruceMlEccomapp.SOLO_ECCOMAPP)),
+                        ("ML-Eccomapp — Coincidencias", (c for c in diag.casos if c.estado in exactas)),
+                        ("ML-Eccomapp — Ambiguos", (c for c in diag.casos if c.estado in ambiguas))):
+        _escribir_casos_ml_eccomapp(wb.create_sheet(name), tuple(cases))
+
+
+def _escribir_casos_ml_eccomapp(ws: Worksheet, cases) -> None:
+    ws.append(["Grupo u orden", "IDs venta ML", "IDs orden Eccomapp", "Estado", "Aptitud utilidad", "Fecha", "Filas originales ML", "Filas originales Eccomapp", "Ingresos productos ML", "Ingresos envío ML", "Cargos e impuestos ML", "Costos envío ML", "Anulaciones/reembolsos ML", "Total informado ML", "SKU/publicación ML", "Importe venta Eccomapp", "Costo Eccomapp", "Utilidad informada Eccomapp", "Motivo", "Acción recomendada"])
+    for c in cases:
+        sum_ml = lambda attr: _decimal_o_vacio(sum((getattr(v, attr) for v in c.ventas_ml if getattr(v, attr) is not None), Decimal("0"))) if any(getattr(v, attr) is not None for v in c.ventas_ml) else ""
+        sum_ec = lambda attr: _decimal_o_vacio(sum((getattr(o, attr) for o in c.operaciones_eccomapp if getattr(o, attr) is not None), Decimal("0"))) if any(getattr(o, attr) is not None for o in c.operaciones_eccomapp) else ""
+        ws.append([_texto_seguro(c.id_grupo), _texto_seguro(", ".join(c.ids_venta_ml)), _texto_seguro(", ".join(c.ids_orden_eccomapp)), c.estado.value, c.aptitud_utilidad.value, c.fecha, _texto_seguro(", ".join(str(v.fila_origen) for v in c.ventas_ml)), _texto_seguro(", ".join(str(o.numero_fila_origen) for o in c.operaciones_eccomapp)), sum_ml("ingresos_productos"), sum_ml("ingresos_envio"), sum_ml("cargo_venta_impuestos"), sum_ml("costos_envio"), sum_ml("anulaciones_reembolsos"), _decimal_o_vacio(c.total_ml), _texto_seguro(", ".join(filter(None, (f"{v.sku or ''}/{v.id_publicacion or ''}" for v in c.ventas_ml)))), sum_ec("monto_venta"), _decimal_o_vacio(c.costo_eccomapp), sum_ec("utilidad_neta_informada"), _texto_seguro(c.motivo), _texto_seguro(c.accion_recomendada)])
+    _formatear_tabla(ws, moneda_columnas=set(range(9, 19)), wrap_columnas={19, 20}, freeze=True)
 
 
 def generar_excepciones_consolidadas_excel(reporte: ReporteControlConsolidado) -> bytes:

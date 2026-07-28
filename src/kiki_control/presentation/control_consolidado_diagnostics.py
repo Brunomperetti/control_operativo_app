@@ -298,9 +298,10 @@ def diagnosticar_revisiones(
         ("Datos críticos incompletos", tiene_datos_criticos_faltantes, "Completar campos críticos en la fuente correspondiente."),
         ("Diferencia pendiente de clasificación contable", lambda r: r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia, "Revisar ML oficial, Eccomapp y MP sin asumir causa contable."),
         ("Venta oficial sin Total (ARS)", lambda r: r.tiene_mercado_libre_oficial and r.total_informado_ml is None, "Completar o revisar la columna Total (ARS) de Mercado Libre oficial antes del control monetario."),
-        # MP sin venta se desglosa por temporalidad en el panel siguiente; no se
-        # etiqueta indiscriminadamente como fuente faltante.
-        ("Fuente faltante", lambda r: not _es_movimiento_fondos(r) and not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago) and not (r.tiene_mercado_pago and not r.tiene_mercado_libre_oficial), "Confirmar si el archivo cargado cubre el universo esperado."),
+        ("ML sin Eccomapp", lambda r: r.tiene_mercado_libre_oficial and not r.tiene_eccomapp, "Verificar el ID comercial y la cobertura del archivo Eccomapp."),
+        ("Eccomapp sin ML", lambda r: r.tiene_eccomapp and not r.tiene_mercado_libre_oficial, "Verificar el ID comercial y la cobertura del archivo oficial ML."),
+        ("Identidad duplicada o ambigua", lambda r: r.estado == EstadoControlConsolidado.DUPLICADA_O_AMBIGUA, "Resolver duplicados o identidades incompatibles antes de vincular."),
+        ("Movimiento financiero faltante", lambda r: r.tiene_mercado_libre_oficial and r.tiene_eccomapp and not r.tiene_mercado_pago, "Confirmar la cobertura temporal de Mercado Pago."),
         ("Revisión financiera", lambda r: r.estado == EstadoControlConsolidado.EN_REVISION_FINANCIERA or r.indicadores_financieros.tiene_devolucion or r.indicadores_financieros.tiene_reclamo or r.indicadores_financieros.tiene_disputa, "Revisar movimientos financieros asociados."),
     )
     items=[]

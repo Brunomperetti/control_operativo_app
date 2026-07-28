@@ -22,6 +22,7 @@ SESSION_KEYS_TO_CLEAR = (
     "reporte_comercial",
     "reporte_financiero",
     "reporte_consolidado",
+    "diagnostico_ml_eccomapp",
     "firma_procesamiento",
     "firma_actual",
     "filtro_estados",
@@ -56,6 +57,14 @@ SESSION_KEYS_TO_CLEAR = (
     "bloque_b_buscar_id_mp",
     "bloque_b_filtro_tipo",
     "bloque_b_filtro_cat",
+    "ml_ec_estado",
+    "ml_ec_aptitud",
+    "ml_ec_busqueda",
+    "ml_ec_con_costo",
+    "ml_ec_prioritarios",
+    "ml_ec_detalle",
+    "ml_ec_fecha_desde",
+    "ml_ec_fecha_hasta",
 )
 
 RESULT_KEYS_TO_CLEAR = (
@@ -66,6 +75,7 @@ RESULT_KEYS_TO_CLEAR = (
     "reporte_comercial",
     "reporte_financiero",
     "reporte_consolidado",
+    "diagnostico_ml_eccomapp",
     "firma_procesamiento",
     "firma_actual",
     "filtro_estados",
@@ -100,6 +110,14 @@ RESULT_KEYS_TO_CLEAR = (
     "bloque_b_buscar_id_mp",
     "bloque_b_filtro_tipo",
     "bloque_b_filtro_cat",
+    "ml_ec_estado",
+    "ml_ec_aptitud",
+    "ml_ec_busqueda",
+    "ml_ec_con_costo",
+    "ml_ec_prioritarios",
+    "ml_ec_detalle",
+    "ml_ec_fecha_desde",
+    "ml_ec_fecha_hasta",
 )
 
 VIEW_FILTER_KEYS_TO_CLEAR = (
