@@ -105,9 +105,10 @@ def test_revisiones_multietiqueta_solo_requiere_revision_y_temporal_mixta_cierra
     diag = diagnosticar_control_consolidado(reporte, date(2026,7,10), date(2026,7,20), {8: date(2026,7,1), 9: date(2026,7,30)})
     dif_rev = [x for x in diag.revisiones.revisiones_multietiqueta if x.motivo_visible == 'Diferencia pendiente de clasificación contable'][0]
     assert dif_rev.cantidad == 1
-    assert diag.temporal_mp_sin_venta.fechas_mixtas.cantidad == 1
-    assert diag.temporal_mp_sin_venta.fechas_mixtas.neto_aprobado_mp == D('0')
-    assert diag.temporal_mp_sin_venta.fechas_mixtas.neto_financiero_total_mp == D('0')
+    assert diag.temporal_mp_sin_venta.fechas_mixtas.cantidad == 0
+    assert diag.temporal_mp_sin_venta.dentro.cantidad == 1
+    assert diag.temporal_mp_sin_venta.dentro.neto_aprobado_mp == D('0')
+    assert diag.temporal_mp_sin_venta.dentro.neto_financiero_total_mp == D('0')
     assert diag.temporal_mp_sin_venta.sin_fecha.cantidad == 1
     assert diag.temporal_mp_sin_venta.particion_cierra_exactamente
 
@@ -360,3 +361,51 @@ def test_nunca_se_fuerza_residual_a_cupon_para_cerrar_identidad():
     # La identidad cierra naturalmente (no se forzó cupón).
     assert residual.diferencia_final == D('0')
     assert residual.estado_conciliacion == 'CIERRA'
+
+
+def test_bloque_d_separa_mp_sin_venta_y_excluye_payout_de_todas_sus_filas():
+    casos = [
+        r('fin:ant', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('10'), neto_fin=D('-1'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(11,)),
+        r('fin:den', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('20'), neto_fin=D('-2'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(12,)),
+        r('fin:post', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('30'), neto_fin=D('-3'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(13,)),
+        r('fin:sf', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('40'), neto_fin=D('-4'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(14,)),
+        r('fin:payout', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('999'), neto_fin=D('999'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(15,), tipo=TipoMovimientoFinanciero.MOVIMIENTO_DE_FONDOS),
+    ]
+    diag = diagnosticar_control_consolidado(rep(casos), date(2026, 7, 10), date(2026, 7, 20), {
+        11: date(2026, 7, 1), 12: date(2026, 7, 15), 13: date(2026, 7, 30), 15: date(2026, 7, 15),
+    })
+    filas = {x.motivo_visible: x for x in diag.revisiones.revisiones_multietiqueta}
+    nombres = (
+        'MP sin venta anterior al período ML', 'MP sin venta dentro del período ML',
+        'MP sin venta posterior al período ML', 'MP sin venta sin fecha de origen',
+    )
+    assert [filas[n].cantidad for n in nombres] == [1, 1, 1, 1]
+    assert [filas[n].importe_afectado for n in nombres] == [D('-1'), D('-2'), D('-3'), D('-4')]
+    assert all(filas[n].accion_recomendada for n in nombres)
+    assert all('payout' not in filas[n].grupos_involucrados for n in nombres)
+    assert 'Fuente faltante' not in filas or 'fin:payout' not in filas['Fuente faltante'].grupos_involucrados
+    assert diag.temporal_mp_sin_venta.total_solo_movimiento_financiero == 4
+
+
+def test_coherencia_resumen_bloque_b_y_filas_temporales_bloque_d():
+    from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b
+    casos = [
+        r('fin:a', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('10'), neto_fin=D('-1'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(21,)),
+        r('fin:d', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('20'), neto_fin=D('-2'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(22, 23)),
+        r('fin:p', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('30'), neto_fin=D('-3'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(24,)),
+        r('fin:s', E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D('40'), neto_fin=D('-4'), costo=None, dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(25,)),
+    ]
+    fechas = {21: date(2026, 7, 1), 22: date(2026, 7, 1), 23: date(2026, 7, 15), 24: date(2026, 7, 30)}
+    reporte = rep(casos)
+    b = diagnosticar_bloque_b(reporte, date(2026, 7, 10), date(2026, 7, 20), fechas)
+    d = diagnosticar_control_consolidado(reporte, date(2026, 7, 10), date(2026, 7, 20), fechas)
+    resumen_b = {x.categoria.value: (x.cantidad_grupos, x.neto_financiero_total) for x in b.resumen_mp_sin_venta}
+    temporal_d = {
+        'ANTERIOR_AL_PERIODO_ML': d.temporal_mp_sin_venta.anteriores,
+        'DENTRO_DEL_PERIODO_ML_SIN_VENTA': d.temporal_mp_sin_venta.dentro,
+        'POSTERIOR_AL_PERIODO_ML': d.temporal_mp_sin_venta.posteriores,
+        'SIN_FECHA_DE_ORIGEN': d.temporal_mp_sin_venta.sin_fecha,
+    }
+    assert all(resumen_b[k] == (v.cantidad, v.neto_financiero_total_mp) for k, v in temporal_d.items())
+    assert sum(x[0] for x in resumen_b.values()) == b.cantidad_mp_sin_venta == 4
+    assert sum(x[1] for x in resumen_b.values()) == b.neto_financiero_total_mp_sin_venta == D('-10')

@@ -675,3 +675,13 @@ def test_excel_mp_sin_venta_incluye_resumen_detalle_y_seguridad():
     headers = [c.value for c in ws[1]]
     amount = ws.cell(2, headers.index("Neto aprobado bruto MP") + 1)
     assert D(str(amount.value)) == D("12.34") and "$" in amount.number_format
+
+@pytest.mark.parametrize(("fechas", "esperada"), [
+    ({1: date(2026, 6, 30), 2: date(2026, 7, 10)}, "DENTRO_DEL_PERIODO_ML_SIN_VENTA"),
+    ({1: date(2026, 7, 10), 2: date(2026, 8, 1)}, "DENTRO_DEL_PERIODO_ML_SIN_VENTA"),
+    ({}, "SIN_FECHA_DE_ORIGEN"),
+    ({1: date(2026, 6, 30), 2: date(2026, 8, 1)}, "DENTRO_DEL_PERIODO_ML_SIN_VENTA"),
+])
+def test_categoria_principal_grupos_con_fechas_limite(fechas, esperada):
+    from kiki_control.presentation.bloque_b_diagnostics import categoria_principal_mp
+    assert categoria_principal_mp((1, 2), fechas, date(2026, 7, 1), date(2026, 7, 31)).value == esperada

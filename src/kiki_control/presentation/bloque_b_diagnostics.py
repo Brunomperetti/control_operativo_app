@@ -373,17 +373,17 @@ def categoria_principal_mp(
     """Clasificación excluyente y conservadora basada en la cobertura ML real."""
     fechas = [_as_date(fechas_origen_por_fila.get(f)) for f in filas_mp]
     validas = [f for f in fechas if f is not None]
-    if not validas or inicio_ml is None or fin_ml is None or len(validas) != len(filas_mp):
-        return CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN
-    # Un grupo que cruza límites no se fuerza a un período: requiere revisión.
-    if min(validas) < inicio_ml and max(validas) >= inicio_ml:
-        return CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN
-    if min(validas) <= fin_ml and max(validas) > fin_ml:
+    if not validas or inicio_ml is None or fin_ml is None:
         return CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN
     if max(validas) < inicio_ml:
         return CategoriaPrincipalMpSinVenta.ANTERIOR_AL_PERIODO_ML
     if min(validas) > fin_ml:
         return CategoriaPrincipalMpSinVenta.POSTERIOR_AL_PERIODO_ML
+    if any(inicio_ml <= fecha <= fin_ml for fecha in validas):
+        return CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA
+    # Si hay fechas anteriores y posteriores pero ninguna dentro, el intervalo
+    # del grupo atraviesa la cobertura ML. Conservadoramente se revisa como
+    # DENTRO_DEL_PERIODO_ML_SIN_VENTA; nunca se lo presenta como carente de fecha.
     return CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA
 
 

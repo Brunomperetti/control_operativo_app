@@ -327,7 +327,9 @@ def test_excel_consolidado_usa_mismo_diagnostico_temporal_que_interfaz():
         assert excel[categoria][1].value == interfaz[categoria]['Cantidad']
         assert excel[categoria][2].value == D(interfaz[categoria]['Neto aprobado MP'].replace('$ ', '').replace('.', '').replace(',', '.'))
         assert excel[categoria][3].value == D(interfaz[categoria]['Neto financiero total MP'].replace('$ ', '').replace('.', '').replace(',', '.'))
-    assert {excel[c][1].value for c in interfaz} == {1}
+    assert excel['Dentro'][1].value == 2
+    assert excel['Fechas mixtas'][1].value == 0
+    assert sum(excel[c][1].value for c in interfaz) == 5
 
 
 def test_excel_residual_muestra_universo_sumas_y_no_formatea_cantidades_como_moneda():

@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Iterable, Mapping
 
 from kiki_control.domain.control_consolidado import EstadoControlConsolidado, ReporteControlConsolidado, ResultadoControlConsolidado
+from kiki_control.presentation.bloque_b_diagnostics import CategoriaPrincipalMpSinVenta, categoria_principal_mp
 
 _ZERO = Decimal("0")
 
@@ -283,21 +284,43 @@ def diagnosticar_utilidad(reporte: ReporteControlConsolidado) -> DiagnosticoCobe
     return DiagnosticoCoberturaUtilidad(reporte.total_resultados, len(calc), len(excl), neto, costo, utilidad, _sum(r.costo_productos_eccomapp for r in excl), motivos, sum(motivos.values()) == len(excl), utilidad == neto - costo)
 
 
-def diagnosticar_revisiones(reporte: ReporteControlConsolidado) -> DiagnosticoRevisionesConsolidadas:
+def _es_movimiento_fondos(r: ResultadoControlConsolidado) -> bool:
+    return str(getattr(r.tipo_movimiento_financiero, "value", r.tipo_movimiento_financiero)) == "MOVIMIENTO_DE_FONDOS"
+
+
+def diagnosticar_revisiones(
+    reporte: ReporteControlConsolidado,
+    inicio_ml: date | datetime | None = None,
+    fin_ml: date | datetime | None = None,
+    fechas_mp_por_fila: Mapping[int, date | datetime | None] | None = None,
+) -> DiagnosticoRevisionesConsolidadas:
     reglas = (
         ("Datos críticos incompletos", tiene_datos_criticos_faltantes, "Completar campos críticos en la fuente correspondiente."),
         ("Diferencia pendiente de clasificación contable", lambda r: r.diferencia_ml_mp is not None and abs(r.diferencia_ml_mp) > r.tolerancia, "Revisar ML oficial, Eccomapp y MP sin asumir causa contable."),
         ("Venta oficial sin Total (ARS)", lambda r: r.tiene_mercado_libre_oficial and r.total_informado_ml is None, "Completar o revisar la columna Total (ARS) de Mercado Libre oficial antes del control monetario."),
         # MP sin venta se desglosa por temporalidad en el panel siguiente; no se
         # etiqueta indiscriminadamente como fuente faltante.
-        ("Fuente faltante", lambda r: not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago) and not (r.tiene_mercado_pago and not r.tiene_mercado_libre_oficial), "Confirmar si el archivo cargado cubre el universo esperado."),
-        ("MP sin venta: revisar clasificación temporal", lambda r: r.tiene_mercado_pago and not r.tiene_mercado_libre_oficial, "Separar movimientos anteriores, dentro, posteriores y sin fecha según la cobertura ML cargada."),
+        ("Fuente faltante", lambda r: not _es_movimiento_fondos(r) and not (r.tiene_mercado_libre_oficial and r.tiene_eccomapp and r.tiene_mercado_pago) and not (r.tiene_mercado_pago and not r.tiene_mercado_libre_oficial), "Confirmar si el archivo cargado cubre el universo esperado."),
         ("Revisión financiera", lambda r: r.estado == EstadoControlConsolidado.EN_REVISION_FINANCIERA or r.indicadores_financieros.tiene_devolucion or r.indicadores_financieros.tiene_reclamo or r.indicadores_financieros.tiene_disputa, "Revisar movimientos financieros asociados."),
     )
     items=[]
     for nombre, pred, accion in reglas:
         rs=tuple(r for r in reporte.resultados if r.requiere_revision and pred(r))
         if rs: items.append(DiagnosticoRevision(nombre, len(rs), _sum(r.neto_aprobado_mp for r in rs) if nombre != "Datos críticos incompletos" else None, accion, tuple(_grupo(r) for r in rs)))
+    fechas = fechas_mp_por_fila or {}
+    categorias = (
+        (CategoriaPrincipalMpSinVenta.ANTERIOR_AL_PERIODO_ML, "MP sin venta anterior al período ML", "Revisión financiera histórica; ampliar la cobertura ML solo si corresponde."),
+        (CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA, "MP sin venta dentro del período ML", "Revisar prioritariamente la vinculación y la venta oficial ML."),
+        (CategoriaPrincipalMpSinVenta.POSTERIOR_AL_PERIODO_ML, "MP sin venta posterior al período ML", "Revisar cuando se cargue el período ML posterior."),
+        (CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN, "MP sin venta sin fecha de origen", "Completar o validar la fecha de origen y el tipo de movimiento."),
+    )
+    universo_mp_sin_venta = tuple(
+        r for r in reporte.resultados
+        if r.tiene_mercado_pago and not r.tiene_mercado_libre_oficial and not _es_movimiento_fondos(r)
+    )
+    for categoria, nombre, accion in categorias:
+        rs = tuple(r for r in universo_mp_sin_venta if categoria_principal_mp(r.filas_origen_mp, fechas, _as_date(inicio_ml), _as_date(fin_ml)) == categoria)
+        items.append(DiagnosticoRevision(nombre, len(rs), _sum(r.neto_financiero_total_mp for r in rs), accion, tuple(_grupo(r) for r in rs)))
     return DiagnosticoRevisionesConsolidadas(reporte.total_requieren_revision, tuple(items), "Conteos multietiqueta: no deben sumarse para obtener el total. Revisiones consolidadas: tres fuentes. Revisiones históricas: Eccomapp–Mercado Pago. Los contadores 206 y 122 pertenecen a universos diferentes y no son comparables directamente.")
 
 
@@ -317,22 +340,15 @@ def diagnosticar_temporal_mp_sin_venta(reporte: ReporteControlConsolidado, inici
     }
     total = 0
     for r in reporte.resultados:
-        if r.estado != EstadoControlConsolidado.SOLO_MOVIMIENTO_FINANCIERO: continue
+        if not r.tiene_mercado_pago or r.tiene_mercado_libre_oficial or _es_movimiento_fondos(r): continue
         total += 1
-        categorias = set()
-        for fila in r.filas_origen_mp:
-            fecha = _as_date(fechas.get(fila)) if fila in fechas else None
-            if fecha is None or inicio is None or fin is None:
-                categorias.add("sin_fecha")
-            elif fecha < inicio:
-                categorias.add("anteriores")
-            elif fecha > fin:
-                categorias.add("posteriores")
-            else:
-                categorias.add("dentro")
-        if not categorias:
-            categorias.add("sin_fecha")
-        key = next(iter(categorias)) if len(categorias) == 1 else "fechas_mixtas"
+        categoria = categoria_principal_mp(r.filas_origen_mp, fechas, inicio, fin)
+        key = {
+            CategoriaPrincipalMpSinVenta.ANTERIOR_AL_PERIODO_ML: "anteriores",
+            CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA: "dentro",
+            CategoriaPrincipalMpSinVenta.POSTERIOR_AL_PERIODO_ML: "posteriores",
+            CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN: "sin_fecha",
+        }[categoria]
         buckets[key][0] += 1
         if r.neto_aprobado_mp is not None:
             buckets[key][1] += r.neto_aprobado_mp
@@ -451,4 +467,4 @@ def diagnosticar_residual_ml(reporte: ReporteControlConsolidado) -> ResidualMerc
     )
 
 def diagnosticar_control_consolidado(reporte: ReporteControlConsolidado, inicio_ml: date | datetime | None = None, fin_ml: date | datetime | None = None, fechas_mp_por_fila: Mapping[int, date | datetime | None] | None = None) -> DiagnosticoControlConsolidado:
-    return DiagnosticoControlConsolidado(diagnosticar_particion(reporte), diagnosticar_diferencias(reporte), diagnosticar_puente(reporte), diagnosticar_utilidad(reporte), diagnosticar_revisiones(reporte), diagnosticar_temporal_mp_sin_venta(reporte, inicio_ml, fin_ml, fechas_mp_por_fila), diagnosticar_cobertura_monetaria(reporte), diagnosticar_residual_ml(reporte))
+    return DiagnosticoControlConsolidado(diagnosticar_particion(reporte), diagnosticar_diferencias(reporte), diagnosticar_puente(reporte), diagnosticar_utilidad(reporte), diagnosticar_revisiones(reporte, inicio_ml, fin_ml, fechas_mp_por_fila), diagnosticar_temporal_mp_sin_venta(reporte, inicio_ml, fin_ml, fechas_mp_por_fila), diagnosticar_cobertura_monetaria(reporte), diagnosticar_residual_ml(reporte))
