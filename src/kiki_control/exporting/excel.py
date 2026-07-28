@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 from io import BytesIO
 from typing import Any, Literal
@@ -243,8 +243,21 @@ def _estilo_header(celda: Cell) -> None:
 
 
 def _asegurar_celda(celda: Cell) -> None:
-    if isinstance(celda.value, str):
-        celda.value = _texto_seguro(celda.value)
+    celda.value = _valor_seguro_excel(celda.value)
+
+
+def _valor_seguro_excel(valor: Any) -> Any:
+    """Adapta valores a Excel sin alterar la fecha/hora comercial local.
+
+    OpenPyXL no serializa ``datetime`` ni ``time`` con zona horaria. Las fechas
+    llegan aquí después de su normalización operativa, por lo que se elimina
+    solamente ``tzinfo``: no se convierten a UTC ni a texto.
+    """
+    if isinstance(valor, (datetime, time)) and valor.tzinfo is not None:
+        return valor.replace(tzinfo=None)
+    if isinstance(valor, str):
+        return _texto_seguro(valor)
+    return valor
 
 
 def _escribir_revisiones(ws: Worksheet, casos: Iterable[Any]) -> None:
@@ -314,9 +327,12 @@ def _agregar_hojas_ml_eccomapp(wb: Workbook, diag: DiagnosticoMlEccomapp) -> Non
                 ("Grupos ML", diag.cantidad_grupos_ml), ("Filas Eccomapp", diag.cantidad_filas_eccomapp),
                 ("Operaciones únicas Eccomapp", diag.cantidad_operaciones_unicas_eccomapp), ("Grupos Eccomapp", diag.cantidad_grupos_eccomapp),
                 ("Coincidencias exactas", diag.cantidad_coincidencias_exactas), ("Coincidencias por grupo", diag.cantidad_coincidencias_por_grupo),
-                ("Solo ML", diag.cantidad_solo_ml), ("Solo Eccomapp", diag.cantidad_solo_eccomapp),
+                ("Grupos comerciales con coincidencia", diag.cantidad_coincidencias),
+                ("Grupos ML sin Eccomapp", diag.cantidad_solo_ml), ("Grupos Eccomapp sin ML", diag.cantidad_solo_eccomapp),
                 ("Incompletas", diag.cantidad_identificador_incompleto), ("Ambiguas", diag.cantidad_ambiguas),
-                ("Duplicadas", diag.cantidad_duplicadas), ("Aptas para utilidad", diag.cantidad_apta_utilidad), ("No aptas", diag.cantidad_no_apta_utilidad)):
+                ("Duplicadas", diag.cantidad_duplicadas),
+                ("Grupos ambiguos o incompletos", diag.cantidad_ambiguas + diag.cantidad_identificador_incompleto + diag.cantidad_duplicadas),
+                ("Grupos aptos para utilidad", diag.cantidad_apta_utilidad), ("No aptas", diag.cantidad_no_apta_utilidad)):
         ws.append(row)
     _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas=set(), freeze=True)
     exactas = {EstadoCruceMlEccomapp.COINCIDENCIA_EXACTA, EstadoCruceMlEccomapp.COINCIDENCIA_POR_GRUPO}
