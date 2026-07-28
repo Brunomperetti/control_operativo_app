@@ -259,6 +259,24 @@ class ResumenOperativoMpSinVenta:
 
 
 @dataclass(frozen=True)
+class CalidadMonetariaMpSinVenta:
+    """Calidad del detalle monetario, sin convertir ausencias en importes cero."""
+
+    grupos_coherentes: int
+    grupos_incoherentes: int
+    grupos_no_verificables: int
+    movimientos_correspondencia_inconsistente: int
+    pagos_aprobados_negativos: int
+    importe_reconstruido_confiable: Decimal
+    importe_reconstruido_excluido_kpi: Decimal | None
+    agregado_original_referencia: Decimal | None
+    diferencia_agregado_detalle: Decimal | None
+    importe_no_verificable: Decimal | None
+    cantidad_grupos_excluidos: int
+    cantidad_grupos_sin_reconstruccion: int
+
+
+@dataclass(frozen=True)
 class ResumenBloqueB:
     """Resumen compacto de Bloque B para presentación."""
 
@@ -301,6 +319,12 @@ class DiagnosticoBloqueB:
     suma_diferencias_individuales: Decimal
     coherencia_suma_diferencias: bool
     """Verifica que suma_diferencias_individuales == diferencia_operaciones_fuera_tolerancia."""
+    composicion_cantidades_coherente: bool = True
+    composicion_movimientos_coherente: bool = True
+    composicion_neto_aprobado_coherente: bool = True
+    composicion_neto_financiero_coherente: bool = True
+    existen_grupos_monetarios_inconsistentes: bool = False
+    calidad_monetaria_mp_sin_venta: CalidadMonetariaMpSinVenta | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -950,7 +974,7 @@ def diagnosticar_bloque_b(
         )
         coherencia_grupo = estado_coherencia == EstadoCoherenciaGrupo.COHERENTE
         diferencia_detalle = (
-            neto_financiero_detalle - r.neto_financiero_total_mp
+            r.neto_financiero_total_mp - neto_financiero_detalle
             if neto_financiero_detalle is not None and r.neto_financiero_total_mp is not None
             else None
         )
@@ -1069,13 +1093,53 @@ def diagnosticar_bloque_b(
             accion_recomendada=accion,
         ))
     coherencia_detalle = all(m.coherencia_grupo for m in movs_sin_venta)
-    coherencia_operativa = (
-        sum(x.cantidad_grupos for x in resumen_operativo) == len(dentro_periodo)
-        and _sum_decimals(x.neto_aprobado_bruto for x in resumen_operativo)
-            == _sum_decimals(m.neto_aprobado_mp for m in dentro_periodo)
-        and _sum_decimals(x.neto_financiero_total for x in resumen_operativo)
-            == _sum_decimals(m.neto_financiero_total_mp for m in dentro_periodo)
-        and all(m.coherencia_grupo for m in dentro_periodo)
+    composicion_cantidades = sum(x.cantidad_grupos for x in resumen_operativo) == len(dentro_periodo)
+    composicion_movimientos = (
+        sum(x.cantidad_movimientos for x in resumen_operativo)
+        == sum(m.cantidad_movimientos for m in dentro_periodo)
+    )
+    composicion_aprobado = (
+        _sum_decimals(x.neto_aprobado_bruto for x in resumen_operativo)
+        == _sum_decimals(m.neto_aprobado_mp for m in dentro_periodo)
+    )
+    composicion_financiero = (
+        _sum_decimals(x.neto_financiero_total for x in resumen_operativo)
+        == _sum_decimals(m.neto_financiero_total_mp for m in dentro_periodo)
+    )
+    coherencia_operativa = all((composicion_cantidades, composicion_movimientos,
+                                composicion_aprobado, composicion_financiero))
+
+    grupos_excluidos = tuple(m for m in movs_sin_venta if not m.coherencia_grupo)
+    reconstruidos_excluidos = tuple(m.suma_reconstruida_movimientos_mp for m in grupos_excluidos)
+    agregados_referencia = tuple(m.neto_financiero_agregado_original_mp for m in grupos_excluidos)
+    diferencias_excluidas = tuple(m.diferencia_agregado_detalle_mp for m in grupos_excluidos)
+
+    def suma_completa(valores: tuple[Decimal | None, ...]) -> Decimal | None:
+        """Suma únicamente conjuntos completos; una ausencia nunca equivale a cero."""
+        return _sum_decimals(valores) if all(v is not None for v in valores) else None
+    calidad = CalidadMonetariaMpSinVenta(
+        grupos_coherentes=sum(m.estado_coherencia == EstadoCoherenciaGrupo.COHERENTE for m in movs_sin_venta),
+        grupos_incoherentes=sum(m.estado_coherencia == EstadoCoherenciaGrupo.INCOHERENTE for m in movs_sin_venta),
+        grupos_no_verificables=sum(m.estado_coherencia == EstadoCoherenciaGrupo.NO_VERIFICABLE for m in movs_sin_venta),
+        movimientos_correspondencia_inconsistente=sum(
+            d.estado_correspondencia_fila != "CORRESPONDENCIA_OK"
+            for m in movs_sin_venta for d in m.movimientos_asociados
+        ),
+        pagos_aprobados_negativos=sum(
+            d.tipo_movimiento.upper().strip() == "PAGO_APROBADO"
+            and d.monto_neto_impactado is not None and d.monto_neto_impactado < _ZERO
+            for m in movs_sin_venta for d in m.movimientos_asociados
+        ),
+        importe_reconstruido_confiable=_sum_decimals(
+            m.suma_reconstruida_movimientos_mp for m in movs_sin_venta if m.coherencia_grupo
+        ),
+        importe_reconstruido_excluido_kpi=suma_completa(reconstruidos_excluidos),
+        agregado_original_referencia=suma_completa(agregados_referencia),
+        diferencia_agregado_detalle=suma_completa(diferencias_excluidas),
+        # No se inventa un monto para el detalle incompleto: su importe es desconocido.
+        importe_no_verificable=(None if any(v is None for v in reconstruidos_excluidos) else _ZERO),
+        cantidad_grupos_excluidos=len(grupos_excluidos),
+        cantidad_grupos_sin_reconstruccion=sum(v is None for v in reconstruidos_excluidos),
     )
 
     return DiagnosticoBloqueB(
@@ -1097,4 +1161,10 @@ def diagnosticar_bloque_b(
         grupos_movimientos_asociados=grupos_movimientos,
         suma_diferencias_individuales=suma_ind,
         coherencia_suma_diferencias=coherencia,
+        composicion_cantidades_coherente=composicion_cantidades,
+        composicion_movimientos_coherente=composicion_movimientos,
+        composicion_neto_aprobado_coherente=composicion_aprobado,
+        composicion_neto_financiero_coherente=composicion_financiero,
+        existen_grupos_monetarios_inconsistentes=bool(grupos_excluidos),
+        calidad_monetaria_mp_sin_venta=calidad,
     )

@@ -589,6 +589,28 @@ def _escribir_resumen_mp_sin_ml(ws: Worksheet, diag: DiagnosticoBloqueB) -> None
                    ))])
         ws.cell(ws.max_row, 5).number_format = _FORMATO_MONEDA_ARS
         ws.cell(ws.max_row, 6).number_format = _FORMATO_MONEDA_ARS
+    calidad = diag.calidad_monetaria_mp_sin_venta
+    if calidad is not None:
+        ws.append([])
+        ws.append(["Control de calidad monetaria por fila", "Valor"])
+        filas_calidad = (
+            ("Grupos coherentes", calidad.grupos_coherentes),
+            ("Grupos incoherentes", calidad.grupos_incoherentes),
+            ("Grupos no verificables", calidad.grupos_no_verificables),
+            ("Movimientos con correspondencia inconsistente", calidad.movimientos_correspondencia_inconsistente),
+            ("Pagos aprobados negativos", calidad.pagos_aprobados_negativos),
+            ("Importe reconstruido confiable", calidad.importe_reconstruido_confiable),
+            ("Importe reconstruido excluido de KPI", calidad.importe_reconstruido_excluido_kpi),
+            ("Agregado original de referencia", calidad.agregado_original_referencia),
+            ("Diferencia agregado − detalle", calidad.diferencia_agregado_detalle),
+            ("Importe no verificable", calidad.importe_no_verificable),
+            ("Cantidad de grupos excluidos", calidad.cantidad_grupos_excluidos),
+            ("Cantidad de grupos sin reconstrucción", calidad.cantidad_grupos_sin_reconstruccion),
+        )
+        for etiqueta, valor in filas_calidad:
+            ws.append([etiqueta, _decimal_o_vacio(valor) if isinstance(valor, Decimal) else valor])
+            if isinstance(valor, Decimal):
+                ws.cell(ws.max_row, 2).number_format = _FORMATO_MONEDA_ARS
 
 
 def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:

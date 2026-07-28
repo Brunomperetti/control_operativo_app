@@ -772,6 +772,64 @@ def test_universo_comparable_611_611_0_permanece_sin_diferencia():
     resumen = diagnosticar_bloque_b(_rep(casos)).resumen
     assert (resumen.comparables_totales, resumen.coincidencias, resumen.con_diferencia) == (611, 611, 0)
     assert resumen.diferencia_universo_comparable == D("0")
+    from kiki_control.presentation.control_consolidado_view import formato_importe
+    assert formato_importe(resumen.diferencia_universo_comparable) == "$ 0,00"
+
+
+def test_composicion_productiva_sintetica_cierra_aun_con_inconsistencia_monetaria():
+    resultados = []
+    fechas, tipos, montos, tratamientos = {}, {}, {}, {}
+    fila = 1
+
+    def agregar(clave, movimientos, agregado):
+        nonlocal fila
+        filas = tuple(range(fila, fila + len(movimientos)))
+        for numero, (tipo, monto, tratamiento) in zip(filas, movimientos):
+            fechas[numero] = date(2026, 7, 10)
+            tipos[numero] = tipo
+            montos[numero] = monto
+            tratamientos[numero] = tratamiento
+        resultados.append(_r(clave, E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=agregado,
+                              neto_fin=agregado, tiene_ml=False, filas_mp=filas))
+        fila += len(movimientos)
+
+    modifica = TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE
+    incluido = TratamientoNetoComparable.COMPONENTE_YA_INCLUIDO
+    for i in range(22):
+        agregar(f"pago-{i}", [("PAGO_APROBADO", D("378536.64") if i == 0 else D("0"), modifica)],
+                D("378536.64") if i == 0 else D("0"))
+    for i in range(71):
+        agregar(f"envio-{i}", [("PAGO_ENVIO", D("0"), incluido)], D("0"))
+    for i in range(74):
+        movimientos = [
+            ("PAGO_APROBADO", D("943236.23") if i == 0 else D("0"), modifica),
+            ("DEVOLUCION_DINERO", D("-942682.14") if i == 0 else D("0"), modifica),
+        ]
+        if i < 12:  # 74 grupos y 160 movimientos en MULTIPLES_TIPOS.
+            movimientos.append(("DEVOLUCION_DINERO", D("0"), modifica))
+        reconstruido = D("554.09") if i == 0 else D("0")
+        agregar(f"mixto-{i}", movimientos, reconstruido + (D("1") if i == 0 else D("0")))
+    agregar("otro", [("BONIFICACION", D("7892.77"), modifica)], D("7892.77"))
+
+    diag = diagnosticar_bloque_b(
+        _rep(resultados), date(2026, 7, 1), date(2026, 7, 31),
+        fechas_origen_mp_por_fila=fechas,
+        tipos_movimiento_mp_por_fila=tipos,
+        montos_neto_mp_por_fila=montos,
+        tratamientos_mp_por_fila=tratamientos,
+    )
+    assert len(diag.movimientos_mp_sin_venta) == 168
+    assert sum(m.cantidad_movimientos for m in diag.movimientos_mp_sin_venta) == 254
+    operativo = {r.subclasificacion_financiera.value: r for r in diag.resumen_operativo_dentro_periodo}
+    assert operativo["PAGO_APROBADO"].cantidad_grupos == 22
+    assert operativo["ENVIO"].cantidad_grupos == 71
+    assert operativo["MULTIPLES_TIPOS"].cantidad_grupos == 74
+    assert operativo["OTRO_MOVIMIENTO"].cantidad_grupos == 1
+    assert operativo["MULTIPLES_TIPOS"].cantidad_movimientos == 160
+    assert sum(r.neto_aprobado_bruto for r in diag.resumen_operativo_dentro_periodo) == D("1321772.87")
+    assert sum(r.neto_financiero_total for r in diag.resumen_operativo_dentro_periodo) == D("386983.50")
+    assert diag.coherencia_operativa_dentro_periodo
+    assert diag.existen_grupos_monetarios_inconsistentes
 
 
 def test_mp_sin_venta_reconstruye_pago_puro_y_excluye_fila_ajena():
@@ -792,7 +850,7 @@ def test_mp_sin_venta_reconstruye_pago_puro_y_excluye_fila_ajena():
     assert grupo.cantidad_movimientos == 1
     assert grupo.neto_aprobado_mp == grupo.neto_financiero_total_mp == D("100")
     assert grupo.suma_reconstruida_movimientos_mp == D("100")
-    assert grupo.diferencia_agregado_detalle_mp == D("1000")
+    assert grupo.diferencia_agregado_detalle_mp == D("-1000")
     assert not grupo.coherencia_grupo and not grupo.posible_venta_faltante
     assert not diag.coherencia_detalle_importes_mp_sin_venta
     assert diag.neto_financiero_total_mp_sin_venta == D("100")
@@ -892,6 +950,60 @@ def test_mp_sin_venta_detalle_completo_sin_agregado_es_no_verificable():
     assert ws.cell(2, headers.index("Estado de coherencia") + 1).value == "NO_VERIFICABLE"
     assert ws.cell(2, headers.index("Motivo de coherencia") + 1).value == motivo
 
+    calidad = diag.calidad_monetaria_mp_sin_venta
+    assert calidad.importe_reconstruido_excluido_kpi == D("100")
+    assert calidad.agregado_original_referencia is None
+    assert calidad.diferencia_agregado_detalle is None
+    assert calidad.importe_no_verificable == D("0")
+
+
+def test_calidad_incoherente_distingue_reconstruido_agregado_y_diferencia_en_ui_y_excel():
+    from kiki_control.presentation.control_consolidado_view import filas_inconsistencias_mp_sin_venta
+
+    r = _r("incoherente", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("100"),
+           neto_fin=D("90"), tiene_ml=False, filas_mp=(1,))
+    diag = diagnosticar_bloque_b(
+        _rep([r]), date(2026, 7, 1), date(2026, 7, 31),
+        fechas_origen_mp_por_fila={1: date(2026, 7, 2)},
+        tipos_movimiento_mp_por_fila={1: "PAGO_APROBADO"},
+        montos_neto_mp_por_fila={1: D("100")},
+        tratamientos_mp_por_fila={1: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE},
+    )
+    calidad = diag.calidad_monetaria_mp_sin_venta
+    assert calidad.importe_reconstruido_excluido_kpi == D("100")
+    assert calidad.agregado_original_referencia == D("90")
+    assert calidad.diferencia_agregado_detalle == D("-10")
+    assert calidad.importe_no_verificable == D("0")
+
+    fila = filas_inconsistencias_mp_sin_venta(diag)[0]
+    assert fila["Suma reconstruida"] == "$ 100,00"
+    assert fila["Agregado original"] == "$ 90,00"
+    assert fila["Diferencia"] == "$ -10,00"
+
+    wb = load_workbook(BytesIO(generar_bloque_b_mp_sin_venta_excel(diag)))
+    resumen = wb["Resumen MP sin ML"]
+    valores = {row[0].value: row[1].value for row in resumen.iter_rows() if row[0].value}
+    assert valores["Importe reconstruido excluido de KPI"] == D("100")
+    assert valores["Agregado original de referencia"] == D("90")
+    assert valores["Diferencia agregado − detalle"] == D("-10")
+
+
+def test_no_verificable_no_reemplaza_reconstruido_ausente_con_agregado():
+    r = _r("incompleto", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("90"),
+           neto_fin=D("90"), tiene_ml=False, filas_mp=(1,))
+    diag = diagnosticar_bloque_b(
+        _rep([r]), date(2026, 7, 1), date(2026, 7, 31),
+        fechas_origen_mp_por_fila={1: date(2026, 7, 2)},
+        tipos_movimiento_mp_por_fila={1: "PAGO_APROBADO"},
+        montos_neto_mp_por_fila={1: None},
+    )
+    calidad = diag.calidad_monetaria_mp_sin_venta
+    assert calidad.importe_reconstruido_excluido_kpi is None
+    assert calidad.agregado_original_referencia == D("90")
+    assert calidad.diferencia_agregado_detalle is None
+    assert calidad.importe_no_verificable is None
+    assert calidad.cantidad_grupos_sin_reconstruccion == 1
+
 
 def test_enriquecimiento_atomico_conserva_fila_excel_tipo_id_importe_y_envio_excluido():
     r = _r("orden-1", tiene_ml=False, ml=None, mp=D("90"), neto_fin=D("90"),
@@ -926,3 +1038,27 @@ def test_clave_desplazada_y_pago_aprobado_negativo_son_inconsistentes_y_no_prior
     assert grupo.neto_financiero_total_mp is None
     assert not grupo.posible_venta_faltante
     assert not grupo.coherencia_grupo
+    # La calidad monetaria no contamina la validación independiente de composición.
+    assert diag.coherencia_operativa_dentro_periodo
+    assert diag.composicion_cantidades_coherente
+    assert diag.composicion_movimientos_coherente
+    assert diag.composicion_neto_aprobado_coherente
+    assert diag.composicion_neto_financiero_coherente
+    assert diag.existen_grupos_monetarios_inconsistentes
+    calidad = diag.calidad_monetaria_mp_sin_venta
+    assert calidad is not None
+    assert calidad.grupos_incoherentes == 1
+    assert calidad.movimientos_correspondencia_inconsistente == 1
+    assert calidad.pagos_aprobados_negativos == 1
+    assert calidad.importe_reconstruido_confiable == D("0")
+    assert calidad.importe_reconstruido_excluido_kpi is None
+    assert calidad.agregado_original_referencia == D("-50")
+    assert calidad.diferencia_agregado_detalle is None
+    assert calidad.importe_no_verificable is None
+
+    from kiki_control.presentation.control_consolidado_view import filas_inconsistencias_mp_sin_venta
+    filas = filas_inconsistencias_mp_sin_venta(diag)
+    assert len(filas) == 1
+    assert filas[0]["ID de grupo"] == grupo.id_grupo
+    assert filas[0]["Estado de coherencia"] == "INCOHERENTE"
+    assert filas_inconsistencias_mp_sin_venta(diag, False) == filas

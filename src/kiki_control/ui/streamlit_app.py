@@ -59,6 +59,7 @@ from kiki_control.presentation.control_consolidado_view import (
     explicacion_resultado,
     filas_bloque_a,
     filas_fondos_mp,
+    filas_inconsistencias_mp_sin_venta,
     filas_grupos_con_diferencia,
     filas_grupos_excluidos,
     filas_grupos_involucrados,
@@ -669,8 +670,61 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
     pk[3].metric("Con ID de orden", pagos_puros.con_id_orden)
     pk[4].metric("Sin ID de orden", pagos_puros.sin_id_orden)
     st.dataframe(filas_resumen_operativo_dentro_periodo(diag_bloque_b), use_container_width=True, hide_index=True)
-    if not diag_bloque_b.coherencia_operativa_dentro_periodo:
+    if diag_bloque_b.coherencia_operativa_dentro_periodo:
+        st.success("La composición operativa coincide con el universo dentro del período ML.")
+    else:
         st.error("La composición operativa no coincide con el total dentro del período ML.")
+
+    if diag_bloque_b.existen_grupos_monetarios_inconsistentes:
+        st.warning(
+            "Existen movimientos con datos monetarios no verificables o inconsistentes. "
+            "Los conteos y la composición coinciden, pero algunos importes globales no se consideran confiables."
+        )
+
+    calidad = diag_bloque_b.calidad_monetaria_mp_sin_venta
+    if calidad is not None:
+        st.subheader("Control de calidad monetaria por fila")
+        q1 = st.columns(4)
+        q1[0].metric("Grupos coherentes", calidad.grupos_coherentes)
+        q1[1].metric("Grupos incoherentes", calidad.grupos_incoherentes)
+        q1[2].metric("Grupos no verificables", calidad.grupos_no_verificables)
+        q1[3].metric("Grupos excluidos", calidad.cantidad_grupos_excluidos)
+        q2 = st.columns(3)
+        q2[0].metric("Movimientos con correspondencia inconsistente", calidad.movimientos_correspondencia_inconsistente)
+        q2[1].metric("Pagos aprobados negativos", calidad.pagos_aprobados_negativos)
+        q2[2].metric("Importe reconstruido confiable", formato_importe(calidad.importe_reconstruido_confiable))
+        q3 = st.columns(4)
+        q3[0].metric(
+            "Importe reconstruido excluido de KPI",
+            (formato_importe(calidad.importe_reconstruido_excluido_kpi)
+             if calidad.importe_reconstruido_excluido_kpi is not None else "No verificable"),
+        )
+        q3[1].metric(
+            "Agregado original de referencia",
+            (formato_importe(calidad.agregado_original_referencia)
+             if calidad.agregado_original_referencia is not None else "No disponible"),
+        )
+        q3[2].metric(
+            "Diferencia agregado − detalle",
+            (formato_importe(calidad.diferencia_agregado_detalle)
+             if calidad.diferencia_agregado_detalle is not None else "No verificable"),
+        )
+        q3[3].metric(
+            "Importe no verificable",
+            (formato_importe(calidad.importe_no_verificable)
+             if calidad.importe_no_verificable is not None else "Desconocido"),
+            help=f"Grupos sin reconstrucción completa: {calidad.cantidad_grupos_sin_reconstruccion}",
+        )
+        solo_inconsistentes = st.checkbox(
+            "Solo movimientos inconsistentes o no verificables",
+            value=True,
+            key="bloque_b_solo_inconsistencias_monetarias",
+        )
+        st.dataframe(
+            filas_inconsistencias_mp_sin_venta(diag_bloque_b, solo_inconsistentes),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     movs_sin_venta = diag_bloque_b.movimientos_mp_sin_venta
     if movs_sin_venta:
@@ -793,7 +847,7 @@ def _mostrar_resultados() -> None:
         d.estado_correspondencia_fila != "CORRESPONDENCIA_OK"
         for _, detalles in diag_bloque_b.grupos_movimientos_asociados for d in detalles
     ):
-        st.error("Advertencia global: existe al menos un movimiento MP con correspondencia de fila o signo inconsistente. Sus importes quedan fuera de KPI confiables.")
+        st.warning("Existen movimientos con datos monetarios no verificables o inconsistentes. Los conteos y la composición coinciden, pero algunos importes globales no se consideran confiables.")
     tab_resumen, tab_operacion, tab_auditoria = st.tabs(["Resumen ejecutivo", "Control por operación", "Auditoría y descargas"])
 
     with tab_resumen:

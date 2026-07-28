@@ -743,6 +743,52 @@ def filas_resumen_operativo_dentro_periodo(diag: DiagnosticoBloqueB) -> list[dic
     } for r in diag.resumen_operativo_dentro_periodo]
 
 
+def filas_inconsistencias_mp_sin_venta(
+    diag: DiagnosticoBloqueB,
+    solo_inconsistentes: bool = True,
+) -> list[dict[str, Any]]:
+    """Expone una fila auditable por movimiento, conservando los importes ausentes."""
+    filas: list[dict[str, Any]] = []
+    for grupo in diag.movimientos_mp_sin_venta:
+        es_grupo_observado = not grupo.coherencia_grupo
+        for movimiento in grupo.movimientos_asociados:
+            es_movimiento_observado = movimiento.estado_correspondencia_fila != "CORRESPONDENCIA_OK"
+            if solo_inconsistentes and not (es_grupo_observado or es_movimiento_observado):
+                continue
+            filas.append({
+                "ID de grupo": grupo.id_grupo,
+                "Fila original MP": movimiento.fila_origen,
+                "ID movimiento": movimiento.id_movimiento_mp,
+                "ID orden": movimiento.id_orden,
+                "Categoría temporal": grupo.categoria_principal.value,
+                "Subclasificación financiera": grupo.subclasificacion_financiera.value,
+                "Prioridad": grupo.prioridad_operativa.value,
+                "Tipo de movimiento": movimiento.tipo_movimiento,
+                "Importe crudo": movimiento.importe_crudo or "No disponible",
+                "Importe normalizado": (
+                    formato_importe(movimiento.monto_neto_impactado)
+                    if movimiento.monto_neto_impactado is not None else "No verificable"
+                ),
+                "Agregado original": (
+                    formato_importe(grupo.neto_financiero_agregado_original_mp)
+                    if grupo.neto_financiero_agregado_original_mp is not None else "No verificable"
+                ),
+                "Suma reconstruida": (
+                    formato_importe(grupo.suma_reconstruida_movimientos_mp)
+                    if grupo.suma_reconstruida_movimientos_mp is not None else "No verificable"
+                ),
+                "Diferencia": (
+                    formato_importe(grupo.diferencia_agregado_detalle_mp)
+                    if grupo.diferencia_agregado_detalle_mp is not None else "No verificable"
+                ),
+                "Estado de correspondencia": movimiento.estado_correspondencia_fila,
+                "Estado de coherencia": grupo.estado_coherencia.value,
+                "Motivo": grupo.motivo_coherencia,
+                "Acción recomendada": grupo.accion_recomendada,
+            })
+    return filas
+
+
 def filas_movimientos_diferencia(grupo: GrupoConDiferencia) -> list[dict[str, Any]]:
     """Devuelve una fila por cada movimiento MP individual asociado a un grupo con diferencia."""
     return [_fila_movimiento_mp(m) for m in grupo.movimientos_asociados]
