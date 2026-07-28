@@ -296,11 +296,16 @@ def kpis_diagnostico_operativo_mp(diag_bloque_b: DiagnosticoBloqueB) -> list[Kpi
     resumen = diag_bloque_b.resumen_operativo_dentro_periodo
     por_subclasificacion = {r.subclasificacion_financiera.value: r for r in resumen}
     especificos = (
-        ("PAGO_APROBADO", "Pagos aprobados sin venta ML", "Revisar prioritariamente la venta oficial y su vinculación."),
         ("MULTIPLES_TIPOS", "Grupos financieros mixtos", "Revisar el ciclo financiero completo."),
         ("ENVIO", "Componentes de envío", "Buscar el pago principal; no tratar como venta faltante."),
     )
-    kpis = [
+    pagos = diag_bloque_b.diagnostico_pagos_aprobados
+    kpis = [] if pagos is None else [
+        Kpi("Pagos aprobados puros detectados", str(len(pagos.detectados)), "Universo detectado dentro del período ML."),
+        Kpi("Candidatos válidos a venta faltante", f"{len(pagos.candidatos_validos)} · {formato_importe(pagos.importe_valido_candidatos)}", "Importe reconstruido confiable; revisar la venta oficial y su vinculación."),
+        Kpi("Pagos aprobados inconsistentes", str(len(pagos.inconsistentes)), "Excluidos del importe hasta revisar la semántica del movimiento en Mercado Pago."),
+    ]
+    kpis += [
         Kpi(nombre, f"{por_subclasificacion[sub].cantidad_grupos} · {formato_importe(por_subclasificacion[sub].neto_financiero_total)}", accion)
         for sub, nombre, accion in especificos
     ]
@@ -787,6 +792,45 @@ def filas_inconsistencias_mp_sin_venta(
                 "Acción recomendada": grupo.accion_recomendada,
             })
     return filas
+
+
+def filas_candidatos_venta_faltante(diag: DiagnosticoBloqueB) -> list[dict[str, Any]]:
+    """Detalle por fila de los pagos puros que superaron todos los controles."""
+    pagos = diag.diagnostico_pagos_aprobados
+    if pagos is None:
+        return []
+    return [{
+        "ID de grupo": grupo.id_grupo,
+        "ID movimiento MP": mov.id_movimiento_mp,
+        "ID de orden": mov.id_orden or "—",
+        "Fila original MP": mov.fila_origen,
+        "Fecha de origen": mov.fecha_origen,
+        "Fecha de aprobación": mov.fecha_aprobacion,
+        "Fecha de liquidación": mov.fecha_liquidacion,
+        "Importe crudo": mov.importe_crudo,
+        "Importe normalizado": formato_importe(mov.monto_neto_impactado),
+        "Neto reconstruido": formato_importe(grupo.suma_reconstruida_movimientos_mp),
+        "Estado de correspondencia": mov.estado_correspondencia_fila,
+        "Estado monetario": grupo.estado_coherencia.value,
+        "Motivo de posible venta faltante": grupo.interpretacion,
+        "Acción recomendada": grupo.accion_recomendada,
+    } for grupo in pagos.candidatos_validos for mov in grupo.movimientos_asociados]
+
+
+def filas_pagos_aprobados_inconsistentes(diag: DiagnosticoBloqueB) -> list[dict[str, Any]]:
+    """Detalle separado de pagos puros que no deben presentarse como candidatos."""
+    pagos = diag.diagnostico_pagos_aprobados
+    if pagos is None:
+        return []
+    return [{
+        "Fila original": mov.fila_origen,
+        "ID movimiento": mov.id_movimiento_mp,
+        "ID orden": mov.id_orden or "—",
+        "Importe": formato_importe(mov.monto_neto_impactado),
+        "Motivo de exclusión": grupo.motivo_coherencia,
+        "Estado": grupo.estado_coherencia.value,
+        "Acción recomendada": "Revisar la semántica del movimiento en Mercado Pago antes de considerarlo candidato.",
+    } for grupo in pagos.inconsistentes for mov in grupo.movimientos_asociados]
 
 
 def filas_movimientos_diferencia(grupo: GrupoConDiferencia) -> list[dict[str, Any]]:

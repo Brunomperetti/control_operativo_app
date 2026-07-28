@@ -757,13 +757,18 @@ def test_resumen_operativo_posible_venta_faltante_filtros_bloque_d_y_excel():
     assert "Duplicados o ambiguos" in bloque_d
     assert not ({"Pagos aprobados sin venta ML", "Grupos financieros mixtos", "Componentes de envío", "Otros movimientos no asociados a venta"} & bloque_d.keys())
     operativos = {k.nombre: k for k in bloques["Diagnóstico operativo MP sin venta dentro del período"]}
-    assert {"Pagos aprobados sin venta ML", "Grupos financieros mixtos", "Componentes de envío", "Otros movimientos no asociados a venta"} == operativos.keys()
-    assert operativos["Pagos aprobados sin venta ML"].valor == "1 · $ 100,00"
+    assert {"Pagos aprobados puros detectados", "Candidatos válidos a venta faltante",
+            "Pagos aprobados inconsistentes", "Grupos financieros mixtos",
+            "Componentes de envío", "Otros movimientos no asociados a venta"} == operativos.keys()
+    assert operativos["Pagos aprobados puros detectados"].valor == "1"
+    assert operativos["Candidatos válidos a venta faltante"].valor == "1 · $ 100,00"
     wb = load_workbook(BytesIO(generar_bloque_b_mp_sin_venta_excel(diag)))
     headers = [c.value for c in wb["MP sin venta ML"][1]]
     for esperado in ("Prioridad operativa", "Combinación resumida", "Interpretación", "posible_venta_faltante"):
         assert esperado in headers
-    assert "Composición de movimientos dentro del período ML sin venta encontrada" in [c.value for c in wb["Resumen MP sin ML"][8]]
+    assert "Composición de movimientos dentro del período ML sin venta encontrada" in {
+        c.value for row in wb["Resumen MP sin ML"].iter_rows() for c in row
+    }
 
 
 def test_universo_comparable_611_611_0_permanece_sin_diferencia():

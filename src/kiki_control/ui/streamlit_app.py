@@ -60,6 +60,8 @@ from kiki_control.presentation.control_consolidado_view import (
     filas_bloque_a,
     filas_fondos_mp,
     filas_inconsistencias_mp_sin_venta,
+    filas_candidatos_venta_faltante,
+    filas_pagos_aprobados_inconsistentes,
     filas_grupos_con_diferencia,
     filas_grupos_excluidos,
     filas_grupos_involucrados,
@@ -658,17 +660,24 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
         r for r in diag_bloque_b.resumen_operativo_dentro_periodo
         if r.subclasificacion_financiera.value == "PAGO_APROBADO"
     )
-    st.markdown("**Pagos aprobados sin venta ML encontrada**")
-    pk = st.columns(5)
-    pk[0].metric("Cantidad de grupos", pagos_puros.cantidad_grupos)
-    pk[1].metric("Neto aprobado bruto", formato_importe(pagos_puros.neto_aprobado_bruto))
-    pk[2].metric(
-        "Neto financiero total",
-        formato_importe(pagos_puros.neto_financiero_total)
-        if diag_bloque_b.coherencia_operativa_dentro_periodo else "No válido",
-    )
-    pk[3].metric("Con ID de orden", pagos_puros.con_id_orden)
-    pk[4].metric("Sin ID de orden", pagos_puros.sin_id_orden)
+    st.markdown("**Diagnóstico de pagos aprobados puros**")
+    pagos_diag = diag_bloque_b.diagnostico_pagos_aprobados
+    if pagos_diag is not None:
+        pk = st.columns(4)
+        pk[0].metric("Pagos aprobados puros detectados", len(pagos_diag.detectados))
+        pk[1].metric("Candidatos válidos a venta faltante", len(pagos_diag.candidatos_validos))
+        pk[2].metric("Casos inconsistentes excluidos", len(pagos_diag.inconsistentes))
+        pk[3].metric("Importe válido de candidatos", formato_importe(pagos_diag.importe_valido_candidatos))
+        st.markdown(pagos_diag.conclusion_ejecutiva)
+        d1, d2 = st.columns(2)
+        d1.markdown("**Universo detectado**")
+        d1.write(f"Con ID de orden: {pagos_diag.detectados_con_id} · Sin ID de orden: {pagos_diag.detectados_sin_id}")
+        d2.markdown("**Candidatos válidos**")
+        d2.write(f"Con ID de orden: {pagos_diag.candidatos_con_id} · Sin ID de orden: {pagos_diag.candidatos_sin_id}")
+        st.markdown("**Candidatos válidos a venta ML no encontrada**")
+        st.dataframe(filas_candidatos_venta_faltante(diag_bloque_b), use_container_width=True, hide_index=True)
+        st.markdown("**Pagos aprobados excluidos por inconsistencia**")
+        st.dataframe(filas_pagos_aprobados_inconsistentes(diag_bloque_b), use_container_width=True, hide_index=True)
     st.dataframe(filas_resumen_operativo_dentro_periodo(diag_bloque_b), use_container_width=True, hide_index=True)
     if diag_bloque_b.coherencia_operativa_dentro_periodo:
         st.success("La composición operativa coincide con el universo dentro del período ML.")
