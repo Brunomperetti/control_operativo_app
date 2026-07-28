@@ -689,14 +689,31 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
         q1[1].metric("Grupos incoherentes", calidad.grupos_incoherentes)
         q1[2].metric("Grupos no verificables", calidad.grupos_no_verificables)
         q1[3].metric("Grupos excluidos", calidad.cantidad_grupos_excluidos)
-        q2 = st.columns(4)
+        q2 = st.columns(3)
         q2[0].metric("Movimientos con correspondencia inconsistente", calidad.movimientos_correspondencia_inconsistente)
         q2[1].metric("Pagos aprobados negativos", calidad.pagos_aprobados_negativos)
         q2[2].metric("Importe reconstruido confiable", formato_importe(calidad.importe_reconstruido_confiable))
-        q2[3].metric(
-            "Importe excluido o no verificable",
-            (formato_importe(calidad.importe_excluido_o_no_verificable)
-             if calidad.importe_excluido_o_no_verificable is not None else "No verificable"),
+        q3 = st.columns(4)
+        q3[0].metric(
+            "Importe reconstruido excluido de KPI",
+            (formato_importe(calidad.importe_reconstruido_excluido_kpi)
+             if calidad.importe_reconstruido_excluido_kpi is not None else "No verificable"),
+        )
+        q3[1].metric(
+            "Agregado original de referencia",
+            (formato_importe(calidad.agregado_original_referencia)
+             if calidad.agregado_original_referencia is not None else "No disponible"),
+        )
+        q3[2].metric(
+            "Diferencia agregado − detalle",
+            (formato_importe(calidad.diferencia_agregado_detalle)
+             if calidad.diferencia_agregado_detalle is not None else "No verificable"),
+        )
+        q3[3].metric(
+            "Importe no verificable",
+            (formato_importe(calidad.importe_no_verificable)
+             if calidad.importe_no_verificable is not None else "Desconocido"),
+            help=f"Grupos sin reconstrucción completa: {calidad.cantidad_grupos_sin_reconstruccion}",
         )
         solo_inconsistentes = st.checkbox(
             "Solo movimientos inconsistentes o no verificables",

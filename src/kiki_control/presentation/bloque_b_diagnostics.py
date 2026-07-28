@@ -268,8 +268,12 @@ class CalidadMonetariaMpSinVenta:
     movimientos_correspondencia_inconsistente: int
     pagos_aprobados_negativos: int
     importe_reconstruido_confiable: Decimal
-    importe_excluido_o_no_verificable: Decimal | None
+    importe_reconstruido_excluido_kpi: Decimal | None
+    agregado_original_referencia: Decimal | None
+    diferencia_agregado_detalle: Decimal | None
+    importe_no_verificable: Decimal | None
     cantidad_grupos_excluidos: int
+    cantidad_grupos_sin_reconstruccion: int
 
 
 @dataclass(frozen=True)
@@ -970,7 +974,7 @@ def diagnosticar_bloque_b(
         )
         coherencia_grupo = estado_coherencia == EstadoCoherenciaGrupo.COHERENTE
         diferencia_detalle = (
-            neto_financiero_detalle - r.neto_financiero_total_mp
+            r.neto_financiero_total_mp - neto_financiero_detalle
             if neto_financiero_detalle is not None and r.neto_financiero_total_mp is not None
             else None
         )
@@ -1106,10 +1110,13 @@ def diagnosticar_bloque_b(
                                 composicion_aprobado, composicion_financiero))
 
     grupos_excluidos = tuple(m for m in movs_sin_venta if not m.coherencia_grupo)
-    importes_excluidos = tuple(
-        m.neto_financiero_agregado_original_mp for m in grupos_excluidos
-        if m.neto_financiero_agregado_original_mp is not None
-    )
+    reconstruidos_excluidos = tuple(m.suma_reconstruida_movimientos_mp for m in grupos_excluidos)
+    agregados_referencia = tuple(m.neto_financiero_agregado_original_mp for m in grupos_excluidos)
+    diferencias_excluidas = tuple(m.diferencia_agregado_detalle_mp for m in grupos_excluidos)
+
+    def suma_completa(valores: tuple[Decimal | None, ...]) -> Decimal | None:
+        """Suma únicamente conjuntos completos; una ausencia nunca equivale a cero."""
+        return _sum_decimals(valores) if all(v is not None for v in valores) else None
     calidad = CalidadMonetariaMpSinVenta(
         grupos_coherentes=sum(m.estado_coherencia == EstadoCoherenciaGrupo.COHERENTE for m in movs_sin_venta),
         grupos_incoherentes=sum(m.estado_coherencia == EstadoCoherenciaGrupo.INCOHERENTE for m in movs_sin_venta),
@@ -1126,12 +1133,13 @@ def diagnosticar_bloque_b(
         importe_reconstruido_confiable=_sum_decimals(
             m.suma_reconstruida_movimientos_mp for m in movs_sin_venta if m.coherencia_grupo
         ),
-        # None comunica que al menos un grupo carece de importe auditable; no se lo presenta como $0.
-        importe_excluido_o_no_verificable=(
-            _sum_decimals(importes_excluidos)
-            if len(importes_excluidos) == len(grupos_excluidos) else None
-        ),
+        importe_reconstruido_excluido_kpi=suma_completa(reconstruidos_excluidos),
+        agregado_original_referencia=suma_completa(agregados_referencia),
+        diferencia_agregado_detalle=suma_completa(diferencias_excluidas),
+        # No se inventa un monto para el detalle incompleto: su importe es desconocido.
+        importe_no_verificable=(None if any(v is None for v in reconstruidos_excluidos) else _ZERO),
         cantidad_grupos_excluidos=len(grupos_excluidos),
+        cantidad_grupos_sin_reconstruccion=sum(v is None for v in reconstruidos_excluidos),
     )
 
     return DiagnosticoBloqueB(
