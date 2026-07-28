@@ -615,14 +615,20 @@ def filas_mp_sin_venta(movs: Iterable[MovimientoMpSinVentaML]) -> list[dict[str,
         {
             "ID de grupo u orden": m.id_grupo,
             "IDs de movimiento MP": ", ".join(m.ids_movimiento_mp) if m.ids_movimiento_mp else "—",
-            "Tipo de movimiento": ", ".join(m.tipos_movimiento),
-            "Fecha de origen": m.fecha_min_origen,
-            "Fecha de liquidación": m.fecha_max_liquidacion,
-            "Neto aprobado MP": formato_importe(m.neto_aprobado_mp),
+            "Subclasificación financiera": m.subclasificacion_financiera.value,
+            "Tipos de movimiento": ", ".join(m.tipos_movimiento),
+            "Tiene ID de orden": "Sí" if m.tiene_id_orden_utilizable else "No",
+            "Fecha de origen desde": m.fecha_min_origen,
+            "Fecha de origen hasta": m.fecha_origen_maxima,
+            "Fecha de liquidación desde": m.fecha_liquidacion_minima,
+            "Fecha de liquidación hasta": m.fecha_max_liquidacion,
+            "Neto aprobado bruto MP": formato_importe(m.neto_aprobado_mp),
             "Neto financiero total MP": formato_importe(m.neto_financiero_total_mp),
-            "Categoría temporal": m.categoria_temporal,
-            "Motivo sin venta ML": m.motivo_sin_venta,
+            "Cantidad de movimientos": m.cantidad_movimientos,
+            "Categoría temporal principal": m.categoria_principal.value,
+            "Motivo visible": m.motivo_sin_venta,
             "Acción recomendada": m.accion_recomendada,
+            "Filas de origen MP": ", ".join(map(str, m.filas_origen_mp)),
         }
         for m in movs
     ]
@@ -633,6 +639,9 @@ def filtrar_mp_sin_venta(
     busqueda_id: str = "",
     filtro_tipo: str = "",
     filtro_categoria: str = "",
+    filtro_subclasificacion: str = "",
+    filtro_id_orden: str = "",
+    solo_prioritarios: bool = False,
 ) -> tuple[MovimientoMpSinVentaML, ...]:
     """Filtra movimientos MP sin venta ML por ID, tipo y categoría temporal."""
     q_id = (busqueda_id or "").strip().lower()
@@ -644,10 +653,34 @@ def filtrar_mp_sin_venta(
             continue
         if q_tipo and q_tipo not in ", ".join(m.tipos_movimiento):
             continue
-        if q_cat and q_cat != m.categoria_temporal:
+        if q_cat and q_cat not in {m.categoria_temporal, m.categoria_principal.value}:
+            continue
+        if filtro_subclasificacion and filtro_subclasificacion != m.subclasificacion_financiera.value:
+            continue
+        if filtro_id_orden == "Con ID" and not m.tiene_id_orden_utilizable:
+            continue
+        if filtro_id_orden == "Sin ID" and m.tiene_id_orden_utilizable:
+            continue
+        if solo_prioritarios and not (
+            m.categoria_principal.value in {"DENTRO_DEL_PERIODO_ML_SIN_VENTA", "SIN_FECHA_DE_ORIGEN"}
+            or m.subclasificacion_financiera.value == "OTRO_MOVIMIENTO"
+        ):
             continue
         result.append(m)
     return tuple(result)
+
+
+def filas_resumen_mp_sin_venta(diag: DiagnosticoBloqueB) -> list[dict[str, Any]]:
+    return [{
+        "Categoría": r.categoria.value,
+        "Cantidad de grupos": r.cantidad_grupos,
+        "Cantidad de movimientos": r.cantidad_movimientos,
+        "Neto aprobado bruto": formato_importe(r.neto_aprobado_bruto),
+        "Neto financiero total": formato_importe(r.neto_financiero_total),
+        "Con ID de orden": r.con_id_orden,
+        "Sin ID de orden": r.sin_id_orden,
+        "Acción recomendada": r.accion_recomendada,
+    } for r in diag.resumen_mp_sin_venta]
 
 
 def filas_movimientos_diferencia(grupo: GrupoConDiferencia) -> list[dict[str, Any]]:

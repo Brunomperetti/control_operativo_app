@@ -629,3 +629,59 @@ def test_ui_y_excel_conservan_clasificaciones_distintas():
     assert hoja_movimientos["E1"].value == "Clasificación normalizada"
     clasificaciones_excel = [celda.value for celda in hoja_movimientos["E"][1:]]
     assert clasificaciones_excel == ["PAGO_APROBADO", "RECLAMO", "PAYOUT"]
+
+# Diagnóstico auditable de MP sin venta ML
+
+def test_clasificacion_principal_resumen_filtros_y_vinculacion():
+    from kiki_control.presentation.bloque_b_diagnostics import CategoriaPrincipalMpSinVenta, SubclasificacionFinanciera
+    from kiki_control.presentation.control_consolidado_view import filtrar_mp_sin_venta
+    casos = [
+        _r("ant", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("10"), tiene_ml=False, filas_mp=(10,), ind=IND_REC),
+        _r("dentro", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("20"), tiene_ml=False, filas_mp=(20, 21)),
+        _r("post", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("30"), tiene_ml=False, filas_mp=(30,)),
+        _r("sin-fecha", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("40"), tiene_ml=False, filas_mp=(40,)),
+        _r("payout", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("999"), tiene_ml=False, filas_mp=(50,), tipo=TipoMovimientoFinanciero.MOVIMIENTO_DE_FONDOS),
+    ]
+    diag = diagnosticar_bloque_b(
+        _rep(casos), inicio_ml=date(2026, 7, 1), fin_ml=date(2026, 7, 31),
+        fechas_origen_mp_por_fila={10: date(2026, 6, 1), 20: date(2026, 7, 2), 21: date(2026, 7, 3), 30: date(2026, 8, 1), 50: date(2026, 7, 1)},
+        tipos_movimiento_mp_por_fila={10: "RECLAMO", 20: "PAGO_APROBADO", 21: "DEVOLUCION", 30: "PAGO_APROBADO", 40: "DESCONOCIDO"},
+        ids_operacion_mp_por_fila={10: "=riesgo", 20: "m20", 21: "m21", 30: "m30", 40: "m40"},
+        ids_orden_mp_por_fila={20: "orden-20"},
+    )
+    assert diag.cantidad_mp_sin_venta == 4
+    assert diag.cantidad_movimientos_fondos == 1
+    assert diag.coherencia_mp_sin_venta
+    assert sum(x.cantidad_grupos for x in diag.resumen_mp_sin_venta) == 4
+    assert sum(x.neto_financiero_total for x in diag.resumen_mp_sin_venta) == D("100")
+    assert {m.categoria_principal for m in diag.movimientos_mp_sin_venta} == set(CategoriaPrincipalMpSinVenta)
+    dentro = next(m for m in diag.movimientos_mp_sin_venta if m.id_grupo == "dentro")
+    assert dentro.subclasificacion_financiera == SubclasificacionFinanciera.MULTIPLES_TIPOS
+    assert dentro.tiene_id_orden_utilizable and dentro.cantidad_movimientos == 2
+    assert len(filtrar_mp_sin_venta(diag.movimientos_mp_sin_venta, solo_prioritarios=True)) == 2
+
+
+def test_excel_mp_sin_venta_incluye_resumen_detalle_y_seguridad():
+    r = _r("grupo", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("12.34"), tiene_ml=False, filas_mp=(7,))
+    diag = diagnosticar_bloque_b(
+        _rep([r]), inicio_ml=date(2026, 7, 1), fin_ml=date(2026, 7, 31),
+        fechas_origen_mp_por_fila={7: date(2026, 7, 2)}, ids_operacion_mp_por_fila={7: "=1+1"},
+        tipos_movimiento_mp_por_fila={7: "PAGO_APROBADO"}, montos_neto_mp_por_fila={7: D("12.34")},
+    )
+    wb = load_workbook(BytesIO(generar_bloque_b_mp_sin_venta_excel(diag)))
+    assert "Resumen MP sin ML" in wb.sheetnames
+    ws = wb["MP sin venta ML"]
+    assert ws["B2"].data_type == "s" and ws["B2"].value.startswith("'")
+    headers = [c.value for c in ws[1]]
+    amount = ws.cell(2, headers.index("Neto aprobado bruto MP") + 1)
+    assert D(str(amount.value)) == D("12.34") and "$" in amount.number_format
+
+@pytest.mark.parametrize(("fechas", "esperada"), [
+    ({1: date(2026, 6, 30), 2: date(2026, 7, 10)}, "DENTRO_DEL_PERIODO_ML_SIN_VENTA"),
+    ({1: date(2026, 7, 10), 2: date(2026, 8, 1)}, "DENTRO_DEL_PERIODO_ML_SIN_VENTA"),
+    ({}, "SIN_FECHA_DE_ORIGEN"),
+    ({1: date(2026, 6, 30), 2: date(2026, 8, 1)}, "DENTRO_DEL_PERIODO_ML_SIN_VENTA"),
+])
+def test_categoria_principal_grupos_con_fechas_limite(fechas, esperada):
+    from kiki_control.presentation.bloque_b_diagnostics import categoria_principal_mp
+    assert categoria_principal_mp((1, 2), fechas, date(2026, 7, 1), date(2026, 7, 31)).value == esperada
