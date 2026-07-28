@@ -63,6 +63,7 @@ from kiki_control.presentation.control_consolidado_view import (
     filas_grupos_excluidos,
     filas_grupos_involucrados,
     filas_mp_sin_venta,
+    filas_resumen_mp_sin_venta,
     filas_movimientos_bloque_b,
     filas_movimientos_diferencia,
     filas_resumen_revisiones,
@@ -625,10 +626,20 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
 
     # Neto MP sin venta ML
     st.subheader("Movimientos de Mercado Pago sin venta ML encontrada")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Cantidad de grupos", diag_bloque_b.cantidad_mp_sin_venta)
-    c2.metric("Neto aprobado MP", formato_importe(diag_bloque_b.neto_aprobado_mp_sin_venta))
-    c3.metric("Neto financiero total MP", formato_importe(diag_bloque_b.neto_financiero_total_mp_sin_venta))
+    resumen_cat = {r.categoria.value: r for r in diag_bloque_b.resumen_mp_sin_venta}
+    kpis = st.columns(4)
+    kpis[0].metric("Total de grupos MP sin venta ML", diag_bloque_b.cantidad_mp_sin_venta)
+    kpis[1].metric("Anteriores al período ML", resumen_cat["ANTERIOR_AL_PERIODO_ML"].cantidad_grupos)
+    kpis[2].metric("Dentro del período ML sin venta", resumen_cat["DENTRO_DEL_PERIODO_ML_SIN_VENTA"].cantidad_grupos)
+    kpis[3].metric("Posteriores al período ML", resumen_cat["POSTERIOR_AL_PERIODO_ML"].cantidad_grupos)
+    kpis = st.columns(4)
+    kpis[0].metric("Sin fecha de origen", resumen_cat["SIN_FECHA_DE_ORIGEN"].cantidad_grupos)
+    kpis[1].metric("Con ID de orden", sum(r.con_id_orden for r in diag_bloque_b.resumen_mp_sin_venta))
+    kpis[2].metric("Sin ID de orden", sum(r.sin_id_orden for r in diag_bloque_b.resumen_mp_sin_venta))
+    kpis[3].metric("Neto financiero total", formato_importe(diag_bloque_b.neto_financiero_total_mp_sin_venta))
+    st.dataframe(filas_resumen_mp_sin_venta(diag_bloque_b), use_container_width=True, hide_index=True)
+    if not diag_bloque_b.coherencia_mp_sin_venta:
+        st.error("La suma del resumen por categorías no coincide con el detalle MP sin venta ML.")
 
     movs_sin_venta = diag_bloque_b.movimientos_mp_sin_venta
     if movs_sin_venta:
@@ -641,14 +652,19 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
             format_func=lambda x: "Todos" if x == "" else x,
             key="bloque_b_filtro_tipo",
         )
-        cats_disponibles = sorted({m.categoria_temporal for m in movs_sin_venta})
+        cats_disponibles = sorted({m.categoria_principal.value for m in movs_sin_venta})
         filtro_cat = b3.selectbox(
             "Filtrar por categoría temporal",
             options=("", *cats_disponibles),
             format_func=lambda x: "Todas" if x == "" else x,
             key="bloque_b_filtro_cat",
         )
-        movs_visibles = filtrar_mp_sin_venta(movs_sin_venta, busqueda_id, filtro_tipo, filtro_cat)
+        b4, b5, b6 = st.columns(3)
+        subs = sorted({m.subclasificacion_financiera.value for m in movs_sin_venta})
+        filtro_sub = b4.selectbox("Subclasificación financiera", ("", *subs), format_func=lambda x: "Todas" if not x else x)
+        filtro_id = b5.selectbox("Vinculación por ID de orden", ("", "Con ID", "Sin ID"), format_func=lambda x: "Todos" if not x else x)
+        prioritarios = b6.checkbox("Solo casos prioritarios")
+        movs_visibles = filtrar_mp_sin_venta(movs_sin_venta, busqueda_id, filtro_tipo, filtro_cat, filtro_sub, filtro_id, prioritarios)
         st.caption(contar_mostrando(movs_visibles, len(movs_sin_venta)))
         st.dataframe(
             filas_mp_sin_venta(movs_visibles),
@@ -656,6 +672,17 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
             hide_index=True,
             height=400,
         )
+        elegido = st.selectbox("Seleccionar grupo para ver detalle", [m.id_grupo for m in movs_visibles]) if movs_visibles else None
+        if elegido:
+            grupo = next(m for m in movs_visibles if m.id_grupo == elegido)
+            st.table({"Clasificación": grupo.categoria_principal.value, "Justificación": grupo.motivo_sin_venta,
+                      "Cobertura ML utilizada": f"{getattr(st.session_state.get('cobertura_consolidada'), 'periodo_ventas_ml', 'Cobertura de la sesión')}",
+                      "Acción recomendada": grupo.accion_recomendada})
+            st.dataframe([{"ID movimiento MP": x.id_movimiento_mp, "Tipo": x.tipo_movimiento,
+                           "Tratamiento en neto comparable": str(getattr(x.tratamiento_neto_comparable, 'value', 'Sin tratamiento')),
+                           "Fecha de origen": x.fecha_origen, "Fecha de liquidación": x.fecha_liquidacion,
+                           "Importe": formato_importe(x.monto_neto_impactado), "Fila de origen": x.fila_origen}
+                          for x in grupo.movimientos_asociados], use_container_width=True, hide_index=True)
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         from kiki_control.exporting.excel import generar_bloque_b_mp_sin_venta_excel
         st.download_button(

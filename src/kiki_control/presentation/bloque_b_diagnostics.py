@@ -65,6 +65,22 @@ class EstadoExplicacionDiferencia(StrEnum):
     PENDIENTE_DE_CLASIFICACION = "PENDIENTE_DE_CLASIFICACION"
 
 
+class CategoriaPrincipalMpSinVenta(StrEnum):
+    ANTERIOR_AL_PERIODO_ML = "ANTERIOR_AL_PERIODO_ML"
+    DENTRO_DEL_PERIODO_ML_SIN_VENTA = "DENTRO_DEL_PERIODO_ML_SIN_VENTA"
+    POSTERIOR_AL_PERIODO_ML = "POSTERIOR_AL_PERIODO_ML"
+    SIN_FECHA_DE_ORIGEN = "SIN_FECHA_DE_ORIGEN"
+
+
+class SubclasificacionFinanciera(StrEnum):
+    PAGO_APROBADO = "PAGO_APROBADO"
+    RECLAMO_O_DISPUTA = "RECLAMO_O_DISPUTA"
+    DEVOLUCION = "DEVOLUCION"
+    ENVIO = "ENVIO"
+    OTRO_MOVIMIENTO = "OTRO_MOVIMIENTO"
+    MULTIPLES_TIPOS = "MULTIPLES_TIPOS"
+
+
 ESTADOS_EXPLICACION_VISIBLES: dict[EstadoExplicacionDiferencia, str] = {
     EstadoExplicacionDiferencia.EXPLICADA: "Explicada",
     EstadoExplicacionDiferencia.INDICIO_TEMPORAL: "Posible diferencia temporal",
@@ -131,6 +147,27 @@ class MovimientoMpSinVentaML:
     categoria_temporal: str
     motivo_sin_venta: str
     accion_recomendada: str
+    categoria_principal: CategoriaPrincipalMpSinVenta = CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN
+    subclasificacion_financiera: SubclasificacionFinanciera = SubclasificacionFinanciera.OTRO_MOVIMIENTO
+    tiene_id_orden_utilizable: bool = False
+    cantidad_movimientos: int = 0
+    cantidad_ids_movimiento_mp: int = 0
+    fecha_origen_maxima: str = "Sin fecha"
+    fecha_liquidacion_minima: str = "Sin fecha"
+    filas_origen_mp: tuple[int, ...] = ()
+    movimientos_asociados: tuple[DetalleMovimientoMp, ...] = ()
+
+
+@dataclass(frozen=True)
+class ResumenCategoriaMpSinVenta:
+    categoria: CategoriaPrincipalMpSinVenta
+    cantidad_grupos: int
+    cantidad_movimientos: int
+    neto_aprobado_bruto: Decimal
+    neto_financiero_total: Decimal
+    con_id_orden: int
+    sin_id_orden: int
+    accion_recomendada: str
 
 
 @dataclass(frozen=True)
@@ -161,6 +198,8 @@ class DiagnosticoBloqueB:
     neto_aprobado_mp_sin_venta: Decimal
     neto_financiero_total_mp_sin_venta: Decimal
     movimientos_mp_sin_venta: tuple[MovimientoMpSinVentaML, ...]
+    resumen_mp_sin_venta: tuple[ResumenCategoriaMpSinVenta, ...]
+    coherencia_mp_sin_venta: bool
     cantidad_movimientos_fondos: int
     """Payouts y movimientos de fondos: no son ventas faltantes."""
     neto_aprobado_mp_fondos: Decimal
@@ -323,6 +362,63 @@ def categoria_temporal_mp(
     if len(categorias) == 1:
         return next(iter(categorias))
     return "Fechas mixtas"
+
+
+def categoria_principal_mp(
+    filas_mp: tuple[int, ...],
+    fechas_origen_por_fila: Mapping[int, date | datetime | None],
+    inicio_ml: date | None,
+    fin_ml: date | None,
+) -> CategoriaPrincipalMpSinVenta:
+    """Clasificación excluyente y conservadora basada en la cobertura ML real."""
+    fechas = [_as_date(fechas_origen_por_fila.get(f)) for f in filas_mp]
+    validas = [f for f in fechas if f is not None]
+    if not validas or inicio_ml is None or fin_ml is None or len(validas) != len(filas_mp):
+        return CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN
+    # Un grupo que cruza límites no se fuerza a un período: requiere revisión.
+    if min(validas) < inicio_ml and max(validas) >= inicio_ml:
+        return CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN
+    if min(validas) <= fin_ml and max(validas) > fin_ml:
+        return CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN
+    if max(validas) < inicio_ml:
+        return CategoriaPrincipalMpSinVenta.ANTERIOR_AL_PERIODO_ML
+    if min(validas) > fin_ml:
+        return CategoriaPrincipalMpSinVenta.POSTERIOR_AL_PERIODO_ML
+    return CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA
+
+
+def subclasificar_financieramente(tipos: tuple[str, ...]) -> SubclasificacionFinanciera:
+    normalizados = {t.upper().strip() for t in tipos if t and t != "Sin tipo"}
+    if len(normalizados) > 1:
+        return SubclasificacionFinanciera.MULTIPLES_TIPOS
+    texto = next(iter(normalizados), "")
+    if "RECLAM" in texto or "DISPUT" in texto:
+        return SubclasificacionFinanciera.RECLAMO_O_DISPUTA
+    if "DEVOL" in texto or "REEMBOL" in texto:
+        return SubclasificacionFinanciera.DEVOLUCION
+    if "ENVIO" in texto or "ENVÍO" in texto:
+        return SubclasificacionFinanciera.ENVIO
+    if "APROBAD" in texto or texto in {"PAGO", "PAYMENT"}:
+        return SubclasificacionFinanciera.PAGO_APROBADO
+    return SubclasificacionFinanciera.OTRO_MOVIMIENTO
+
+
+def _motivo_categoria(categoria: CategoriaPrincipalMpSinVenta) -> str:
+    return {
+        CategoriaPrincipalMpSinVenta.ANTERIOR_AL_PERIODO_ML: "Movimiento originado antes del período de ventas ML cargado. No puede considerarse venta faltante con los archivos actuales.",
+        CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA: "Movimiento originado dentro del período ML cargado sin venta oficial encontrada. Requiere revisión prioritaria.",
+        CategoriaPrincipalMpSinVenta.POSTERIOR_AL_PERIODO_ML: "Movimiento posterior al período ML cargado.",
+        CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN: "No existe una fecha de origen válida para clasificar temporalmente.",
+    }[categoria]
+
+
+def _accion_categoria(categoria: CategoriaPrincipalMpSinVenta) -> str:
+    return {
+        CategoriaPrincipalMpSinVenta.ANTERIOR_AL_PERIODO_ML: "Revisión financiera histórica; ampliar la cobertura ML solo si corresponde.",
+        CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA: "Revisar prioritariamente la vinculación y la venta oficial ML.",
+        CategoriaPrincipalMpSinVenta.POSTERIOR_AL_PERIODO_ML: "Revisar cuando se cargue el período ML posterior.",
+        CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN: "Completar o validar la fecha de origen y el tipo de movimiento.",
+    }[categoria]
 
 
 def _motivo_sin_venta_ml(r: ResultadoControlConsolidado) -> str:
@@ -618,23 +714,37 @@ def diagnosticar_bloque_b(
     movs_sin_venta: list[MovimientoMpSinVentaML] = []
     for r in solo_mp:
         id_g = _id_grupo(r)
-        f_min_orig, _ = _fechas_rango(r.filas_origen_mp, fechas_origen)
-        _, f_max_liq_mv = _fechas_rango(r.filas_origen_mp, fechas_liq)
+        f_min_orig, f_max_orig = _fechas_rango(r.filas_origen_mp, fechas_origen)
+        f_min_liq_mv, f_max_liq_mv = _fechas_rango(r.filas_origen_mp, fechas_liq)
         cat_temp = categoria_temporal_mp(r.filas_origen_mp, fechas_origen, inicio, fin)
-        motivo = _motivo_sin_venta_ml(r)
-        accion = _accion_recomendada_sin_venta(r)
+        categoria = categoria_principal_mp(r.filas_origen_mp, fechas_origen, inicio, fin)
+        tipos_grupo = _tipos_movimiento_para_filas(r.filas_origen_mp, tipos)
+        ids_grupo = _ids_operacion_para_filas(r.filas_origen_mp, ids_op)
+        detalles = _construir_detalle_movimientos(
+            r.filas_origen_mp, ids_op, ids_orden_mp, tipos, fechas_origen,
+            fechas_aprobacion, fechas_liq, montos_neto, clasificaciones, tratamientos,
+        )
 
         movs_sin_venta.append(MovimientoMpSinVentaML(
             id_grupo=id_g,
-            ids_movimiento_mp=_ids_operacion_para_filas(r.filas_origen_mp, ids_op),
-            tipos_movimiento=_tipos_movimiento_para_filas(r.filas_origen_mp, tipos),
+            ids_movimiento_mp=ids_grupo,
+            tipos_movimiento=tipos_grupo,
             fecha_min_origen=f_min_orig,
             fecha_max_liquidacion=f_max_liq_mv,
             neto_aprobado_mp=r.neto_aprobado_mp,
             neto_financiero_total_mp=r.neto_financiero_total_mp,
             categoria_temporal=cat_temp,
-            motivo_sin_venta=motivo,
-            accion_recomendada=accion,
+            motivo_sin_venta=_motivo_categoria(categoria),
+            accion_recomendada=_accion_categoria(categoria),
+            categoria_principal=categoria,
+            subclasificacion_financiera=subclasificar_financieramente(tipos_grupo),
+            tiene_id_orden_utilizable=any(ids_orden_mp.get(f) for f in r.filas_origen_mp),
+            cantidad_movimientos=len(r.filas_origen_mp),
+            cantidad_ids_movimiento_mp=len(set(ids_grupo)),
+            fecha_origen_maxima=f_max_orig,
+            fecha_liquidacion_minima=f_min_liq_mv,
+            filas_origen_mp=r.filas_origen_mp,
+            movimientos_asociados=detalles,
         ))
 
     # --- Métricas y listas de fondos/payouts ---
@@ -665,6 +775,25 @@ def diagnosticar_bloque_b(
     suma_ind = _sum_decimals(g.diferencia_ml_mp for g in grupos_con_dif)
     coherencia = abs(suma_ind - dif_fuera_tolerancia) <= reporte.tolerancia
 
+    resumen_categorias: list[ResumenCategoriaMpSinVenta] = []
+    for categoria in CategoriaPrincipalMpSinVenta:
+        items = tuple(m for m in movs_sin_venta if m.categoria_principal == categoria)
+        resumen_categorias.append(ResumenCategoriaMpSinVenta(
+            categoria=categoria,
+            cantidad_grupos=len(items),
+            cantidad_movimientos=sum(m.cantidad_movimientos for m in items),
+            neto_aprobado_bruto=_sum_decimals(m.neto_aprobado_mp for m in items),
+            neto_financiero_total=_sum_decimals(m.neto_financiero_total_mp for m in items),
+            con_id_orden=sum(m.tiene_id_orden_utilizable for m in items),
+            sin_id_orden=sum(not m.tiene_id_orden_utilizable for m in items),
+            accion_recomendada=_accion_categoria(categoria),
+        ))
+    coherencia_mp = (
+        sum(x.cantidad_grupos for x in resumen_categorias) == len(solo_mp)
+        and _sum_decimals(x.neto_aprobado_bruto for x in resumen_categorias) == neto_ap_sin_venta
+        and _sum_decimals(x.neto_financiero_total for x in resumen_categorias) == neto_fin_sin_venta
+    )
+
     return DiagnosticoBloqueB(
         resumen=resumen,
         grupos_con_diferencia=tuple(grupos_con_dif),
@@ -672,6 +801,8 @@ def diagnosticar_bloque_b(
         neto_aprobado_mp_sin_venta=neto_ap_sin_venta,
         neto_financiero_total_mp_sin_venta=neto_fin_sin_venta,
         movimientos_mp_sin_venta=tuple(movs_sin_venta),
+        resumen_mp_sin_venta=tuple(resumen_categorias),
+        coherencia_mp_sin_venta=coherencia_mp,
         cantidad_movimientos_fondos=len(fondos_r),
         neto_aprobado_mp_fondos=neto_ap_fondos,
         neto_financiero_total_mp_fondos=neto_fin_fondos,

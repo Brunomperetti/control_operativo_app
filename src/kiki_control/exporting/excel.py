@@ -283,6 +283,7 @@ def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagno
         _escribir_resumen_bloque_b(wb.create_sheet("Bloque B — Resumen"), diag_bloque_b)
         _escribir_diferencias_bloque_b(wb.create_sheet("Bloque B — Diferencias"), diag_bloque_b)
         _escribir_movimientos_bloque_b(wb.create_sheet("Bloque B — Movimientos"), diag_bloque_b)
+        _escribir_resumen_mp_sin_ml(wb.create_sheet("Bloque B — Resumen MP sin ML"), diag_bloque_b)
         _escribir_mp_sin_venta_bloque_b(wb.create_sheet("Bloque B — MP sin venta ML"), diag_bloque_b)
         _escribir_fondos_bloque_b(wb.create_sheet("Bloque B — Fondos y payouts"), diag_bloque_b)
     _escribir_diccionario_consolidado(wb.create_sheet("Diccionario de cálculos"))
@@ -429,16 +430,14 @@ _COLS_MONETARIAS_DIF_B = {"Neto informado ML", "Neto aprobado bruto MP", "Reclam
 _COLUMNAS_MP_SIN_VENTA = (
     "ID de grupo u orden",
     "IDs de movimiento MP",
-    "Tipo de movimiento",
-    "Fecha de origen",
-    "Fecha de liquidación",
-    "Neto aprobado MP",
+    "Categoría temporal principal", "Subclasificación financiera", "Tipos de movimiento",
+    "Tiene ID de orden", "Fecha de origen desde", "Fecha de origen hasta",
+    "Fecha de liquidación desde", "Fecha de liquidación hasta",
+    "Neto aprobado bruto MP",
     "Neto financiero total MP",
-    "Categoría temporal",
-    "Motivo sin venta ML",
-    "Acción recomendada",
+    "Cantidad de movimientos", "Motivo visible", "Acción recomendada", "Filas de origen MP",
 )
-_COLS_MONETARIAS_MP_SIN = {"Neto aprobado MP", "Neto financiero total MP"}
+_COLS_MONETARIAS_MP_SIN = {"Neto aprobado bruto MP", "Neto financiero total MP"}
 
 
 def generar_bloque_b_mp_sin_venta_excel(diag: DiagnosticoBloqueB) -> bytes:
@@ -447,6 +446,7 @@ def generar_bloque_b_mp_sin_venta_excel(diag: DiagnosticoBloqueB) -> bytes:
     ws = wb.active
     ws.title = "MP sin venta ML"
     _escribir_mp_sin_venta_bloque_b(ws, diag)
+    _escribir_resumen_mp_sin_ml(wb.create_sheet("Resumen MP sin ML"), diag)
     salida = BytesIO()
     wb.save(salida)
     return salida.getvalue()
@@ -519,17 +519,35 @@ def _escribir_mp_sin_venta_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> 
         ws.append([
             _texto_seguro(m.id_grupo),
             _texto_seguro(", ".join(m.ids_movimiento_mp)),
+            _texto_seguro(m.categoria_principal.value),
+            _texto_seguro(m.subclasificacion_financiera.value),
             _texto_seguro(", ".join(m.tipos_movimiento)),
+            _si_no(m.tiene_id_orden_utilizable),
             _texto_seguro(m.fecha_min_origen),
+            _texto_seguro(m.fecha_origen_maxima),
+            _texto_seguro(m.fecha_liquidacion_minima),
             _texto_seguro(m.fecha_max_liquidacion),
             _decimal_o_vacio(m.neto_aprobado_mp),
             _decimal_o_vacio(m.neto_financiero_total_mp),
-            _texto_seguro(m.categoria_temporal),
+            m.cantidad_movimientos,
             _texto_seguro(m.motivo_sin_venta),
             _texto_seguro(m.accion_recomendada),
+            _texto_seguro(", ".join(map(str, m.filas_origen_mp))),
         ])
     mon_cols = {idx for idx, c in enumerate(_COLUMNAS_MP_SIN_VENTA, start=1) if c in _COLS_MONETARIAS_MP_SIN}
-    _formatear_tabla(ws, moneda_columnas=mon_cols, wrap_columnas={9, 10}, freeze=True)
+    _formatear_tabla(ws, moneda_columnas=mon_cols, wrap_columnas={14, 15}, freeze=True)
+
+
+def _escribir_resumen_mp_sin_ml(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
+    columnas = ("Categoría", "Cantidad de grupos", "Cantidad de movimientos", "Neto aprobado bruto",
+                "Neto financiero total", "Con ID de orden", "Sin ID de orden", "Acción recomendada")
+    ws.append(list(columnas))
+    for r in diag.resumen_mp_sin_venta:
+        ws.append([r.categoria.value, r.cantidad_grupos, r.cantidad_movimientos, r.neto_aprobado_bruto,
+                   r.neto_financiero_total, r.con_id_orden, r.sin_id_orden, _texto_seguro(r.accion_recomendada)])
+    ws.append(["VALIDACIÓN", sum(r.cantidad_grupos for r in diag.resumen_mp_sin_venta), "", "", "", "", "",
+               "Coherente" if diag.coherencia_mp_sin_venta else "INCONSISTENTE"])
+    _formatear_tabla(ws, moneda_columnas={4, 5}, wrap_columnas={8}, freeze=True)
 
 
 def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
@@ -537,10 +555,13 @@ def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
     ws.append(list(_COLUMNAS_MP_SIN_VENTA))
     for m in diag.movimientos_fondos:
         ws.append([_texto_seguro(m.id_grupo), _texto_seguro(", ".join(m.ids_movimiento_mp)),
-                   _texto_seguro(", ".join(m.tipos_movimiento)), _texto_seguro(m.fecha_min_origen),
-                   _texto_seguro(m.fecha_max_liquidacion), _decimal_o_vacio(m.neto_aprobado_mp),
-                   _decimal_o_vacio(m.neto_financiero_total_mp), _texto_seguro(m.categoria_temporal),
-                   _texto_seguro(m.motivo_sin_venta), _texto_seguro(m.accion_recomendada)])
+                   "MOVIMIENTO_DE_FONDOS", _texto_seguro(m.subclasificacion_financiera.value),
+                   _texto_seguro(", ".join(m.tipos_movimiento)), _si_no(m.tiene_id_orden_utilizable),
+                   _texto_seguro(m.fecha_min_origen), _texto_seguro(m.fecha_origen_maxima),
+                   _texto_seguro(m.fecha_liquidacion_minima), _texto_seguro(m.fecha_max_liquidacion),
+                   _decimal_o_vacio(m.neto_aprobado_mp), _decimal_o_vacio(m.neto_financiero_total_mp),
+                   m.cantidad_movimientos, _texto_seguro(m.motivo_sin_venta),
+                   _texto_seguro(m.accion_recomendada), _texto_seguro(", ".join(map(str, m.filas_origen_mp)))])
     mon_cols = {idx for idx, c in enumerate(_COLUMNAS_MP_SIN_VENTA, start=1) if c in _COLS_MONETARIAS_MP_SIN}
     _formatear_tabla(ws, moneda_columnas=mon_cols, wrap_columnas={9, 10}, freeze=True)
 
