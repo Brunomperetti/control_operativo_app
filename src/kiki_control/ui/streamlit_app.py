@@ -668,6 +668,8 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
         pk[1].metric("Candidatos válidos a venta faltante", len(pagos_diag.candidatos_validos))
         pk[2].metric("Casos inconsistentes excluidos", len(pagos_diag.inconsistentes))
         pk[3].metric("Importe válido de candidatos", formato_importe(pagos_diag.importe_valido_candidatos))
+        if pagos_diag.no_candidatos_importe_no_positivo:
+            st.metric("No candidatos por importe no positivo", len(pagos_diag.no_candidatos_importe_no_positivo))
         st.markdown(pagos_diag.conclusion_ejecutiva)
         d1, d2 = st.columns(2)
         d1.markdown("**Universo detectado**")

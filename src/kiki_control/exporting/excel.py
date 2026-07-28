@@ -583,6 +583,7 @@ def _escribir_resumen_mp_sin_ml(ws: Worksheet, diag: DiagnosticoBloqueB) -> None
             ("Pagos puros detectados", len(pagos.detectados)),
             ("Candidatos válidos", len(pagos.candidatos_validos)),
             ("Pagos inconsistentes", len(pagos.inconsistentes)),
+            ("No candidatos por importe no positivo", len(pagos.no_candidatos_importe_no_positivo)),
             ("Importe válido", pagos.importe_valido_candidatos),
             ("Detectados con ID", pagos.detectados_con_id),
             ("Detectados sin ID", pagos.detectados_sin_id),

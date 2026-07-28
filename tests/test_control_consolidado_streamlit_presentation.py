@@ -114,6 +114,7 @@ def test_bloque_d_renderiza_siete_generales_y_cuatro_operativos_sin_descartes(mo
     ), diagnostico_pagos_aprobados=SimpleNamespace(
         detectados=tuple(range(22)), candidatos_validos=tuple(range(19)),
         inconsistentes=tuple(range(3)), importe_valido_candidatos=Decimal("1000"),
+        no_candidatos_importe_no_positivo=(),
     ))
     renderizados = []
 

@@ -143,7 +143,7 @@ class EnriquecimientoMovimientoMpPorFila:
     id_movimiento: str
     id_orden: str | None
     tipo_operacion: str
-    monto_neto_impactado: Decimal
+    monto_neto_impactado: Decimal | None
     tratamiento: TratamientoNetoComparable
     fecha_origen: date | datetime | None
     fecha_aprobacion: date | datetime | None
@@ -283,6 +283,7 @@ class DiagnosticoPagosAprobadosSinVenta:
     detectados: tuple[MovimientoMpSinVentaML, ...]
     candidatos_validos: tuple[MovimientoMpSinVentaML, ...]
     inconsistentes: tuple[MovimientoMpSinVentaML, ...]
+    no_candidatos_importe_no_positivo: tuple[MovimientoMpSinVentaML, ...]
     importe_valido_candidatos: Decimal
     detectados_con_id: int
     detectados_sin_id: int
@@ -299,8 +300,10 @@ class DiagnosticoPagosAprobadosSinVenta:
             f"{len(self.candidatos_validos)} cumplen los controles de correspondencia y "
             "coherencia monetaria y se consideran candidatos a venta ML no encontrada, "
             f"por un importe total de {formato_pesos_argentino(self.importe_valido_candidatos)}. "
-            f"Los {len(self.inconsistentes)} casos restantes fueron excluidos por "
-            "inconsistencias monetarias."
+            + (f"Los {len(self.inconsistentes)} casos restantes fueron excluidos por inconsistencias monetarias."
+               if not self.no_candidatos_importe_no_positivo else
+               f"Se excluyeron {len(self.inconsistentes)} casos por inconsistencias monetarias y "
+               f"{len(self.no_candidatos_importe_no_positivo)} casos coherentes por importe no positivo.")
         )
 
 
@@ -707,7 +710,8 @@ def _construir_detalle_movimientos(
             estado = "CORRESPONDENCIA_OK"
             if e.fila_origen != fila:
                 estado = "ESTADO_DATO_INCONSISTENTE: clave y fila original no coinciden"
-            if e.tipo_operacion == "PAGO_APROBADO" and e.monto_neto_impactado < _ZERO:
+            if (e.tipo_operacion == "PAGO_APROBADO" and e.monto_neto_impactado is not None
+                    and e.monto_neto_impactado < _ZERO):
                 estado = "ESTADO_DATO_INCONSISTENTE: PAGO_APROBADO negativo"
             detalles.append(DetalleMovimientoMp(
                 e.id_movimiento, e.id_orden or "—", e.tipo_operacion, e.tipo_operacion,
@@ -1177,11 +1181,22 @@ def diagnosticar_bloque_b(
         if m.subclasificacion_financiera == SubclasificacionFinanciera.PAGO_APROBADO
     )
     candidatos = tuple(m for m in pagos_detectados if m.posible_venta_faltante)
-    inconsistentes = tuple(m for m in pagos_detectados if not m.posible_venta_faltante)
+    inconsistentes = tuple(
+        m for m in pagos_detectados
+        if m.estado_coherencia in {EstadoCoherenciaGrupo.INCOHERENTE,
+                                  EstadoCoherenciaGrupo.NO_VERIFICABLE}
+        or any(d.estado_correspondencia_fila != "CORRESPONDENCIA_OK"
+               for d in m.movimientos_asociados)
+    )
+    no_positivos = tuple(
+        m for m in pagos_detectados
+        if m not in candidatos and m not in inconsistentes
+    )
     diagnostico_pagos = DiagnosticoPagosAprobadosSinVenta(
         detectados=pagos_detectados,
         candidatos_validos=candidatos,
         inconsistentes=inconsistentes,
+        no_candidatos_importe_no_positivo=no_positivos,
         importe_valido_candidatos=_sum_decimals(
             m.suma_reconstruida_movimientos_mp for m in candidatos
         ),

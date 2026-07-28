@@ -305,6 +305,12 @@ def kpis_diagnostico_operativo_mp(diag_bloque_b: DiagnosticoBloqueB) -> list[Kpi
         Kpi("Candidatos válidos a venta faltante", f"{len(pagos.candidatos_validos)} · {formato_importe(pagos.importe_valido_candidatos)}", "Importe reconstruido confiable; revisar la venta oficial y su vinculación."),
         Kpi("Pagos aprobados inconsistentes", str(len(pagos.inconsistentes)), "Excluidos del importe hasta revisar la semántica del movimiento en Mercado Pago."),
     ]
+    if pagos is not None and pagos.no_candidatos_importe_no_positivo:
+        kpis.append(Kpi(
+            "No candidatos por importe no positivo",
+            str(len(pagos.no_candidatos_importe_no_positivo)),
+            "Casos monetariamente coherentes separados de las inconsistencias; no aportan al importe válido.",
+        ))
     kpis += [
         Kpi(nombre, f"{por_subclasificacion[sub].cantidad_grupos} · {formato_importe(por_subclasificacion[sub].neto_financiero_total)}", accion)
         for sub, nombre, accion in especificos

@@ -29,7 +29,10 @@ from kiki_control.exporting.excel import (
 )
 from kiki_control.presentation.bloque_b_diagnostics import (
     DiagnosticoBloqueB,
+    CategoriaPrincipalMpSinVenta,
+    EstadoCoherenciaGrupo,
     EstadoExplicacionDiferencia,
+    SubclasificacionFinanciera,
     categoria_temporal_mp,
     clasificar_diferencia,
     diagnosticar_bloque_b,
@@ -1067,3 +1070,143 @@ def test_clave_desplazada_y_pago_aprobado_negativo_son_inconsistentes_y_no_prior
     assert filas[0]["ID de grupo"] == grupo.id_grupo
     assert filas[0]["Estado de coherencia"] == "INCOHERENTE"
     assert filas_inconsistencias_mp_sin_venta(diag, False) == filas
+
+
+def test_regresion_integral_pagos_aprobados_desde_movimientos_tablas_y_excel():
+    """Certifica 22/19/3 desde filas MP reales, sin precargar el diagnóstico."""
+    from kiki_control.presentation.control_consolidado_view import (
+        filas_candidatos_venta_faltante,
+        filas_pagos_aprobados_inconsistentes,
+    )
+
+    resultados = []
+    enriquecimientos = {}
+    importes_validos = [D("378518.64"), *([D("1.00")] * 18)]
+    for indice, importe in enumerate(importes_validos, start=1):
+        id_movimiento = "=MOVIMIENTO_PELIGROSO" if indice == 1 else f"200000000000000{indice:02d}"
+        id_orden = f"900000000000000{indice:02d}" if indice <= 10 else None
+        resultados.append(_r(
+            f"candidato-{indice}", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None,
+            mp=importe, neto_fin=importe, tiene_ml=False, filas_mp=(indice,),
+            tipo=TipoMovimientoFinanciero.ORDEN_FINANCIERA,
+        ))
+        enriquecimientos[indice] = EnriquecimientoMovimientoMpPorFila(
+            indice, id_movimiento, id_orden, "PAGO_APROBADO", importe,
+            TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE,
+            date(2026, 7, 10), date(2026, 7, 11), date(2026, 7, 12), str(importe),
+        )
+
+    casos_excluidos = (
+        (20, "negativo", D("-10"), D("-10"), 20, "90000000000000020"),
+        (21, "correspondencia", D("25"), D("25"), 999, None),
+        (22, "sin-importe", D("50"), None, 22, None),
+    )
+    for fila, clave, agregado, detalle, fila_enriquecida, id_orden in casos_excluidos:
+        resultados.append(_r(
+            clave, E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=agregado,
+            neto_fin=agregado, tiene_ml=False, filas_mp=(fila,),
+            tipo=TipoMovimientoFinanciero.ORDEN_FINANCIERA,
+        ))
+        enriquecimientos[fila] = EnriquecimientoMovimientoMpPorFila(
+            fila_enriquecida, f"mp-{clave}", id_orden, "PAGO_APROBADO", detalle,
+            TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE,
+            date(2026, 7, 10), date(2026, 7, 11), date(2026, 7, 12),
+            "" if detalle is None else str(detalle),
+        )
+
+    reporte = _rep(resultados)
+    diag = diagnosticar_bloque_b(
+        reporte, date(2026, 7, 1), date(2026, 7, 31),
+        enriquecimientos_mp_por_fila=enriquecimientos,
+    )
+    pagos = diag.diagnostico_pagos_aprobados
+    assert pagos is not None
+    assert (len(pagos.detectados), len(pagos.candidatos_validos), len(pagos.inconsistentes)) == (22, 19, 3)
+    assert pagos.importe_valido_candidatos == D("378536.64")
+    assert pagos.no_candidatos_importe_no_positivo == ()
+    assert (pagos.detectados_con_id, pagos.detectados_sin_id) == (11, 11)
+    assert (pagos.candidatos_con_id, pagos.candidatos_sin_id) == (10, 9)
+    assert pagos.detectados_con_id + pagos.detectados_sin_id == 22
+    assert pagos.candidatos_con_id + pagos.candidatos_sin_id == 19
+    assert all(
+        m.categoria_principal == CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA
+        and m.subclasificacion_financiera == SubclasificacionFinanciera.PAGO_APROBADO
+        and m.estado_coherencia == EstadoCoherenciaGrupo.COHERENTE
+        and m.suma_reconstruida_movimientos_mp is not None
+        and m.suma_reconstruida_movimientos_mp > D("0")
+        and m.posible_venta_faltante
+        and all(d.estado_correspondencia_fila == "CORRESPONDENCIA_OK" for d in m.movimientos_asociados)
+        for m in pagos.candidatos_validos
+    )
+    assert not any(m.posible_venta_faltante for m in pagos.inconsistentes)
+    assert {m.id_grupo for m in pagos.inconsistentes} == {"negativo", "correspondencia", "sin-importe"}
+    assert "22 grupos" in pagos.conclusion_ejecutiva
+    assert "19 cumplen" in pagos.conclusion_ejecutiva
+    assert "$ 378.536,64" in pagos.conclusion_ejecutiva
+    assert "3 casos restantes" in pagos.conclusion_ejecutiva
+
+    candidatos = filas_candidatos_venta_faltante(diag)
+    inconsistentes = filas_pagos_aprobados_inconsistentes(diag)
+    assert len(candidatos) == 19
+    assert len(inconsistentes) == 3
+    assert {f["ID de grupo"] for f in candidatos} == {f"candidato-{i}" for i in range(1, 20)}
+    assert not ({"negativo", "correspondencia", "sin-importe"} & {f["ID de grupo"] for f in candidatos})
+    assert set(candidatos[0]) == {
+        "ID de grupo", "ID movimiento MP", "ID de orden", "Fila original MP",
+        "Fecha de origen", "Fecha de aprobación", "Fecha de liquidación", "Importe crudo",
+        "Importe normalizado", "Neto reconstruido", "Estado de correspondencia",
+        "Estado monetario", "Motivo de posible venta faltante", "Acción recomendada",
+    }
+    motivos = {f["ID movimiento"]: f["Motivo de exclusión"] for f in inconsistentes}
+    assert "filas" in motivos["mp-negativo"]
+    assert "filas" in motivos["mp-correspondencia"]
+    assert "falta monto_neto_impactado" in motivos["mp-sin-importe"]
+
+    for contenido in (
+        generar_bloque_b_mp_sin_venta_excel(diag),
+        generar_reporte_consolidado_excel(reporte, diag_bloque_b=diag),
+    ):
+        wb = load_workbook(BytesIO(contenido), data_only=False)
+        assert {"Candidatos venta faltante", "Pagos MP inconsistentes"} <= set(wb.sheetnames)
+        ws_c = wb["Candidatos venta faltante"]
+        ws_i = wb["Pagos MP inconsistentes"]
+        assert [c.value for c in ws_c[1]] == [
+            "ID de grupo", "ID movimiento MP", "ID de orden", "Fila original MP",
+            "Fecha de origen", "Fecha de aprobación", "Fecha de liquidación", "Importe crudo",
+            "Importe normalizado", "Neto reconstruido", "Estado de correspondencia",
+            "Estado monetario", "Motivo de posible venta faltante", "Acción recomendada",
+        ]
+        assert [c.value for c in ws_i[1]] == [
+            "Fila original", "ID movimiento", "ID orden", "Importe",
+            "Motivo de exclusión", "Estado", "Acción recomendada",
+        ]
+        assert ws_c.max_row - 1 == 19
+        assert ws_i.max_row - 1 == 3
+        assert isinstance(ws_c.cell(2, 9).value, (int, float, Decimal))
+        assert isinstance(ws_c.cell(2, 10).value, (int, float, Decimal))
+        assert ws_c.cell(2, 2).data_type == "s"
+        assert ws_c.cell(2, 2).value == "'=MOVIMIENTO_PELIGROSO"
+        assert ws_c.cell(2, 3).data_type == "s"
+        fila_sin_importe = next(row for row in ws_i.iter_rows(min_row=2) if row[1].value == "mp-sin-importe")
+        assert fila_sin_importe[3].value is None
+
+
+def test_pago_coherente_cero_es_no_candidato_pero_no_inconsistente():
+    """Opción A: un cero coherente tiene categoría propia y no contamina inconsistencias."""
+    r = _r("pago-cero", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("0"),
+           neto_fin=D("0"), tiene_ml=False, filas_mp=(1,))
+    diag = diagnosticar_bloque_b(
+        _rep([r]), date(2026, 7, 1), date(2026, 7, 31),
+        enriquecimientos_mp_por_fila={1: EnriquecimientoMovimientoMpPorFila(
+            1, "mp-cero", None, "PAGO_APROBADO", D("0"),
+            TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE,
+            date(2026, 7, 2), date(2026, 7, 2), date(2026, 7, 3), "0",
+        )},
+    )
+    pagos = diag.diagnostico_pagos_aprobados
+    assert pagos is not None
+    assert len(pagos.detectados) == 1
+    assert pagos.candidatos_validos == ()
+    assert pagos.inconsistentes == ()
+    assert [m.id_grupo for m in pagos.no_candidatos_importe_no_positivo] == ["pago-cero"]
+    assert pagos.importe_valido_candidatos == D("0")
