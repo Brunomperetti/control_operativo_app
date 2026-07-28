@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from io import BytesIO
 
@@ -6,9 +7,11 @@ from openpyxl import load_workbook
 import pytest
 
 from kiki_control.domain.ml_eccomapp_diagnostic import EstadoAptitudUtilidad as Apt, EstadoCruceMlEccomapp as Estado
-from kiki_control.exporting.excel import generar_diagnostico_ml_eccomapp_excel
+from kiki_control.exporting.excel import generar_diagnostico_ml_eccomapp_excel, generar_reporte_consolidado_excel
 from kiki_control.linking.ml_eccomapp_diagnostic import diagnosticar_ml_eccomapp
+from kiki_control.presentation.ml_eccomapp_view import conclusion_ejecutiva_ml_eccomapp
 from tests.test_commercial_linking import op, venta
+from tests.test_control_consolidado import reporte
 
 
 def caso(ventas, ops):
@@ -111,3 +114,58 @@ def test_excel_cinco_hojas_ids_extensos_formulas_seguras_y_faltantes_vacios():
     assert ws["A2"].value == long_id and ws["A2"].data_type == "s"
     missing = wb["ML sin Eccomapp"]
     assert missing["A2"].value == "'=CMD()" and missing["N2"].value is None
+
+
+@pytest.mark.parametrize("exportador", ["especifico", "consolidado"])
+def test_excel_sanea_fechas_con_timezone_sin_cambiar_hora_local_y_conserva_none(exportador):
+    fecha_naive = datetime(2026, 7, 20, 9, 15)
+    fecha_operativa = datetime(2026, 7, 20, 11, 40, tzinfo=timezone(timedelta(hours=-3)))
+    fecha_utc = datetime(2026, 7, 21, 1, 5, tzinfo=timezone.utc)
+
+    exacto = replace(caso([venta("MATCH")], [op("MATCH")]), fecha=fecha_operativa)
+    solo_ml = replace(caso([venta("ONLY-ML")], []), fecha=fecha_naive)
+    solo_ec = replace(caso([], [op("ONLY-EC")]), fecha=fecha_utc)
+    ambiguo = replace(caso([venta("")], []), fecha=None)
+    base = diagnosticar_ml_eccomapp([venta("BASE")], [op("BASE")])
+    diag = replace(base, casos=(exacto, solo_ml, solo_ec, ambiguo))
+
+    if exportador == "especifico":
+        contenido = generar_diagnostico_ml_eccomapp_excel(diag)
+    else:
+        contenido = generar_reporte_consolidado_excel(reporte([], [], []), diagnostico_ml_eccomapp=diag)
+
+    wb = load_workbook(BytesIO(contenido))
+    esperadas = {
+        "ML-Eccomapp — Coincidencias": fecha_operativa.replace(tzinfo=None),
+        "ML sin Eccomapp": fecha_naive,
+        "Eccomapp sin ML": fecha_utc.replace(tzinfo=None),
+        "ML-Eccomapp — Ambiguos": None,
+    }
+    assert "ML-Eccomapp — Resumen" in wb.sheetnames
+    for hoja, esperada in esperadas.items():
+        celda = wb[hoja]["F2"]
+        assert celda.value == esperada
+        if esperada is not None:
+            assert celda.is_date
+
+
+def test_rotulos_excel_explicitan_unidades_sin_alterar_metricas():
+    diag = diagnosticar_ml_eccomapp([venta("A"), venta("B", fila=2)], [op("A")])
+    wb = load_workbook(BytesIO(generar_diagnostico_ml_eccomapp_excel(diag)))
+    valores = {row[0].value: row[1].value for row in wb["ML-Eccomapp — Resumen"].iter_rows(min_row=2)}
+    assert valores["Ventas únicas ML"] == diag.cantidad_ventas_unicas_ml
+    assert valores["Operaciones únicas Eccomapp"] == diag.cantidad_operaciones_unicas_eccomapp
+    assert valores["Grupos comerciales con coincidencia"] == diag.cantidad_coincidencias
+    assert valores["Grupos ML sin Eccomapp"] == diag.cantidad_solo_ml
+    assert valores["Grupos Eccomapp sin ML"] == diag.cantidad_solo_eccomapp
+    assert valores["Grupos ambiguos o incompletos"] == diag.cantidad_ambiguas + diag.cantidad_identificador_incompleto + diag.cantidad_duplicadas
+    assert valores["Grupos aptos para utilidad"] == diag.cantidad_apta_utilidad
+
+
+def test_conclusion_ejecutiva_distingue_ventas_operaciones_y_grupos():
+    diag = diagnosticar_ml_eccomapp([venta("A"), venta("B", fila=2)], [op("A")])
+    conclusion = conclusion_ejecutiva_ml_eccomapp(diag)
+    assert f"{diag.cantidad_ventas_unicas_ml} ventas únicas ML" in conclusion
+    assert f"{diag.cantidad_operaciones_unicas_eccomapp} operaciones únicas Eccomapp" in conclusion
+    assert f"{diag.cantidad_coincidencias} grupos comerciales con coincidencia" in conclusion
+    assert "una coincidencia agrupada puede contener varias filas o ventas ML" in conclusion

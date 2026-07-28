@@ -841,10 +841,10 @@ def _mostrar_cruce_ml_eccomapp(diag) -> None:
     st.subheader("Cruce Mercado Libre oficial vs. Eccomapp")
     st.caption("Unidad de comparación: grupo comercial por carrito u orden. Las filas de origen y ventas individuales se informan por separado.")
     cols = st.columns(7)
-    metricas = (("Operaciones únicas ML", diag.cantidad_ventas_unicas_ml), ("Operaciones únicas Eccomapp", diag.cantidad_operaciones_unicas_eccomapp),
-                ("Coincidencias", diag.cantidad_coincidencias), ("ML sin Eccomapp", diag.cantidad_solo_ml),
-                ("Eccomapp sin ML", diag.cantidad_solo_eccomapp), ("Ambiguas/incompletas", diag.cantidad_ambiguas + diag.cantidad_identificador_incompleto + diag.cantidad_duplicadas),
-                ("Aptas para utilidad", diag.cantidad_apta_utilidad))
+    metricas = (("Ventas únicas ML", diag.cantidad_ventas_unicas_ml), ("Operaciones únicas Eccomapp", diag.cantidad_operaciones_unicas_eccomapp),
+                ("Grupos comerciales con coincidencia", diag.cantidad_coincidencias), ("Grupos ML sin Eccomapp", diag.cantidad_solo_ml),
+                ("Grupos Eccomapp sin ML", diag.cantidad_solo_eccomapp), ("Grupos ambiguos o incompletos", diag.cantidad_ambiguas + diag.cantidad_identificador_incompleto + diag.cantidad_duplicadas),
+                ("Grupos aptos para utilidad", diag.cantidad_apta_utilidad))
     for col, (label, value) in zip(cols, metricas, strict=True): col.metric(label, value)
     st.info(conclusion_ejecutiva_ml_eccomapp(diag))
     st.table(resumen_estados_ml_eccomapp(diag))

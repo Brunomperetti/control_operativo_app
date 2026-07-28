@@ -7,8 +7,10 @@ from kiki_control.domain.ml_eccomapp_diagnostic import DiagnosticoMlEccomapp
 def conclusion_ejecutiva_ml_eccomapp(d):
     causas = Counter(c.motivo for c in d.casos if c.requiere_revision)
     principales = "; ".join(f"{texto} ({n})" for texto, n in causas.most_common(3)) or "sin causas pendientes"
-    return (f"{d.cantidad_coincidencias} operaciones o grupos ML tienen contraparte Eccomapp; "
-            f"{d.cantidad_solo_ml} están solo en ML y {d.cantidad_solo_eccomapp} solo en Eccomapp. "
+    return (f"El universo contiene {d.cantidad_ventas_unicas_ml} ventas únicas ML y "
+            f"{d.cantidad_operaciones_unicas_eccomapp} operaciones únicas Eccomapp. "
+            f"Hay {d.cantidad_coincidencias} grupos comerciales con coincidencia; una coincidencia agrupada puede contener varias filas o ventas ML. "
+            f"{d.cantidad_solo_ml} grupos están solo en ML y {d.cantidad_solo_eccomapp} grupos solo en Eccomapp. "
             f"{d.cantidad_apta_utilidad} son utilizables para calcular utilidad y {d.cantidad_no_apta_utilidad} requieren revisión o datos adicionales. "
             f"Principales causas: {principales}.")
 
