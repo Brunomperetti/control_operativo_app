@@ -430,7 +430,8 @@ _COLS_MONETARIAS_DIF_B = {"Neto informado ML", "Neto aprobado bruto MP", "Reclam
 _COLUMNAS_MP_SIN_VENTA = (
     "ID de grupo u orden",
     "IDs de movimiento MP",
-    "Categoría temporal principal", "Subclasificación financiera", "Tipos de movimiento",
+    "Categoría temporal principal", "Prioridad operativa", "Subclasificación financiera",
+    "Combinación resumida", "Tipos de movimiento", "Interpretación", "posible_venta_faltante",
     "Tiene ID de orden", "Fecha de origen desde", "Fecha de origen hasta",
     "Fecha de liquidación desde", "Fecha de liquidación hasta",
     "Neto aprobado bruto MP",
@@ -520,8 +521,12 @@ def _escribir_mp_sin_venta_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> 
             _texto_seguro(m.id_grupo),
             _texto_seguro(", ".join(m.ids_movimiento_mp)),
             _texto_seguro(m.categoria_principal.value),
+            _texto_seguro(m.prioridad_operativa.value),
             _texto_seguro(m.subclasificacion_financiera.value),
+            _texto_seguro(m.combinacion_resumida.value),
             _texto_seguro(", ".join(m.tipos_movimiento)),
+            _texto_seguro(m.interpretacion),
+            m.posible_venta_faltante,
             _si_no(m.tiene_id_orden_utilizable),
             _texto_seguro(m.fecha_min_origen),
             _texto_seguro(m.fecha_origen_maxima),
@@ -548,6 +553,20 @@ def _escribir_resumen_mp_sin_ml(ws: Worksheet, diag: DiagnosticoBloqueB) -> None
     ws.append(["VALIDACIÓN", sum(r.cantidad_grupos for r in diag.resumen_mp_sin_venta), "", "", "", "", "",
                "Coherente" if diag.coherencia_mp_sin_venta else "INCONSISTENTE"])
     _formatear_tabla(ws, moneda_columnas={4, 5}, wrap_columnas={8}, freeze=True)
+    ws.append([])
+    ws.append(["Composición de movimientos dentro del período ML sin venta encontrada"])
+    ws.append(["Clasificación operativa", "Subclasificación financiera", "Cantidad de grupos",
+               "Cantidad de movimientos", "Neto aprobado bruto", "Neto financiero total",
+               "Con ID de orden", "Sin ID de orden", "Interpretación", "Acción recomendada",
+               "posible_venta_faltante"])
+    for r in diag.resumen_operativo_dentro_periodo:
+        ws.append([r.prioridad_operativa.value, r.subclasificacion_financiera.value,
+                   r.cantidad_grupos, r.cantidad_movimientos, r.neto_aprobado_bruto,
+                   r.neto_financiero_total, r.con_id_orden, r.sin_id_orden,
+                   _texto_seguro(r.interpretacion), _texto_seguro(r.accion_recomendada),
+                   r.subclasificacion_financiera.value == "PAGO_APROBADO"])
+        ws.cell(ws.max_row, 5).number_format = _FORMATO_MONEDA_ARS
+        ws.cell(ws.max_row, 6).number_format = _FORMATO_MONEDA_ARS
 
 
 def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
@@ -555,8 +574,10 @@ def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
     ws.append(list(_COLUMNAS_MP_SIN_VENTA))
     for m in diag.movimientos_fondos:
         ws.append([_texto_seguro(m.id_grupo), _texto_seguro(", ".join(m.ids_movimiento_mp)),
-                   "MOVIMIENTO_DE_FONDOS", _texto_seguro(m.subclasificacion_financiera.value),
-                   _texto_seguro(", ".join(m.tipos_movimiento)), _si_no(m.tiene_id_orden_utilizable),
+                   "MOVIMIENTO_DE_FONDOS", _texto_seguro(m.prioridad_operativa.value),
+                   _texto_seguro(m.subclasificacion_financiera.value), _texto_seguro(m.combinacion_resumida.value),
+                   _texto_seguro(", ".join(m.tipos_movimiento)), _texto_seguro(m.interpretacion), False,
+                   _si_no(m.tiene_id_orden_utilizable),
                    _texto_seguro(m.fecha_min_origen), _texto_seguro(m.fecha_origen_maxima),
                    _texto_seguro(m.fecha_liquidacion_minima), _texto_seguro(m.fecha_max_liquidacion),
                    _decimal_o_vacio(m.neto_aprobado_mp), _decimal_o_vacio(m.neto_financiero_total_mp),

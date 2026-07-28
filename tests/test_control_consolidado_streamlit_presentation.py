@@ -1,4 +1,5 @@
 from decimal import Decimal
+from types import SimpleNamespace
 
 from kiki_control.presentation.control_consolidado_view import (
     FilaControlConsolidado,
@@ -79,6 +80,72 @@ def test_kpis_comparables_utilidad_parcial_y_mp_sin_ml():
     assert b["Neto MP sin venta ML"] == "$ 30,00"
     assert b["Utilidad preliminar calculable"] == "$ 60,00"
     assert b["Cobertura de utilidad"] == "1 de 3"
+
+
+def test_bloque_d_renderiza_siete_generales_y_cuatro_operativos_sin_descartes(monkeypatch):
+    import streamlit as st
+
+    from kiki_control.presentation.control_consolidado_view import Kpi, kpis_diagnostico_operativo_mp
+    from kiki_control.ui.streamlit_app import _mostrar_kpis_en_filas
+
+    def item(subclasificacion, prioridad, cantidad, neto):
+        return SimpleNamespace(
+            subclasificacion_financiera=SimpleNamespace(value=subclasificacion),
+            prioridad_operativa=SimpleNamespace(value=prioridad),
+            cantidad_grupos=cantidad,
+            neto_financiero_total=Decimal(neto),
+        )
+
+    diag = SimpleNamespace(resumen_operativo_dentro_periodo=(
+        item("PAGO_APROBADO", "PRIORIDAD_ALTA", 22, "1000"),
+        item("MULTIPLES_TIPOS", "PRIORIDAD_MEDIA", 74, "2000"),
+        item("ENVIO", "PRIORIDAD_BAJA", 71, "300"),
+        item("RECLAMO_O_DISPUTA", "NO_ES_VENTA", 0, "0"),
+        item("DEVOLUCION", "NO_ES_VENTA", 0, "0"),
+        item("OTRO_MOVIMIENTO", "NO_ES_VENTA", 1, "5"),
+    ))
+    renderizados = []
+
+    class Columna:
+        def metric(self, rotulo, valor, **_kwargs):
+            renderizados.append((rotulo, valor))
+
+    monkeypatch.setattr(st, "subheader", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(st, "columns", lambda cantidad: [Columna() for _ in range(cantidad)])
+
+    kpis = kpis_diagnostico_operativo_mp(diag)
+    generales = [
+        Kpi(nombre, str(indice), "")
+        for indice, nombre in enumerate((
+            "Resultados completos", "Requieren revisión", "Venta oficial sin Total (ARS)",
+            "Sin costo", "Sin MP", "Sin venta oficial", "Duplicados o ambiguos",
+        ), start=1)
+    ]
+    _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", generales, (3, 3, 1))
+    _mostrar_kpis_en_filas("Diagnóstico operativo MP sin venta dentro del período", kpis, (4,))
+
+    assert [rotulo for rotulo, _ in renderizados[:7]] == [
+        "Resultados completos",
+        "Requieren revisión",
+        "Venta oficial sin Total (ARS)",
+        "Sin costo",
+        "Sin MP",
+        "Sin venta oficial",
+        "Duplicados o ambiguos",
+    ]
+    assert [rotulo for rotulo, _ in renderizados[7:]] == [
+        "Pagos aprobados sin venta ML",
+        "Grupos financieros mixtos",
+        "Componentes de envío",
+        "Otros movimientos no asociados a venta",
+    ]
+    assert len(renderizados) == len(generales) + len(kpis) == 11
+    assert dict(renderizados[7:]) == {
+        "Pagos aprobados sin venta ML": "22 · $ 1.000,00",
+        "Grupos financieros mixtos": "74 · $ 2.000,00",
+        "Componentes de envío": "71 · $ 300,00",
+        "Otros movimientos no asociados a venta": "1 · $ 5,00",
+    }
 
 
 def test_bloque_a_muestra_formacion_completa_metodo_cupon_y_cierre():

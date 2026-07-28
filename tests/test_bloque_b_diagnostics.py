@@ -658,7 +658,8 @@ def test_clasificacion_principal_resumen_filtros_y_vinculacion():
     dentro = next(m for m in diag.movimientos_mp_sin_venta if m.id_grupo == "dentro")
     assert dentro.subclasificacion_financiera == SubclasificacionFinanciera.MULTIPLES_TIPOS
     assert dentro.tiene_id_orden_utilizable and dentro.cantidad_movimientos == 2
-    assert len(filtrar_mp_sin_venta(diag.movimientos_mp_sin_venta, solo_prioritarios=True)) == 2
+    # El checkbox ya no mezcla casos temporales u otros movimientos: solo alta.
+    assert len(filtrar_mp_sin_venta(diag.movimientos_mp_sin_venta, solo_prioritarios=True)) == 0
 
 
 def test_excel_mp_sin_venta_incluye_resumen_detalle_y_seguridad():
@@ -685,3 +686,65 @@ def test_excel_mp_sin_venta_incluye_resumen_detalle_y_seguridad():
 def test_categoria_principal_grupos_con_fechas_limite(fechas, esperada):
     from kiki_control.presentation.bloque_b_diagnostics import categoria_principal_mp
     assert categoria_principal_mp((1, 2), fechas, date(2026, 7, 1), date(2026, 7, 31)).value == esperada
+
+
+@pytest.mark.parametrize(("tipos", "sub", "combinacion"), [
+    (("PAGO_APROBADO",), "PAGO_APROBADO", "NO_APLICA"),
+    (("PAGO_ENVIO",), "ENVIO", "NO_APLICA"),
+    (("PAGO_APROBADO", "DEVOLUCION"), "MULTIPLES_TIPOS", "PAGO + DEVOLUCIÓN"),
+    (("PAGO_APROBADO", "RECLAMO"), "MULTIPLES_TIPOS", "PAGO + RECLAMO"),
+    (("PAGO_ENVIO", "DEVOLUCION"), "MULTIPLES_TIPOS", "ENVÍO + DEVOLUCIÓN"),
+    (("PAGO_ENVIO", "DISPUTA"), "MULTIPLES_TIPOS", "ENVÍO + DISPUTA"),
+    (("CASHBACK",), "OTRO_MOVIMIENTO", "NO_APLICA"),
+])
+def test_clasificacion_operativa_y_combinaciones(tipos, sub, combinacion):
+    from kiki_control.presentation.bloque_b_diagnostics import combinacion_resumida, subclasificar_financieramente
+    assert subclasificar_financieramente(tipos).value == sub
+    assert combinacion_resumida(tipos).value == combinacion
+
+
+def test_resumen_operativo_posible_venta_faltante_filtros_bloque_d_y_excel():
+    from kiki_control.presentation.control_consolidado_view import filtrar_mp_sin_venta, kpis_consolidados
+    tipos = {
+        1: "PAGO_APROBADO", 2: "PAGO_ENVIO", 3: "PAGO_APROBADO", 4: "DEVOLUCION",
+        5: "CASHBACK",
+    }
+    casos = [
+        _r("pago", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("100"), tiene_ml=False, filas_mp=(1,)),
+        _r("envio", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("10"), tiene_ml=False, filas_mp=(2,)),
+        _r("mixto", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("80"), tiene_ml=False, filas_mp=(3, 4)),
+        _r("cashback", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("5"), tiene_ml=False, filas_mp=(5,)),
+    ]
+    diag = diagnosticar_bloque_b(
+        _rep(casos), inicio_ml=date(2026, 7, 1), fin_ml=date(2026, 7, 31),
+        fechas_origen_mp_por_fila={i: date(2026, 7, 15) for i in tipos},
+        tipos_movimiento_mp_por_fila=tipos,
+        ids_orden_mp_por_fila={1: "orden-1"},
+    )
+    assert diag.coherencia_operativa_dentro_periodo
+    assert sum(r.cantidad_grupos for r in diag.resumen_operativo_dentro_periodo) == 4
+    posibles = [m.id_grupo for m in diag.movimientos_mp_sin_venta if m.posible_venta_faltante]
+    assert posibles == ["pago"]
+    assert [m.id_grupo for m in filtrar_mp_sin_venta(diag.movimientos_mp_sin_venta, solo_prioritarios=True)] == ["pago"]
+    assert [m.id_grupo for m in filtrar_mp_sin_venta(diag.movimientos_mp_sin_venta, filtro_combinacion="PAGO + DEVOLUCIÓN")] == ["mixto"]
+    bloques = kpis_consolidados(_rep(casos), diag)
+    bloque_d = {k.nombre: k for k in bloques["Bloque D — Calidad y pendientes"]}
+    assert len(bloque_d) == 7
+    assert "Duplicados o ambiguos" in bloque_d
+    assert not ({"Pagos aprobados sin venta ML", "Grupos financieros mixtos", "Componentes de envío", "Otros movimientos no asociados a venta"} & bloque_d.keys())
+    operativos = {k.nombre: k for k in bloques["Diagnóstico operativo MP sin venta dentro del período"]}
+    assert {"Pagos aprobados sin venta ML", "Grupos financieros mixtos", "Componentes de envío", "Otros movimientos no asociados a venta"} == operativos.keys()
+    assert operativos["Pagos aprobados sin venta ML"].valor == "1 · $ 100,00"
+    wb = load_workbook(BytesIO(generar_bloque_b_mp_sin_venta_excel(diag)))
+    headers = [c.value for c in wb["MP sin venta ML"][1]]
+    for esperado in ("Prioridad operativa", "Combinación resumida", "Interpretación", "posible_venta_faltante"):
+        assert esperado in headers
+    assert "Composición de movimientos dentro del período ML sin venta encontrada" in [c.value for c in wb["Resumen MP sin ML"][8]]
+
+
+def test_universo_comparable_611_611_0_permanece_sin_diferencia():
+    """La nueva clasificación no altera la fórmula ni el universo del Bloque B."""
+    casos = [_r(f"comparable-{i}", ml=D("100"), mp=D("100"), dif=D("0")) for i in range(611)]
+    resumen = diagnosticar_bloque_b(_rep(casos)).resumen
+    assert (resumen.comparables_totales, resumen.coincidencias, resumen.con_diferencia) == (611, 611, 0)
+    assert resumen.diferencia_universo_comparable == D("0")

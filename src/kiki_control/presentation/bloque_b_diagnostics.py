@@ -81,6 +81,23 @@ class SubclasificacionFinanciera(StrEnum):
     MULTIPLES_TIPOS = "MULTIPLES_TIPOS"
 
 
+class PrioridadOperativa(StrEnum):
+    PRIORIDAD_ALTA = "PRIORIDAD_ALTA"
+    PRIORIDAD_MEDIA = "PRIORIDAD_MEDIA"
+    PRIORIDAD_BAJA = "PRIORIDAD_BAJA"
+    NO_ES_VENTA = "NO_ES_VENTA"
+
+
+class CombinacionResumida(StrEnum):
+    NO_APLICA = "NO_APLICA"
+    PAGO_DEVOLUCION = "PAGO + DEVOLUCIÓN"
+    PAGO_RECLAMO = "PAGO + RECLAMO"
+    PAGO_ENVIO = "PAGO + ENVÍO"
+    ENVIO_DEVOLUCION = "ENVÍO + DEVOLUCIÓN"
+    ENVIO_DISPUTA = "ENVÍO + DISPUTA"
+    OTRAS_COMBINACIONES = "OTRAS COMBINACIONES"
+
+
 ESTADOS_EXPLICACION_VISIBLES: dict[EstadoExplicacionDiferencia, str] = {
     EstadoExplicacionDiferencia.EXPLICADA: "Explicada",
     EstadoExplicacionDiferencia.INDICIO_TEMPORAL: "Posible diferencia temporal",
@@ -156,6 +173,10 @@ class MovimientoMpSinVentaML:
     fecha_liquidacion_minima: str = "Sin fecha"
     filas_origen_mp: tuple[int, ...] = ()
     movimientos_asociados: tuple[DetalleMovimientoMp, ...] = ()
+    prioridad_operativa: PrioridadOperativa = PrioridadOperativa.NO_ES_VENTA
+    combinacion_resumida: CombinacionResumida = CombinacionResumida.NO_APLICA
+    interpretacion: str = "Movimiento financiero o promocional que no representa una venta ML."
+    posible_venta_faltante: bool = False
 
 
 @dataclass(frozen=True)
@@ -167,6 +188,20 @@ class ResumenCategoriaMpSinVenta:
     neto_financiero_total: Decimal
     con_id_orden: int
     sin_id_orden: int
+    accion_recomendada: str
+
+
+@dataclass(frozen=True)
+class ResumenOperativoMpSinVenta:
+    prioridad_operativa: PrioridadOperativa
+    subclasificacion_financiera: SubclasificacionFinanciera
+    cantidad_grupos: int
+    cantidad_movimientos: int
+    neto_aprobado_bruto: Decimal
+    neto_financiero_total: Decimal
+    con_id_orden: int
+    sin_id_orden: int
+    interpretacion: str
     accion_recomendada: str
 
 
@@ -200,6 +235,8 @@ class DiagnosticoBloqueB:
     movimientos_mp_sin_venta: tuple[MovimientoMpSinVentaML, ...]
     resumen_mp_sin_venta: tuple[ResumenCategoriaMpSinVenta, ...]
     coherencia_mp_sin_venta: bool
+    resumen_operativo_dentro_periodo: tuple[ResumenOperativoMpSinVenta, ...]
+    coherencia_operativa_dentro_periodo: bool
     cantidad_movimientos_fondos: int
     """Payouts y movimientos de fondos: no son ventas faltantes."""
     neto_aprobado_mp_fondos: Decimal
@@ -401,6 +438,47 @@ def subclasificar_financieramente(tipos: tuple[str, ...]) -> SubclasificacionFin
     if "APROBAD" in texto or texto in {"PAGO", "PAYMENT"}:
         return SubclasificacionFinanciera.PAGO_APROBADO
     return SubclasificacionFinanciera.OTRO_MOVIMIENTO
+
+
+def combinacion_resumida(tipos: tuple[str, ...]) -> CombinacionResumida:
+    """Resume una combinación sin descartar los tipos originales auditables."""
+    textos = {t.upper().strip() for t in tipos if t and t != "Sin tipo"}
+    if len(textos) <= 1:
+        return CombinacionResumida.NO_APLICA
+    pago = any("APROBAD" in t or t in {"PAGO", "PAYMENT"} for t in textos)
+    devolucion = any("DEVOL" in t or "REEMBOL" in t for t in textos)
+    reclamo = any("RECLAM" in t for t in textos)
+    disputa = any("DISPUT" in t for t in textos)
+    envio = any("ENVIO" in t or "ENVÍO" in t for t in textos)
+    if pago and devolucion:
+        return CombinacionResumida.PAGO_DEVOLUCION
+    if pago and reclamo:
+        return CombinacionResumida.PAGO_RECLAMO
+    if pago and envio:
+        return CombinacionResumida.PAGO_ENVIO
+    if envio and devolucion:
+        return CombinacionResumida.ENVIO_DEVOLUCION
+    if envio and disputa:
+        return CombinacionResumida.ENVIO_DISPUTA
+    return CombinacionResumida.OTRAS_COMBINACIONES
+
+
+def _datos_operativos(sub: SubclasificacionFinanciera) -> tuple[PrioridadOperativa, str, str]:
+    if sub == SubclasificacionFinanciera.PAGO_APROBADO:
+        return (PrioridadOperativa.PRIORIDAD_ALTA,
+                "Pago aprobado originado dentro del período ML sin venta oficial encontrada. Requiere revisión prioritaria.",
+                "Buscar la venta oficial por ID de orden y validar la cobertura ML de forma prioritaria.")
+    if sub == SubclasificacionFinanciera.MULTIPLES_TIPOS:
+        return (PrioridadOperativa.PRIORIDAD_MEDIA,
+                "Grupo financiero con múltiples movimientos asociados. Revisar el ciclo completo antes de considerarlo venta faltante.",
+                "Revisar todos los movimientos y su secuencia antes de escalar como posible venta faltante.")
+    if sub == SubclasificacionFinanciera.ENVIO:
+        return (PrioridadOperativa.PRIORIDAD_BAJA,
+                "Componente de envío sin pago principal localizado en el universo cargado. No implica por sí mismo una venta faltante.",
+                "Buscar el pago principal asociado; no registrar el envío aislado como venta faltante.")
+    return (PrioridadOperativa.NO_ES_VENTA,
+            "Movimiento financiero o promocional que no representa una venta ML.",
+            "Clasificar como movimiento financiero o informativo; no tratar como venta omitida.")
 
 
 def _motivo_categoria(categoria: CategoriaPrincipalMpSinVenta) -> str:
@@ -724,6 +802,11 @@ def diagnosticar_bloque_b(
             r.filas_origen_mp, ids_op, ids_orden_mp, tipos, fechas_origen,
             fechas_aprobacion, fechas_liq, montos_neto, clasificaciones, tratamientos,
         )
+        subclasificacion = subclasificar_financieramente(tipos_grupo)
+        prioridad, interpretacion, accion_operativa = _datos_operativos(subclasificacion)
+        dentro_periodo = categoria == CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA
+        if not dentro_periodo:
+            prioridad = PrioridadOperativa.NO_ES_VENTA
 
         movs_sin_venta.append(MovimientoMpSinVentaML(
             id_grupo=id_g,
@@ -735,9 +818,9 @@ def diagnosticar_bloque_b(
             neto_financiero_total_mp=r.neto_financiero_total_mp,
             categoria_temporal=cat_temp,
             motivo_sin_venta=_motivo_categoria(categoria),
-            accion_recomendada=_accion_categoria(categoria),
+            accion_recomendada=accion_operativa if dentro_periodo else _accion_categoria(categoria),
             categoria_principal=categoria,
-            subclasificacion_financiera=subclasificar_financieramente(tipos_grupo),
+            subclasificacion_financiera=subclasificacion,
             tiene_id_orden_utilizable=any(ids_orden_mp.get(f) for f in r.filas_origen_mp),
             cantidad_movimientos=len(r.filas_origen_mp),
             cantidad_ids_movimiento_mp=len(set(ids_grupo)),
@@ -745,6 +828,10 @@ def diagnosticar_bloque_b(
             fecha_liquidacion_minima=f_min_liq_mv,
             filas_origen_mp=r.filas_origen_mp,
             movimientos_asociados=detalles,
+            prioridad_operativa=prioridad,
+            combinacion_resumida=combinacion_resumida(tipos_grupo),
+            interpretacion=interpretacion if dentro_periodo else _motivo_categoria(categoria),
+            posible_venta_faltante=dentro_periodo and subclasificacion == SubclasificacionFinanciera.PAGO_APROBADO,
         ))
 
     # --- Métricas y listas de fondos/payouts ---
@@ -794,6 +881,29 @@ def diagnosticar_bloque_b(
         and _sum_decimals(x.neto_financiero_total for x in resumen_categorias) == neto_fin_sin_venta
     )
 
+    dentro_periodo = tuple(
+        m for m in movs_sin_venta
+        if m.categoria_principal == CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA
+    )
+    resumen_operativo: list[ResumenOperativoMpSinVenta] = []
+    # Se conservan todas las subclasificaciones, incluso las que hoy tienen cero casos.
+    for subclasificacion in SubclasificacionFinanciera:
+        items = tuple(m for m in dentro_periodo if m.subclasificacion_financiera == subclasificacion)
+        prioridad, interpretacion, accion = _datos_operativos(subclasificacion)
+        resumen_operativo.append(ResumenOperativoMpSinVenta(
+            prioridad_operativa=prioridad,
+            subclasificacion_financiera=subclasificacion,
+            cantidad_grupos=len(items),
+            cantidad_movimientos=sum(m.cantidad_movimientos for m in items),
+            neto_aprobado_bruto=_sum_decimals(m.neto_aprobado_mp for m in items),
+            neto_financiero_total=_sum_decimals(m.neto_financiero_total_mp for m in items),
+            con_id_orden=sum(m.tiene_id_orden_utilizable for m in items),
+            sin_id_orden=sum(not m.tiene_id_orden_utilizable for m in items),
+            interpretacion=interpretacion,
+            accion_recomendada=accion,
+        ))
+    coherencia_operativa = sum(x.cantidad_grupos for x in resumen_operativo) == len(dentro_periodo)
+
     return DiagnosticoBloqueB(
         resumen=resumen,
         grupos_con_diferencia=tuple(grupos_con_dif),
@@ -803,6 +913,8 @@ def diagnosticar_bloque_b(
         movimientos_mp_sin_venta=tuple(movs_sin_venta),
         resumen_mp_sin_venta=tuple(resumen_categorias),
         coherencia_mp_sin_venta=coherencia_mp,
+        resumen_operativo_dentro_periodo=tuple(resumen_operativo),
+        coherencia_operativa_dentro_periodo=coherencia_operativa,
         cantidad_movimientos_fondos=len(fondos_r),
         neto_aprobado_mp_fondos=neto_ap_fondos,
         neto_financiero_total_mp_fondos=neto_fin_fondos,
