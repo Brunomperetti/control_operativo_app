@@ -406,6 +406,8 @@ def test_coherencia_resumen_bloque_b_y_filas_temporales_bloque_d():
         'POSTERIOR_AL_PERIODO_ML': d.temporal_mp_sin_venta.posteriores,
         'SIN_FECHA_DE_ORIGEN': d.temporal_mp_sin_venta.sin_fecha,
     }
-    assert all(resumen_b[k] == (v.cantidad, v.neto_financiero_total_mp) for k, v in temporal_d.items())
+    assert all(resumen_b[k][0] == v.cantidad for k, v in temporal_d.items())
     assert sum(x[0] for x in resumen_b.values()) == b.cantidad_mp_sin_venta == 4
-    assert sum(x[1] for x in resumen_b.values()) == b.neto_financiero_total_mp_sin_venta == D('-10')
+    # Bloque B no reutiliza agregados cuando el detalle por fila carece de monto.
+    assert sum(x[1] for x in resumen_b.values()) == b.neto_financiero_total_mp_sin_venta == D('0')
+    assert not b.coherencia_detalle_importes_mp_sin_venta

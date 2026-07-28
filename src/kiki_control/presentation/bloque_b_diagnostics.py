@@ -98,6 +98,14 @@ class CombinacionResumida(StrEnum):
     OTRAS_COMBINACIONES = "OTRAS COMBINACIONES"
 
 
+class EstadoCoherenciaGrupo(StrEnum):
+    """Resultado de contrastar el agregado con el detalle monetario visible."""
+
+    COHERENTE = "COHERENTE"
+    INCOHERENTE = "INCOHERENTE"
+    NO_VERIFICABLE = "NO_VERIFICABLE"
+
+
 ESTADOS_EXPLICACION_VISIBLES: dict[EstadoExplicacionDiferencia, str] = {
     EstadoExplicacionDiferencia.EXPLICADA: "Explicada",
     EstadoExplicacionDiferencia.INDICIO_TEMPORAL: "Posible diferencia temporal",
@@ -181,6 +189,8 @@ class MovimientoMpSinVentaML:
     neto_financiero_agregado_original_mp: Decimal | None = None
     diferencia_agregado_detalle_mp: Decimal | None = None
     coherencia_grupo: bool = True
+    estado_coherencia: EstadoCoherenciaGrupo = EstadoCoherenciaGrupo.COHERENTE
+    motivo_coherencia: str = "El agregado coincide con la suma reconstruida del detalle."
     advertencia_inconsistencia: str = ""
 
 
@@ -630,17 +640,22 @@ def _tratamiento_detalle(detalle: DetalleMovimientoMp) -> TratamientoNetoCompara
 
 def _importes_desde_detalle(
     detalles: tuple[DetalleMovimientoMp, ...],
-    neto_aprobado_respaldo: Decimal | None,
     neto_financiero_respaldo: Decimal | None,
-) -> tuple[Decimal | None, Decimal | None, bool]:
+) -> tuple[Decimal | None, Decimal | None, EstadoCoherenciaGrupo, str]:
     """Reconstruye ambos importes usando exactamente las filas visibles.
 
-    Si un reporte legado no trae importes por fila se mantienen sus agregados,
-    porque no hay detalle monetario contra el cual validarlos. Cuando sí existe
-    detalle (el flujo productivo normal), no se consulta ningún agregado amplio.
+    Sin filas o con importes faltantes no existe evidencia para reconstruir: los
+    importes calculados quedan en ``None`` y el agregado solo puede mostrarse por
+    separado como referencia de auditoría.
     """
-    if not detalles or any(d.monto_neto_impactado is None for d in detalles):
-        return neto_aprobado_respaldo, neto_financiero_respaldo, True
+    if not detalles:
+        return (None, None, EstadoCoherenciaGrupo.NO_VERIFICABLE,
+                "No hay movimientos asociados para reconstruir los importes del grupo.")
+    filas_sin_importe = tuple(d.fila_origen for d in detalles if d.monto_neto_impactado is None)
+    if filas_sin_importe:
+        return (None, None, EstadoCoherenciaGrupo.NO_VERIFICABLE,
+                "Detalle monetario incompleto: falta monto_neto_impactado en las filas MP "
+                + ", ".join(map(str, filas_sin_importe)) + ".")
     neto_aprobado = _sum_decimals(
         d.monto_neto_impactado for d in detalles
         if d.tipo_movimiento.upper().strip() == "PAGO_APROBADO"
@@ -649,7 +664,11 @@ def _importes_desde_detalle(
         d.monto_neto_impactado for d in detalles
         if _tratamiento_detalle(d) == TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE
     )
-    return neto_aprobado, reconstruido, reconstruido == neto_financiero_respaldo
+    if reconstruido == neto_financiero_respaldo:
+        return (neto_aprobado, reconstruido, EstadoCoherenciaGrupo.COHERENTE,
+                "El agregado coincide con la suma reconstruida del detalle.")
+    return (neto_aprobado, reconstruido, EstadoCoherenciaGrupo.INCOHERENTE,
+            "El agregado financiero no coincide con la suma de los movimientos visibles asociados.")
 
 
 # ---------------------------------------------------------------------------
@@ -846,9 +865,10 @@ def diagnosticar_bloque_b(
             r.filas_origen_mp, ids_op, ids_orden_mp, tipos, fechas_origen,
             fechas_aprobacion, fechas_liq, montos_neto, clasificaciones, tratamientos,
         )
-        neto_aprobado_detalle, neto_financiero_detalle, coherencia_grupo = _importes_desde_detalle(
-            detalles, r.neto_aprobado_mp, r.neto_financiero_total_mp,
+        neto_aprobado_detalle, neto_financiero_detalle, estado_coherencia, motivo_coherencia = _importes_desde_detalle(
+            detalles, r.neto_financiero_total_mp,
         )
+        coherencia_grupo = estado_coherencia == EstadoCoherenciaGrupo.COHERENTE
         diferencia_detalle = (
             neto_financiero_detalle - r.neto_financiero_total_mp
             if neto_financiero_detalle is not None and r.neto_financiero_total_mp is not None
@@ -889,8 +909,10 @@ def diagnosticar_bloque_b(
             neto_financiero_agregado_original_mp=r.neto_financiero_total_mp,
             diferencia_agregado_detalle_mp=diferencia_detalle,
             coherencia_grupo=coherencia_grupo,
+            estado_coherencia=estado_coherencia,
+            motivo_coherencia=motivo_coherencia,
             advertencia_inconsistencia=("" if coherencia_grupo else
-                "INCONSISTENCIA: el agregado financiero no coincide con la suma de los movimientos visibles asociados."),
+                f"{estado_coherencia.value}: {motivo_coherencia}"),
         ))
 
     # Los KPI operativos se reconstruyen después de armar el detalle; nunca

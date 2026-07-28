@@ -443,7 +443,8 @@ _COLUMNAS_MP_SIN_VENTA = (
     "Neto aprobado bruto MP",
     "Neto financiero total MP",
     "Suma reconstruida desde movimientos", "Agregado financiero original",
-    "Diferencia agregado − detalle", "Coherencia del grupo", "Advertencia de inconsistencia",
+    "Diferencia agregado − detalle", "Coherencia del grupo", "Estado de coherencia",
+    "Motivo de coherencia", "Advertencia de inconsistencia",
     "Cantidad de movimientos", "Motivo visible", "Acción recomendada", "Filas de origen MP",
 )
 _COLS_MONETARIAS_MP_SIN = {"Neto aprobado bruto MP", "Neto financiero total MP", "Suma reconstruida desde movimientos", "Agregado financiero original", "Diferencia agregado − detalle"}
@@ -548,6 +549,8 @@ def _escribir_mp_sin_venta_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> 
             _decimal_o_vacio(m.neto_financiero_agregado_original_mp),
             _decimal_o_vacio(m.diferencia_agregado_detalle_mp),
             _si_no(m.coherencia_grupo),
+            _texto_seguro(m.estado_coherencia.value),
+            _texto_seguro(m.motivo_coherencia),
             _texto_seguro(m.advertencia_inconsistencia),
             m.cantidad_movimientos,
             _texto_seguro(m.motivo_sin_venta),
@@ -603,6 +606,7 @@ def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
                    _decimal_o_vacio(m.suma_reconstruida_movimientos_mp),
                    _decimal_o_vacio(m.neto_financiero_agregado_original_mp),
                    _decimal_o_vacio(m.diferencia_agregado_detalle_mp), _si_no(m.coherencia_grupo),
+                   _texto_seguro(m.estado_coherencia.value), _texto_seguro(m.motivo_coherencia),
                    _texto_seguro(m.advertencia_inconsistencia),
                    m.cantidad_movimientos, _texto_seguro(m.motivo_sin_venta),
                    _texto_seguro(m.accion_recomendada), _texto_seguro(", ".join(map(str, m.filas_origen_mp)))])

@@ -363,7 +363,11 @@ def test_listado_mp_sin_venta_ml():
     reporte = _rep([r1, r2, r3])
     diag = diagnosticar_bloque_b(reporte)
     assert diag.cantidad_mp_sin_venta == 2
-    assert diag.neto_aprobado_mp_sin_venta == D("120")
+    # Sin importes por fila el agregado queda solo como referencia: el KPI no
+    # reutiliza silenciosamente 50 + 70.
+    assert diag.neto_aprobado_mp_sin_venta == D("0")
+    assert diag.neto_financiero_total_mp_sin_venta == D("0")
+    assert not diag.coherencia_detalle_importes_mp_sin_venta
     assert len(diag.movimientos_mp_sin_venta) == 2
 
 
@@ -648,6 +652,7 @@ def test_clasificacion_principal_resumen_filtros_y_vinculacion():
         tipos_movimiento_mp_por_fila={10: "RECLAMO", 20: "PAGO_APROBADO", 21: "DEVOLUCION", 30: "PAGO_APROBADO", 40: "DESCONOCIDO"},
         ids_operacion_mp_por_fila={10: "=riesgo", 20: "m20", 21: "m21", 30: "m30", 40: "m40"},
         ids_orden_mp_por_fila={20: "orden-20"},
+        montos_neto_mp_por_fila={10: D("10"), 20: D("30"), 21: D("-10"), 30: D("30"), 40: D("40")},
     )
     assert diag.cantidad_mp_sin_venta == 4
     assert diag.cantidad_movimientos_fondos == 1
@@ -711,7 +716,7 @@ def test_resumen_operativo_posible_venta_faltante_filtros_bloque_d_y_excel():
     }
     casos = [
         _r("pago", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("100"), tiene_ml=False, filas_mp=(1,)),
-        _r("envio", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("10"), tiene_ml=False, filas_mp=(2,)),
+        _r("envio", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("10"), neto_fin=D("0"), tiene_ml=False, filas_mp=(2,)),
         _r("mixto", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("80"), tiene_ml=False, filas_mp=(3, 4)),
         _r("cashback", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("5"), tiene_ml=False, filas_mp=(5,)),
     ]
@@ -720,6 +725,14 @@ def test_resumen_operativo_posible_venta_faltante_filtros_bloque_d_y_excel():
         fechas_origen_mp_por_fila={i: date(2026, 7, 15) for i in tipos},
         tipos_movimiento_mp_por_fila=tipos,
         ids_orden_mp_por_fila={1: "orden-1"},
+        montos_neto_mp_por_fila={1: D("100"), 2: D("10"), 3: D("100"), 4: D("-20"), 5: D("5")},
+        tratamientos_mp_por_fila={
+            1: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE,
+            2: TratamientoNetoComparable.COMPONENTE_YA_INCLUIDO,
+            3: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE,
+            4: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE,
+            5: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE,
+        },
     )
     assert diag.coherencia_operativa_dentro_periodo
     assert sum(r.cantidad_grupos for r in diag.resumen_operativo_dentro_periodo) == 4
@@ -794,3 +807,36 @@ def test_mp_sin_venta_varios_pagos_y_grupo_mixto_se_reconstruyen_del_detalle():
     assert mixto.subclasificacion_financiera.value == "MULTIPLES_TIPOS"
     assert diag.coherencia_operativa_dentro_periodo
     assert sum(r.neto_financiero_total for r in diag.resumen_operativo_dentro_periodo) == D("150")
+
+
+@pytest.mark.parametrize(("filas", "montos", "motivo"), [
+    ((), {}, "No hay movimientos asociados"),
+    ((1,), {1: None}, "Detalle monetario incompleto"),
+])
+def test_mp_sin_venta_sin_evidencia_monetaria_es_no_verificable(filas, montos, motivo):
+    from kiki_control.presentation.control_consolidado_view import filas_mp_sin_venta
+
+    r = _r("sin-evidencia", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("100"),
+           tiene_ml=False, filas_mp=filas)
+    diag = diagnosticar_bloque_b(
+        _rep([r]), inicio_ml=date(2026, 7, 1), fin_ml=date(2026, 7, 31),
+        fechas_origen_mp_por_fila={1: date(2026, 7, 2)},
+        tipos_movimiento_mp_por_fila={1: "PAGO_APROBADO"},
+        montos_neto_mp_por_fila=montos,
+    )
+    grupo = diag.movimientos_mp_sin_venta[0]
+    assert grupo.estado_coherencia.value == "NO_VERIFICABLE"
+    assert not grupo.coherencia_grupo and not grupo.posible_venta_faltante
+    assert grupo.neto_aprobado_mp is None and grupo.neto_financiero_total_mp is None
+    assert grupo.suma_reconstruida_movimientos_mp is None
+    assert grupo.neto_financiero_agregado_original_mp == D("100")
+    assert motivo in grupo.motivo_coherencia
+    assert motivo in filas_mp_sin_venta((grupo,))[0]["Advertencia"]
+    assert diag.neto_financiero_total_mp_sin_venta == D("0")
+
+    wb = load_workbook(BytesIO(generar_bloque_b_mp_sin_venta_excel(diag)))
+    ws = wb["MP sin venta ML"]
+    headers = [cell.value for cell in ws[1]]
+    assert ws.cell(2, headers.index("Estado de coherencia") + 1).value == "NO_VERIFICABLE"
+    assert motivo in ws.cell(2, headers.index("Motivo de coherencia") + 1).value
+    assert ws.cell(2, headers.index("Suma reconstruida desde movimientos") + 1).value is None
