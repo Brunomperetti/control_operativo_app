@@ -14,6 +14,8 @@ from kiki_control.presentation.ml_eccomapp_view import (
     ETIQUETAS_ESTADO,
     conclusion_ejecutiva_ml_eccomapp,
     filas_casos_ml_eccomapp,
+    motivo_visible_ml_eccomapp,
+    secciones_casos_ml_eccomapp,
 )
 from tests.test_commercial_linking import op, venta
 from tests.test_control_consolidado import reporte
@@ -212,3 +214,44 @@ def test_excel_agrega_rotulos_legibles_y_conserva_valores_tecnicos_auditables():
     assert ws["D2"].value == "Solo en Mercado Libre"
     assert ws["U2"].value == "SOLO_ML"
     assert ws["V2"].value == "SIN_VINCULO_ECCOMAPP"
+
+
+def test_motivos_visibles_de_seis_estados_son_administrativos():
+    base = caso([venta("A")], [op("A")])
+    esperados = {
+        Estado.COINCIDENCIA_EXACTA: "correspondencia directa",
+        Estado.COINCIDENCIA_POR_GRUPO: "mismo carrito u orden comercial",
+        Estado.IDENTIFICADOR_AMBIGUO: "más de una operación",
+        Estado.IDENTIFICADOR_INCOMPLETO: "información suficiente",
+        Estado.DUPLICADO_ML: "registros repetidos en Mercado Libre",
+        Estado.DUPLICADO_ECCOMAPP: "registros repetidos en Eccomapp",
+    }
+    for estado, fragmento in esperados.items():
+        visible = motivo_visible_ml_eccomapp(replace(
+            base, estado=estado, motivo="Clasificación derivada del vinculador comercial canónico."
+        ))
+        assert fragmento in visible
+        assert "vinculador comercial canónico" not in visible
+
+
+def test_secciones_separan_coincidencias_de_identificaciones_a_revisar():
+    base = caso([venta("A")], [op("A")])
+    casos = tuple(replace(base, clave=estado.value, estado=estado) for estado in Estado)
+    secciones = {titulo: (subset, vacio) for titulo, subset, vacio in secciones_casos_ml_eccomapp(casos)}
+    coincidencias, _ = secciones["Coincidencias agrupadas por carrito u orden"]
+    revisiones, mensaje_vacio = secciones["Identificaciones que requieren revisión"]
+    assert {c.estado for c in coincidencias} == {Estado.COINCIDENCIA_EXACTA, Estado.COINCIDENCIA_POR_GRUPO}
+    assert {c.estado for c in revisiones} == {
+        Estado.IDENTIFICADOR_AMBIGUO, Estado.IDENTIFICADOR_INCOMPLETO,
+        Estado.DUPLICADO_ML, Estado.DUPLICADO_ECCOMAPP,
+    }
+    assert mensaje_vacio == "No se encontraron identificaciones ambiguas, incompletas ni duplicadas."
+
+
+def test_excel_preserva_motivo_tecnico_solo_en_columna_auditable():
+    tecnico = "Clasificación derivada del vinculador comercial canónico."
+    base = diagnosticar_ml_eccomapp([venta("A")], [op("A")])
+    diag = replace(base, casos=(replace(base.casos[0], motivo=tecnico),))
+    ws = load_workbook(BytesIO(generar_diagnostico_ml_eccomapp_excel(diag)))["ML-Eccomapp — Coincidencias"]
+    assert tecnico not in ws["S2"].value
+    assert ws["W2"].value == tecnico

@@ -34,6 +34,35 @@ ETIQUETAS_APTITUD = {
     EstadoAptitudUtilidad.DATOS_CRITICOS_INCOMPLETOS: "Información necesaria incompleta",
 }
 
+MOTIVOS_VISIBLES = {
+    EstadoCruceMlEccomapp.COINCIDENCIA_EXACTA:
+        "Se encontró una correspondencia directa entre Mercado Libre y Eccomapp mediante el identificador comercial.",
+    EstadoCruceMlEccomapp.COINCIDENCIA_POR_GRUPO:
+        "Las ventas y operaciones fueron vinculadas correctamente al mismo carrito u orden comercial.",
+    EstadoCruceMlEccomapp.IDENTIFICADOR_AMBIGUO:
+        "Los identificadores disponibles pueden corresponder a más de una operación y no permiten una vinculación segura.",
+    EstadoCruceMlEccomapp.IDENTIFICADOR_INCOMPLETO:
+        "No hay información suficiente para identificar la operación correspondiente.",
+    EstadoCruceMlEccomapp.DUPLICADO_ML:
+        "Se encontraron registros repetidos en Mercado Libre para el mismo identificador comercial.",
+    EstadoCruceMlEccomapp.DUPLICADO_ECCOMAPP:
+        "Se encontraron registros repetidos en Eccomapp para el mismo identificador comercial.",
+}
+
+ACCIONES_VISIBLES = {
+    EstadoCruceMlEccomapp.COINCIDENCIA_EXACTA: "No se requiere ninguna acción.",
+    EstadoCruceMlEccomapp.COINCIDENCIA_POR_GRUPO:
+        "Conservar la comparación agrupada del carrito u orden comercial.",
+    EstadoCruceMlEccomapp.IDENTIFICADOR_AMBIGUO:
+        "Revisar los identificadores de ambas fuentes y confirmar a qué operación corresponden.",
+    EstadoCruceMlEccomapp.IDENTIFICADOR_INCOMPLETO:
+        "Completar el ID de carrito o de orden en el archivo de origen.",
+    EstadoCruceMlEccomapp.DUPLICADO_ML:
+        "Revisar los registros repetidos de Mercado Libre antes de calcular la utilidad.",
+    EstadoCruceMlEccomapp.DUPLICADO_ECCOMAPP:
+        "Revisar los registros repetidos de Eccomapp antes de calcular la utilidad.",
+}
+
 
 def etiqueta_estado_ml_eccomapp(estado: EstadoCruceMlEccomapp) -> str:
     return ETIQUETAS_ESTADO[estado]
@@ -57,7 +86,7 @@ def motivo_visible_ml_eccomapp(caso) -> str:
                 "carrito o el ID de orden.")
     if caso.estado == EstadoCruceMlEccomapp.SOLO_ECCOMAPP:
         return "No se encontró una venta correspondiente en Mercado Libre utilizando el ID de carrito o el ID de orden."
-    return caso.motivo or "Sin información adicional."
+    return MOTIVOS_VISIBLES[caso.estado]
 
 
 def accion_visible_ml_eccomapp(caso) -> str:
@@ -65,7 +94,7 @@ def accion_visible_ml_eccomapp(caso) -> str:
         return "Verificar si la operación fue cancelada, devuelta o excluida del archivo Eccomapp."
     if caso.estado == EstadoCruceMlEccomapp.SOLO_ECCOMAPP:
         return "Verificar el ID comercial y la cobertura del archivo de Mercado Libre."
-    return caso.accion_recomendada or "Sin acción requerida."
+    return ACCIONES_VISIBLES[caso.estado]
 
 
 def _es_total_cero_con_anulaciones(caso) -> bool:
@@ -110,3 +139,28 @@ def resumen_estados_ml_eccomapp(d):
     counts = Counter(c.estado for c in d.casos)
     return [{"Estado de vinculación": etiqueta_estado_ml_eccomapp(estado), "Cantidad": cantidad}
             for estado, cantidad in sorted(counts.items(), key=lambda item: etiqueta_estado_ml_eccomapp(item[0]))]
+
+
+def secciones_casos_ml_eccomapp(casos):
+    """Separa coincidencias válidas de identificaciones pendientes en la vista."""
+    coincidencias = {EstadoCruceMlEccomapp.COINCIDENCIA_EXACTA, EstadoCruceMlEccomapp.COINCIDENCIA_POR_GRUPO}
+    revision = {
+        EstadoCruceMlEccomapp.IDENTIFICADOR_AMBIGUO,
+        EstadoCruceMlEccomapp.IDENTIFICADOR_INCOMPLETO,
+        EstadoCruceMlEccomapp.DUPLICADO_ML,
+        EstadoCruceMlEccomapp.DUPLICADO_ECCOMAPP,
+    }
+    return (
+        ("Ventas de Mercado Libre sin operación en Eccomapp",
+         tuple(c for c in casos if c.estado == EstadoCruceMlEccomapp.SOLO_ML),
+         "No se encontraron ventas de Mercado Libre sin operación en Eccomapp."),
+        ("Operaciones Eccomapp sin venta en Mercado Libre",
+         tuple(c for c in casos if c.estado == EstadoCruceMlEccomapp.SOLO_ECCOMAPP),
+         "No se encontraron operaciones Eccomapp sin Mercado Libre."),
+        ("Coincidencias agrupadas por carrito u orden",
+         tuple(c for c in casos if c.estado in coincidencias),
+         "No se encontraron coincidencias para los filtros seleccionados."),
+        ("Identificaciones que requieren revisión",
+         tuple(c for c in casos if c.estado in revision),
+         "No se encontraron identificaciones ambiguas, incompletas ni duplicadas."),
+    )

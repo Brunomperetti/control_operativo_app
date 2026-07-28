@@ -49,6 +49,7 @@ from kiki_control.presentation.ml_eccomapp_view import (
     etiqueta_estado_ml_eccomapp,
     filas_casos_ml_eccomapp,
     resumen_estados_ml_eccomapp,
+    secciones_casos_ml_eccomapp,
 )
 from kiki_control.linking.control_financiero import consolidar_control_financiero
 from kiki_control.presentation.control_consolidado_view import (
@@ -872,10 +873,7 @@ def _mostrar_cruce_ml_eccomapp(diag) -> None:
                   and (costo == "Todos" or (costo == "Con costo") == (c.costo_eccomapp is not None)) and (not prioritarios or c.requiere_revision)
                   and (fecha_desde is None or (c.fecha is not None and c.fecha.date() >= fecha_desde))
                   and (fecha_hasta is None or (c.fecha is not None and c.fecha.date() <= fecha_hasta)))
-    grupos = (("Ventas de Mercado Libre sin operación en Eccomapp", tuple(c for c in casos if c.estado.value == "SOLO_ML"), "No se encontraron ventas de Mercado Libre sin operación en Eccomapp."),
-              ("Operaciones Eccomapp sin venta en Mercado Libre", tuple(c for c in casos if c.estado.value == "SOLO_ECCOMAPP"), "No se encontraron operaciones Eccomapp sin Mercado Libre."),
-              ("Coincidencias agrupadas por carrito u orden", tuple(c for c in casos if c.estado.value not in {"SOLO_ML", "SOLO_ECCOMAPP"}), "No se encontraron coincidencias ni casos de identificación para los filtros seleccionados."))
-    for titulo, subset, mensaje_vacio in grupos:
+    for titulo, subset, mensaje_vacio in secciones_casos_ml_eccomapp(casos):
         st.markdown(f"**{titulo}**")
         if subset:
             st.dataframe(filas_casos_ml_eccomapp(subset), use_container_width=True, hide_index=True)
