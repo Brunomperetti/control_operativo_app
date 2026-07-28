@@ -5,6 +5,7 @@ from kiki_control.ui.session_cycle import (
     SESSION_KEYS_TO_CLEAR,
     VIEW_FILTER_KEYS_TO_CLEAR,
     construir_firma_procesamiento,
+    construir_firma_procesamiento_tres_fuentes,
     detectar_cambio,
     invalidar_resultados_conocidos,
     limpiar_claves_conocidas,
@@ -267,6 +268,7 @@ def test_invalidacion_elimina_widgets_de_diagnosticos_y_conserva_configuracion()
 
 def test_claves_bloque_b_nuevas_se_limpian_e_invalidan():
     claves = {
+        "enriq_movimientos_mp_por_fila",
         "enriq_fechas_liq_mp_por_fila", "enriq_tipos_mp_por_fila",
         "enriq_ids_op_mp_por_fila", "enriq_fechas_venta_ml_por_fila",
         "enriq_clasificaciones_mp_por_fila", "enriq_tratamientos_mp_por_fila", "enriq_fechas_aprobacion_mp_por_fila",
@@ -278,3 +280,46 @@ def test_claves_bloque_b_nuevas_se_limpian_e_invalidan():
     estado = dict.fromkeys(claves, "anterior")
     invalidar_resultados_conocidos(estado)
     assert claves.isdisjoint(estado)
+
+
+def test_enriquecimiento_atomico_se_limpia_totalmente_y_al_invalidar_resultados():
+    clave = "enriq_movimientos_mp_por_fila"
+    assert clave in SESSION_KEYS_TO_CLEAR
+    assert clave in RESULT_KEYS_TO_CLEAR
+
+    for limpiar in (limpiar_claves_conocidas, invalidar_resultados_conocidos):
+        anterior = {2: {"id_movimiento": "mp-anterior", "monto": "999"}}
+        estado = {clave: anterior, "clave_no_gestionada": "vigente"}
+        limpiar(estado)
+        assert clave not in estado
+        assert anterior not in estado.values()
+        assert estado == {"clave_no_gestionada": "vigente"}
+
+
+def test_reemplazar_cualquiera_de_tres_archivos_invalida_enriquecimiento_atomico():
+    hashes = ("ml-oficial-a", "eccomapp-a", "mp-a")
+    firma_base = construir_firma_procesamiento_tres_fuentes(*hashes, ZONA, Decimal("0.01"))
+
+    for posicion in range(3):
+        reemplazados = list(hashes)
+        reemplazados[posicion] += "-reemplazado"
+        assert construir_firma_procesamiento_tres_fuentes(
+            *reemplazados, ZONA, Decimal("0.01")
+        ) != firma_base
+        estado = {"enriq_movimientos_mp_por_fila": {2: "anterior"}}
+        invalidar_resultados_conocidos(estado)
+        assert "enriq_movimientos_mp_por_fila" not in estado
+
+
+def test_cambio_zona_o_tolerancia_invalida_enriquecimiento_atomico():
+    firma_base = construir_firma_procesamiento_tres_fuentes(
+        "ml-oficial", "eccomapp", "mp", ZONA, Decimal("0.01")
+    )
+    configuraciones = (("UTC", Decimal("0.01")), (ZONA, Decimal("0.02")))
+    for zona, tolerancia in configuraciones:
+        assert construir_firma_procesamiento_tres_fuentes(
+            "ml-oficial", "eccomapp", "mp", zona, tolerancia
+        ) != firma_base
+        estado = {"enriq_movimientos_mp_por_fila": {2: "anterior"}}
+        invalidar_resultados_conocidos(estado)
+        assert "enriq_movimientos_mp_por_fila" not in estado

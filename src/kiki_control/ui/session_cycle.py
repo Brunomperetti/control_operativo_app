@@ -41,6 +41,7 @@ SESSION_KEYS_TO_CLEAR = (
     "motivo_grupos_revision",
     "buscar_grupo_revision",
     # Enriquecimiento de Bloque B
+    "enriq_movimientos_mp_por_fila",
     "enriq_fechas_liq_mp_por_fila",
     "enriq_tipos_mp_por_fila",
     "enriq_ids_op_mp_por_fila",
@@ -84,6 +85,7 @@ RESULT_KEYS_TO_CLEAR = (
     "motivo_grupos_revision",
     "buscar_grupo_revision",
     # Enriquecimiento de Bloque B
+    "enriq_movimientos_mp_por_fila",
     "enriq_fechas_liq_mp_por_fila",
     "enriq_tipos_mp_por_fila",
     "enriq_ids_op_mp_por_fila",
