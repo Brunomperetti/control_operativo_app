@@ -16,7 +16,13 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from kiki_control.domain.control_consolidado import ReporteControlConsolidado, ResultadoControlConsolidado
 from kiki_control.domain.reconciliation import ReporteConciliacion, ResultadoConciliacion
-from kiki_control.presentation.bloque_b_diagnostics import DiagnosticoBloqueB, GrupoConDiferencia, MovimientoMpSinVentaML, ESTADOS_EXPLICACION_VISIBLES
+from kiki_control.presentation.bloque_b_diagnostics import (
+    CategoriaPrincipalMpSinVenta,
+    DiagnosticoBloqueB,
+    ESTADOS_EXPLICACION_VISIBLES,
+    GrupoConDiferencia,
+    MovimientoMpSinVentaML,
+)
 from kiki_control.presentation.control_consolidado_diagnostics import DiagnosticoControlConsolidado, diagnosticar_control_consolidado
 from kiki_control.presentation.control_consolidado_view import texto_tratamiento_neto_comparable
 from kiki_control.presentation.review_cases import caso_a_fila, clasificar_revisiones
@@ -436,9 +442,11 @@ _COLUMNAS_MP_SIN_VENTA = (
     "Fecha de liquidación desde", "Fecha de liquidación hasta",
     "Neto aprobado bruto MP",
     "Neto financiero total MP",
+    "Suma reconstruida desde movimientos", "Agregado financiero original",
+    "Diferencia agregado − detalle", "Coherencia del grupo", "Advertencia de inconsistencia",
     "Cantidad de movimientos", "Motivo visible", "Acción recomendada", "Filas de origen MP",
 )
-_COLS_MONETARIAS_MP_SIN = {"Neto aprobado bruto MP", "Neto financiero total MP"}
+_COLS_MONETARIAS_MP_SIN = {"Neto aprobado bruto MP", "Neto financiero total MP", "Suma reconstruida desde movimientos", "Agregado financiero original", "Diferencia agregado − detalle"}
 
 
 def generar_bloque_b_mp_sin_venta_excel(diag: DiagnosticoBloqueB) -> bytes:
@@ -470,6 +478,8 @@ def _escribir_resumen_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
         ("Cantidad MP sin venta ML", diag.cantidad_mp_sin_venta),
         ("Neto aprobado MP sin venta", diag.neto_aprobado_mp_sin_venta),
         ("Neto financiero total MP sin venta", diag.neto_financiero_total_mp_sin_venta),
+        ("Coherencia detalle/importes MP sin venta", "Sí" if diag.coherencia_detalle_importes_mp_sin_venta else "No"),
+        ("Validez KPI monetario MP sin venta", "Válido" if diag.coherencia_detalle_importes_mp_sin_venta else "NO VÁLIDO — revisar inconsistencias por grupo"),
         ("Convención", "diferencia_ml_mp = neto_financiero_total_mp − total_informado_ml"),
         ("Tratamiento PAGO_ENVIO", "Componente ya incluido en el neto aprobado bruto MP: se muestra, pero no se suma nuevamente."),
         ("Positiva", "MP informa más neto que ML"),
@@ -534,6 +544,11 @@ def _escribir_mp_sin_venta_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> 
             _texto_seguro(m.fecha_max_liquidacion),
             _decimal_o_vacio(m.neto_aprobado_mp),
             _decimal_o_vacio(m.neto_financiero_total_mp),
+            _decimal_o_vacio(m.suma_reconstruida_movimientos_mp),
+            _decimal_o_vacio(m.neto_financiero_agregado_original_mp),
+            _decimal_o_vacio(m.diferencia_agregado_detalle_mp),
+            _si_no(m.coherencia_grupo),
+            _texto_seguro(m.advertencia_inconsistencia),
             m.cantidad_movimientos,
             _texto_seguro(m.motivo_sin_venta),
             _texto_seguro(m.accion_recomendada),
@@ -564,7 +579,11 @@ def _escribir_resumen_mp_sin_ml(ws: Worksheet, diag: DiagnosticoBloqueB) -> None
                    r.cantidad_grupos, r.cantidad_movimientos, r.neto_aprobado_bruto,
                    r.neto_financiero_total, r.con_id_orden, r.sin_id_orden,
                    _texto_seguro(r.interpretacion), _texto_seguro(r.accion_recomendada),
-                   r.subclasificacion_financiera.value == "PAGO_APROBADO"])
+                   (r.subclasificacion_financiera.value == "PAGO_APROBADO" and all(
+                       m.coherencia_grupo for m in diag.movimientos_mp_sin_venta
+                       if m.categoria_principal == CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA
+                       and m.subclasificacion_financiera == r.subclasificacion_financiera
+                   ))])
         ws.cell(ws.max_row, 5).number_format = _FORMATO_MONEDA_ARS
         ws.cell(ws.max_row, 6).number_format = _FORMATO_MONEDA_ARS
 
@@ -581,6 +600,10 @@ def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
                    _texto_seguro(m.fecha_min_origen), _texto_seguro(m.fecha_origen_maxima),
                    _texto_seguro(m.fecha_liquidacion_minima), _texto_seguro(m.fecha_max_liquidacion),
                    _decimal_o_vacio(m.neto_aprobado_mp), _decimal_o_vacio(m.neto_financiero_total_mp),
+                   _decimal_o_vacio(m.suma_reconstruida_movimientos_mp),
+                   _decimal_o_vacio(m.neto_financiero_agregado_original_mp),
+                   _decimal_o_vacio(m.diferencia_agregado_detalle_mp), _si_no(m.coherencia_grupo),
+                   _texto_seguro(m.advertencia_inconsistencia),
                    m.cantidad_movimientos, _texto_seguro(m.motivo_sin_venta),
                    _texto_seguro(m.accion_recomendada), _texto_seguro(", ".join(map(str, m.filas_origen_mp)))])
     mon_cols = {idx for idx, c in enumerate(_COLUMNAS_MP_SIN_VENTA, start=1) if c in _COLS_MONETARIAS_MP_SIN}

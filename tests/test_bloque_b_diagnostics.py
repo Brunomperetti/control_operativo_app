@@ -748,3 +748,49 @@ def test_universo_comparable_611_611_0_permanece_sin_diferencia():
     resumen = diagnosticar_bloque_b(_rep(casos)).resumen
     assert (resumen.comparables_totales, resumen.coincidencias, resumen.con_diferencia) == (611, 611, 0)
     assert resumen.diferencia_universo_comparable == D("0")
+
+
+def test_mp_sin_venta_reconstruye_pago_puro_y_excluye_fila_ajena():
+    """El agregado amplio no puede contaminar las filas visibles del grupo."""
+    r = _r("pago", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("100"),
+           neto_fin=D("-900"), tiene_ml=False, filas_mp=(1,))
+    diag = diagnosticar_bloque_b(
+        _rep([r]), inicio_ml=date(2026, 7, 1), fin_ml=date(2026, 7, 31),
+        fechas_origen_mp_por_fila={1: date(2026, 7, 2), 99: date(2020, 1, 1)},
+        tipos_movimiento_mp_por_fila={1: "PAGO_APROBADO", 99: "DEVOLUCION_DINERO"},
+        montos_neto_mp_por_fila={1: D("100"), 99: D("-1000")},
+        tratamientos_mp_por_fila={
+            1: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE,
+            99: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE,
+        },
+    )
+    grupo = diag.movimientos_mp_sin_venta[0]
+    assert grupo.cantidad_movimientos == 1
+    assert grupo.neto_aprobado_mp == grupo.neto_financiero_total_mp == D("100")
+    assert grupo.suma_reconstruida_movimientos_mp == D("100")
+    assert grupo.diferencia_agregado_detalle_mp == D("1000")
+    assert not grupo.coherencia_grupo and not grupo.posible_venta_faltante
+    assert not diag.coherencia_detalle_importes_mp_sin_venta
+    assert diag.neto_financiero_total_mp_sin_venta == D("100")
+
+
+def test_mp_sin_venta_varios_pagos_y_grupo_mixto_se_reconstruyen_del_detalle():
+    casos = [
+        _r("dividido", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("70"), tiene_ml=False, filas_mp=(1, 2)),
+        _r("mixto", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("80"), tiene_ml=False, filas_mp=(3, 4)),
+    ]
+    diag = diagnosticar_bloque_b(
+        _rep(casos), inicio_ml=date(2026, 7, 1), fin_ml=date(2026, 7, 31),
+        fechas_origen_mp_por_fila={i: date(2026, 7, 2) for i in range(1, 5)},
+        tipos_movimiento_mp_por_fila={1: "PAGO_APROBADO", 2: "PAGO_APROBADO", 3: "PAGO_APROBADO", 4: "DEVOLUCION_DINERO"},
+        montos_neto_mp_por_fila={1: D("30"), 2: D("40"), 3: D("100"), 4: D("-20")},
+        tratamientos_mp_por_fila={i: TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE for i in range(1, 5)},
+        ids_orden_mp_por_fila={1: None, 2: None, 3: "orden-3", 4: "orden-3"},
+    )
+    dividido, mixto = diag.movimientos_mp_sin_venta
+    assert (dividido.cantidad_movimientos, dividido.neto_aprobado_mp, dividido.neto_financiero_total_mp) == (2, D("70"), D("70"))
+    assert not dividido.tiene_id_orden_utilizable
+    assert (mixto.neto_aprobado_mp, mixto.neto_financiero_total_mp) == (D("100"), D("80"))
+    assert mixto.subclasificacion_financiera.value == "MULTIPLES_TIPOS"
+    assert diag.coherencia_operativa_dentro_periodo
+    assert sum(r.neto_financiero_total for r in diag.resumen_operativo_dentro_periodo) == D("150")
