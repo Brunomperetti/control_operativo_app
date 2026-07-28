@@ -24,7 +24,7 @@ from kiki_control.presentation.bloque_b_diagnostics import (
     GrupoConDiferencia,
     MovimientoMpSinVentaML,
 )
-from kiki_control.presentation.control_consolidado_diagnostics import DiagnosticoControlConsolidado, diagnosticar_control_consolidado
+from kiki_control.presentation.control_consolidado_diagnostics import DiagnosticoControlConsolidado, DiagnosticoRevision, diagnosticar_control_consolidado
 from kiki_control.presentation.control_consolidado_view import texto_tratamiento_neto_comparable
 from kiki_control.presentation.ml_eccomapp_view import (
     accion_visible_ml_eccomapp,
@@ -305,7 +305,7 @@ def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagno
     _escribir_puente_consolidado(wb.create_sheet("Puente de fuentes"), diag)
     _escribir_control_consolidado(wb.create_sheet("Control por operación"), reporte.resultados)
     _escribir_temporal_consolidado(wb.create_sheet("Distribución temporal MP"), diag)
-    _escribir_revisiones_consolidadas(wb.create_sheet("Revisiones"), diag)
+    _escribir_revisiones_consolidadas(wb.create_sheet("Revisiones"), diag, diag_bloque_b)
     if diag_bloque_b is not None:
         _escribir_resumen_bloque_b(wb.create_sheet("Bloque B — Resumen"), diag_bloque_b)
         _escribir_diferencias_bloque_b(wb.create_sheet("Bloque B — Diferencias"), diag_bloque_b)
@@ -372,11 +372,15 @@ def generar_excepciones_consolidadas_excel(reporte: ReporteControlConsolidado) -
     salida = BytesIO(); wb.save(salida); return salida.getvalue()
 
 
-def generar_revisiones_consolidadas_excel(reporte: ReporteControlConsolidado) -> bytes:
+def generar_revisiones_consolidadas_excel(
+    reporte: ReporteControlConsolidado,
+    diagnostico: DiagnosticoControlConsolidado | None = None,
+    diag_bloque_b: DiagnosticoBloqueB | None = None,
+) -> bytes:
     wb = Workbook(); ws = wb.active; ws.title = "Resumen"
-    diag = diagnosticar_control_consolidado(reporte)
+    diag = diagnostico or diagnosticar_control_consolidado(reporte)
     _escribir_resumen_consolidado(ws, reporte, TIPO_REVISIONES_CONSOLIDADAS)
-    _escribir_revisiones_consolidadas(wb.create_sheet("Revisiones"), diag)
+    _escribir_revisiones_consolidadas(wb.create_sheet("Revisiones"), diag, diag_bloque_b)
     salida = BytesIO(); wb.save(salida); return salida.getvalue()
 
 
@@ -455,9 +459,43 @@ def _escribir_temporal_consolidado(ws: Worksheet, diag: Any) -> None:
     _formatear_tabla(ws, moneda_columnas={3, 4}, wrap_columnas={5}, freeze=True)
 
 
-def _escribir_revisiones_consolidadas(ws: Worksheet, diag: Any) -> None:
+_REVISION_TEMPORAL_MP = {
+    CategoriaPrincipalMpSinVenta.ANTERIOR_AL_PERIODO_ML: "MP sin venta anterior al período ML",
+    CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA: "MP sin venta dentro del período ML",
+    CategoriaPrincipalMpSinVenta.POSTERIOR_AL_PERIODO_ML: "MP sin venta posterior al período ML",
+    CategoriaPrincipalMpSinVenta.SIN_FECHA_DE_ORIGEN: "MP sin venta sin fecha de origen",
+}
+
+
+def _filas_revision_temporal_mp_sin_venta(diag: DiagnosticoBloqueB) -> tuple[DiagnosticoRevision, ...]:
+    """Construye el resumen exportable desde las categorías ya resueltas por Bloque B."""
+    movimientos_por_categoria = {
+        categoria: tuple(m for m in diag.movimientos_mp_sin_venta if m.categoria_principal == categoria)
+        for categoria in CategoriaPrincipalMpSinVenta
+    }
+    return tuple(
+        DiagnosticoRevision(
+            motivo_visible=_REVISION_TEMPORAL_MP[resumen.categoria],
+            cantidad=resumen.cantidad_grupos,
+            importe_afectado=resumen.neto_financiero_total,
+            accion_recomendada=resumen.accion_recomendada,
+            grupos_involucrados=tuple(m.id_grupo for m in movimientos_por_categoria[resumen.categoria]),
+        )
+        for resumen in diag.resumen_mp_sin_venta
+    )
+
+
+def _filas_revisiones_consolidadas(diag: Any, diag_bloque_b: DiagnosticoBloqueB | None) -> tuple[DiagnosticoRevision, ...]:
+    filas = tuple(diag.revisiones.revisiones_multietiqueta)
+    if diag_bloque_b is None:
+        return filas
+    motivos_temporales = set(_REVISION_TEMPORAL_MP.values())
+    return tuple(r for r in filas if r.motivo_visible not in motivos_temporales) + _filas_revision_temporal_mp_sin_venta(diag_bloque_b)
+
+
+def _escribir_revisiones_consolidadas(ws: Worksheet, diag: Any, diag_bloque_b: DiagnosticoBloqueB | None = None) -> None:
     ws.append(["Motivo", "Cantidad", "Importe afectado", "Acción", "Grupos"])
-    for r in diag.revisiones.revisiones_multietiqueta:
+    for r in _filas_revisiones_consolidadas(diag, diag_bloque_b):
         ws.append([_texto_seguro(r.motivo_visible), r.cantidad, _decimal_o_vacio(r.importe_afectado), _texto_seguro(r.accion_recomendada), _texto_seguro(", ".join(r.grupos_involucrados))])
     _formatear_tabla(ws, moneda_columnas={3}, wrap_columnas={4, 5}, freeze=True)
 
