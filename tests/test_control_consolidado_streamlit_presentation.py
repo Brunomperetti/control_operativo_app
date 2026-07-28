@@ -48,6 +48,14 @@ def test_streamlit_no_duplica_formulas_financieras_y_usa_apis_existentes():
     assert TITULO_BLOQUE_A == "Bloque A — Formación del neto informado por Mercado Libre"
 
 
+def test_streamlit_separa_composicion_correcta_de_calidad_monetaria():
+    source = open("src/kiki_control/ui/streamlit_app.py", encoding="utf-8").read()
+    assert "La composición operativa coincide con el universo dentro del período ML." in source
+    assert "Existen movimientos con datos monetarios no verificables o inconsistentes." in source
+    assert "Control de calidad monetaria por fila" in source
+    assert "Solo movimientos inconsistentes o no verificables" in source
+
+
 def test_presentacion_sin_float_y_negativos_con_signo():
     assert formato_importe(Decimal("-10.50")).startswith("$ -10,50")
     source = open("src/kiki_control/presentation/control_consolidado_view.py", encoding="utf-8").read()

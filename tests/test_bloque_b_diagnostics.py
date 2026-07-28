@@ -926,3 +926,24 @@ def test_clave_desplazada_y_pago_aprobado_negativo_son_inconsistentes_y_no_prior
     assert grupo.neto_financiero_total_mp is None
     assert not grupo.posible_venta_faltante
     assert not grupo.coherencia_grupo
+    # La calidad monetaria no contamina la validación independiente de composición.
+    assert diag.coherencia_operativa_dentro_periodo
+    assert diag.composicion_cantidades_coherente
+    assert diag.composicion_movimientos_coherente
+    assert diag.composicion_neto_aprobado_coherente
+    assert diag.composicion_neto_financiero_coherente
+    assert diag.existen_grupos_monetarios_inconsistentes
+    calidad = diag.calidad_monetaria_mp_sin_venta
+    assert calidad is not None
+    assert calidad.grupos_incoherentes == 1
+    assert calidad.movimientos_correspondencia_inconsistente == 1
+    assert calidad.pagos_aprobados_negativos == 1
+    assert calidad.importe_reconstruido_confiable == D("0")
+    assert calidad.importe_excluido_o_no_verificable == D("-50")
+
+    from kiki_control.presentation.control_consolidado_view import filas_inconsistencias_mp_sin_venta
+    filas = filas_inconsistencias_mp_sin_venta(diag)
+    assert len(filas) == 1
+    assert filas[0]["ID de grupo"] == grupo.id_grupo
+    assert filas[0]["Estado de coherencia"] == "INCOHERENTE"
+    assert filas_inconsistencias_mp_sin_venta(diag, False) == filas
