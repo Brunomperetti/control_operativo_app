@@ -98,6 +98,14 @@ class CombinacionResumida(StrEnum):
     OTRAS_COMBINACIONES = "OTRAS COMBINACIONES"
 
 
+class EstadoCoherenciaGrupo(StrEnum):
+    """Resultado de contrastar el agregado con el detalle monetario visible."""
+
+    COHERENTE = "COHERENTE"
+    INCOHERENTE = "INCOHERENTE"
+    NO_VERIFICABLE = "NO_VERIFICABLE"
+
+
 ESTADOS_EXPLICACION_VISIBLES: dict[EstadoExplicacionDiferencia, str] = {
     EstadoExplicacionDiferencia.EXPLICADA: "Explicada",
     EstadoExplicacionDiferencia.INDICIO_TEMPORAL: "Posible diferencia temporal",
@@ -177,6 +185,13 @@ class MovimientoMpSinVentaML:
     combinacion_resumida: CombinacionResumida = CombinacionResumida.NO_APLICA
     interpretacion: str = "Movimiento financiero o promocional que no representa una venta ML."
     posible_venta_faltante: bool = False
+    suma_reconstruida_movimientos_mp: Decimal | None = None
+    neto_financiero_agregado_original_mp: Decimal | None = None
+    diferencia_agregado_detalle_mp: Decimal | None = None
+    coherencia_grupo: bool = True
+    estado_coherencia: EstadoCoherenciaGrupo = EstadoCoherenciaGrupo.COHERENTE
+    motivo_coherencia: str = "El agregado coincide con la suma reconstruida del detalle."
+    advertencia_inconsistencia: str = ""
 
 
 @dataclass(frozen=True)
@@ -237,6 +252,7 @@ class DiagnosticoBloqueB:
     coherencia_mp_sin_venta: bool
     resumen_operativo_dentro_periodo: tuple[ResumenOperativoMpSinVenta, ...]
     coherencia_operativa_dentro_periodo: bool
+    coherencia_detalle_importes_mp_sin_venta: bool
     cantidad_movimientos_fondos: int
     """Payouts y movimientos de fondos: no son ventas faltantes."""
     neto_aprobado_mp_fondos: Decimal
@@ -605,6 +621,59 @@ def _construir_detalle_movimientos(
     return tuple(detalles)
 
 
+def _tratamiento_detalle(detalle: DetalleMovimientoMp) -> TratamientoNetoComparable:
+    """Obtiene el tratamiento contable, con una reserva para entradas antiguas.
+
+    El enriquecimiento productivo informa el tratamiento explícito. La reserva
+    solo permite auditar reportes creados antes de que ese mapa existiera y
+    conserva las dos exclusiones inequívocas (envíos ya incluidos y payouts).
+    """
+    if detalle.tratamiento_neto_comparable is not None:
+        return detalle.tratamiento_neto_comparable
+    tipo = detalle.tipo_movimiento.upper().strip()
+    if tipo in {"PAGO_ENVIO", "PAGO DE ENVÍO", "PAGO DE ENVIO"}:
+        return TratamientoNetoComparable.COMPONENTE_YA_INCLUIDO
+    if tipo == "PAYOUT":
+        return TratamientoNetoComparable.MOVIMIENTO_DE_FONDOS
+    return TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE
+
+
+def _importes_desde_detalle(
+    detalles: tuple[DetalleMovimientoMp, ...],
+    neto_financiero_respaldo: Decimal | None,
+) -> tuple[Decimal | None, Decimal | None, EstadoCoherenciaGrupo, str]:
+    """Reconstruye ambos importes usando exactamente las filas visibles.
+
+    Sin filas o con importes faltantes no existe evidencia para reconstruir: los
+    importes calculados quedan en ``None`` y el agregado solo puede mostrarse por
+    separado como referencia de auditoría.
+    """
+    if not detalles:
+        return (None, None, EstadoCoherenciaGrupo.NO_VERIFICABLE,
+                "No hay movimientos asociados para reconstruir los importes del grupo.")
+    filas_sin_importe = tuple(d.fila_origen for d in detalles if d.monto_neto_impactado is None)
+    if filas_sin_importe:
+        return (None, None, EstadoCoherenciaGrupo.NO_VERIFICABLE,
+                "Detalle monetario incompleto: falta monto_neto_impactado en las filas MP "
+                + ", ".join(map(str, filas_sin_importe)) + ".")
+    neto_aprobado = _sum_decimals(
+        d.monto_neto_impactado for d in detalles
+        if d.tipo_movimiento.upper().strip() == "PAGO_APROBADO"
+    )
+    reconstruido = _sum_decimals(
+        d.monto_neto_impactado for d in detalles
+        if _tratamiento_detalle(d) == TratamientoNetoComparable.MODIFICA_NETO_COMPARABLE
+    )
+    if neto_financiero_respaldo is None:
+        return (neto_aprobado, reconstruido, EstadoCoherenciaGrupo.NO_VERIFICABLE,
+                "El detalle monetario pudo reconstruirse, pero no existe agregado financiero original para verificar la coincidencia.")
+    if reconstruido == neto_financiero_respaldo:
+        return (neto_aprobado, reconstruido, EstadoCoherenciaGrupo.COHERENTE,
+                "El agregado coincide con la suma reconstruida del detalle.")
+    return (neto_aprobado, reconstruido, EstadoCoherenciaGrupo.INCOHERENTE,
+            "El agregado financiero no coincide con la suma de los movimientos visibles asociados.")
+
+
 # ---------------------------------------------------------------------------
 # Función principal de diagnóstico
 # ---------------------------------------------------------------------------
@@ -786,9 +855,6 @@ def diagnosticar_bloque_b(
     solo_mp = tuple(r for r in mp_sin_ml_todos if r not in set(fondos_r))
 
     # --- Métricas y listas de ventas faltantes (excluye fondos) ---
-    neto_ap_sin_venta = _sum_decimals(r.neto_aprobado_mp for r in solo_mp)
-    neto_fin_sin_venta = _sum_decimals(r.neto_financiero_total_mp for r in solo_mp)
-
     movs_sin_venta: list[MovimientoMpSinVentaML] = []
     for r in solo_mp:
         id_g = _id_grupo(r)
@@ -802,6 +868,15 @@ def diagnosticar_bloque_b(
             r.filas_origen_mp, ids_op, ids_orden_mp, tipos, fechas_origen,
             fechas_aprobacion, fechas_liq, montos_neto, clasificaciones, tratamientos,
         )
+        neto_aprobado_detalle, neto_financiero_detalle, estado_coherencia, motivo_coherencia = _importes_desde_detalle(
+            detalles, r.neto_financiero_total_mp,
+        )
+        coherencia_grupo = estado_coherencia == EstadoCoherenciaGrupo.COHERENTE
+        diferencia_detalle = (
+            neto_financiero_detalle - r.neto_financiero_total_mp
+            if neto_financiero_detalle is not None and r.neto_financiero_total_mp is not None
+            else None
+        )
         subclasificacion = subclasificar_financieramente(tipos_grupo)
         prioridad, interpretacion, accion_operativa = _datos_operativos(subclasificacion)
         dentro_periodo = categoria == CategoriaPrincipalMpSinVenta.DENTRO_DEL_PERIODO_ML_SIN_VENTA
@@ -814,8 +889,8 @@ def diagnosticar_bloque_b(
             tipos_movimiento=tipos_grupo,
             fecha_min_origen=f_min_orig,
             fecha_max_liquidacion=f_max_liq_mv,
-            neto_aprobado_mp=r.neto_aprobado_mp,
-            neto_financiero_total_mp=r.neto_financiero_total_mp,
+            neto_aprobado_mp=neto_aprobado_detalle,
+            neto_financiero_total_mp=neto_financiero_detalle,
             categoria_temporal=cat_temp,
             motivo_sin_venta=_motivo_categoria(categoria),
             accion_recomendada=accion_operativa if dentro_periodo else _accion_categoria(categoria),
@@ -831,8 +906,22 @@ def diagnosticar_bloque_b(
             prioridad_operativa=prioridad,
             combinacion_resumida=combinacion_resumida(tipos_grupo),
             interpretacion=interpretacion if dentro_periodo else _motivo_categoria(categoria),
-            posible_venta_faltante=dentro_periodo and subclasificacion == SubclasificacionFinanciera.PAGO_APROBADO,
+            posible_venta_faltante=(dentro_periodo and coherencia_grupo
+                                    and subclasificacion == SubclasificacionFinanciera.PAGO_APROBADO),
+            suma_reconstruida_movimientos_mp=neto_financiero_detalle,
+            neto_financiero_agregado_original_mp=r.neto_financiero_total_mp,
+            diferencia_agregado_detalle_mp=diferencia_detalle,
+            coherencia_grupo=coherencia_grupo,
+            estado_coherencia=estado_coherencia,
+            motivo_coherencia=motivo_coherencia,
+            advertencia_inconsistencia=("" if coherencia_grupo else
+                f"{estado_coherencia.value}: {motivo_coherencia}"),
         ))
+
+    # Los KPI operativos se reconstruyen después de armar el detalle; nunca
+    # vuelven a sumar los agregados potencialmente contaminados del reporte.
+    neto_ap_sin_venta = _sum_decimals(m.neto_aprobado_mp for m in movs_sin_venta)
+    neto_fin_sin_venta = _sum_decimals(m.neto_financiero_total_mp for m in movs_sin_venta)
 
     # --- Métricas y listas de fondos/payouts ---
     neto_ap_fondos = _sum_decimals(r.neto_aprobado_mp for r in fondos_r)
@@ -902,7 +991,15 @@ def diagnosticar_bloque_b(
             interpretacion=interpretacion,
             accion_recomendada=accion,
         ))
-    coherencia_operativa = sum(x.cantidad_grupos for x in resumen_operativo) == len(dentro_periodo)
+    coherencia_detalle = all(m.coherencia_grupo for m in movs_sin_venta)
+    coherencia_operativa = (
+        sum(x.cantidad_grupos for x in resumen_operativo) == len(dentro_periodo)
+        and _sum_decimals(x.neto_aprobado_bruto for x in resumen_operativo)
+            == _sum_decimals(m.neto_aprobado_mp for m in dentro_periodo)
+        and _sum_decimals(x.neto_financiero_total for x in resumen_operativo)
+            == _sum_decimals(m.neto_financiero_total_mp for m in dentro_periodo)
+        and all(m.coherencia_grupo for m in dentro_periodo)
+    )
 
     return DiagnosticoBloqueB(
         resumen=resumen,
@@ -915,6 +1012,7 @@ def diagnosticar_bloque_b(
         coherencia_mp_sin_venta=coherencia_mp,
         resumen_operativo_dentro_periodo=tuple(resumen_operativo),
         coherencia_operativa_dentro_periodo=coherencia_operativa,
+        coherencia_detalle_importes_mp_sin_venta=coherencia_detalle,
         cantidad_movimientos_fondos=len(fondos_r),
         neto_aprobado_mp_fondos=neto_ap_fondos,
         neto_financiero_total_mp_fondos=neto_fin_fondos,

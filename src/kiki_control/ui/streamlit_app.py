@@ -637,10 +637,16 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
     kpis[0].metric("Sin fecha de origen", resumen_cat["SIN_FECHA_DE_ORIGEN"].cantidad_grupos)
     kpis[1].metric("Con ID de orden", sum(r.con_id_orden for r in diag_bloque_b.resumen_mp_sin_venta))
     kpis[2].metric("Sin ID de orden", sum(r.sin_id_orden for r in diag_bloque_b.resumen_mp_sin_venta))
-    kpis[3].metric("Neto financiero total", formato_importe(diag_bloque_b.neto_financiero_total_mp_sin_venta))
+    kpis[3].metric(
+        "Neto financiero total",
+        (formato_importe(diag_bloque_b.neto_financiero_total_mp_sin_venta)
+         if diag_bloque_b.coherencia_detalle_importes_mp_sin_venta else "No válido"),
+    )
     st.dataframe(filas_resumen_mp_sin_venta(diag_bloque_b), use_container_width=True, hide_index=True)
     if not diag_bloque_b.coherencia_mp_sin_venta:
         st.error("La suma del resumen por categorías no coincide con el detalle MP sin venta ML.")
+    if not diag_bloque_b.coherencia_detalle_importes_mp_sin_venta:
+        st.error("Inconsistencia monetaria: uno o más agregados no coinciden con los movimientos visibles. Los KPI monetarios no son válidos.")
 
     st.subheader("Composición de movimientos dentro del período ML sin venta encontrada")
     pagos_puros = next(
@@ -651,7 +657,11 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
     pk = st.columns(5)
     pk[0].metric("Cantidad de grupos", pagos_puros.cantidad_grupos)
     pk[1].metric("Neto aprobado bruto", formato_importe(pagos_puros.neto_aprobado_bruto))
-    pk[2].metric("Neto financiero total", formato_importe(pagos_puros.neto_financiero_total))
+    pk[2].metric(
+        "Neto financiero total",
+        formato_importe(pagos_puros.neto_financiero_total)
+        if diag_bloque_b.coherencia_operativa_dentro_periodo else "No válido",
+    )
     pk[3].metric("Con ID de orden", pagos_puros.con_id_orden)
     pk[4].metric("Sin ID de orden", pagos_puros.sin_id_orden)
     st.dataframe(filas_resumen_operativo_dentro_periodo(diag_bloque_b), use_container_width=True, hide_index=True)
@@ -701,6 +711,8 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
         elegido = st.selectbox("Seleccionar grupo para ver detalle", [m.id_grupo for m in movs_visibles]) if movs_visibles else None
         if elegido:
             grupo = next(m for m in movs_visibles if m.id_grupo == elegido)
+            if not grupo.coherencia_grupo:
+                st.error(grupo.advertencia_inconsistencia)
             st.table({"Clasificación": grupo.categoria_principal.value, "Justificación": grupo.motivo_sin_venta,
                       "Cobertura ML utilizada": f"{getattr(st.session_state.get('cobertura_consolidada'), 'periodo_ventas_ml', 'Cobertura de la sesión')}",
                       "Acción recomendada": grupo.accion_recomendada})
