@@ -292,6 +292,8 @@ def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagno
         _escribir_resumen_mp_sin_ml(wb.create_sheet("Bloque B — Resumen MP sin ML"), diag_bloque_b)
         _escribir_mp_sin_venta_bloque_b(wb.create_sheet("Bloque B — MP sin venta ML"), diag_bloque_b)
         _escribir_fondos_bloque_b(wb.create_sheet("Bloque B — Fondos y payouts"), diag_bloque_b)
+        _escribir_candidatos_venta_faltante(wb.create_sheet("Candidatos venta faltante"), diag_bloque_b)
+        _escribir_pagos_inconsistentes(wb.create_sheet("Pagos MP inconsistentes"), diag_bloque_b)
     _escribir_diccionario_consolidado(wb.create_sheet("Diccionario de cálculos"))
     salida = BytesIO(); wb.save(salida); return salida.getvalue()
 
@@ -457,6 +459,8 @@ def generar_bloque_b_mp_sin_venta_excel(diag: DiagnosticoBloqueB) -> bytes:
     ws.title = "MP sin venta ML"
     _escribir_mp_sin_venta_bloque_b(ws, diag)
     _escribir_resumen_mp_sin_ml(wb.create_sheet("Resumen MP sin ML"), diag)
+    _escribir_candidatos_venta_faltante(wb.create_sheet("Candidatos venta faltante"), diag)
+    _escribir_pagos_inconsistentes(wb.create_sheet("Pagos MP inconsistentes"), diag)
     salida = BytesIO()
     wb.save(salida)
     return salida.getvalue()
@@ -571,6 +575,25 @@ def _escribir_resumen_mp_sin_ml(ws: Worksheet, diag: DiagnosticoBloqueB) -> None
     ws.append(["VALIDACIÓN", sum(r.cantidad_grupos for r in diag.resumen_mp_sin_venta), "", "", "", "", "",
                "Coherente" if diag.coherencia_mp_sin_venta else "INCONSISTENTE"])
     _formatear_tabla(ws, moneda_columnas={4, 5}, wrap_columnas={8}, freeze=True)
+    pagos = diag.diagnostico_pagos_aprobados
+    if pagos is not None:
+        ws.append([])
+        ws.append(["Diagnóstico de pagos aprobados puros", "Valor"])
+        for etiqueta, valor in (
+            ("Pagos puros detectados", len(pagos.detectados)),
+            ("Candidatos válidos", len(pagos.candidatos_validos)),
+            ("Pagos inconsistentes", len(pagos.inconsistentes)),
+            ("No candidatos por importe no positivo", len(pagos.no_candidatos_importe_no_positivo)),
+            ("Importe válido", pagos.importe_valido_candidatos),
+            ("Detectados con ID", pagos.detectados_con_id),
+            ("Detectados sin ID", pagos.detectados_sin_id),
+            ("Candidatos con ID", pagos.candidatos_con_id),
+            ("Candidatos sin ID", pagos.candidatos_sin_id),
+            ("Conclusión ejecutiva", pagos.conclusion_ejecutiva),
+        ):
+            ws.append([etiqueta, valor])
+            if isinstance(valor, Decimal):
+                ws.cell(ws.max_row, 2).number_format = _FORMATO_MONEDA_ARS
     ws.append([])
     ws.append(["Composición de movimientos dentro del período ML sin venta encontrada"])
     ws.append(["Clasificación operativa", "Subclasificación financiera", "Cantidad de grupos",
@@ -611,6 +634,41 @@ def _escribir_resumen_mp_sin_ml(ws: Worksheet, diag: DiagnosticoBloqueB) -> None
             ws.append([etiqueta, _decimal_o_vacio(valor) if isinstance(valor, Decimal) else valor])
             if isinstance(valor, Decimal):
                 ws.cell(ws.max_row, 2).number_format = _FORMATO_MONEDA_ARS
+
+
+def _escribir_candidatos_venta_faltante(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
+    columnas = ("ID de grupo", "ID movimiento MP", "ID de orden", "Fila original MP",
+                "Fecha de origen", "Fecha de aprobación", "Fecha de liquidación",
+                "Importe crudo", "Importe normalizado", "Neto reconstruido",
+                "Estado de correspondencia", "Estado monetario",
+                "Motivo de posible venta faltante", "Acción recomendada")
+    ws.append(list(columnas))
+    pagos = diag.diagnostico_pagos_aprobados
+    for grupo in (() if pagos is None else pagos.candidatos_validos):
+        for mov in grupo.movimientos_asociados:
+            ws.append([_texto_seguro(grupo.id_grupo), _texto_seguro(mov.id_movimiento_mp),
+                       _texto_seguro(mov.id_orden), mov.fila_origen, _texto_seguro(mov.fecha_origen),
+                       _texto_seguro(mov.fecha_aprobacion), _texto_seguro(mov.fecha_liquidacion),
+                       _texto_seguro(mov.importe_crudo), _decimal_o_vacio(mov.monto_neto_impactado),
+                       _decimal_o_vacio(grupo.suma_reconstruida_movimientos_mp),
+                       _texto_seguro(mov.estado_correspondencia_fila),
+                       _texto_seguro(grupo.estado_coherencia.value),
+                       _texto_seguro(grupo.interpretacion), _texto_seguro(grupo.accion_recomendada)])
+    _formatear_tabla(ws, moneda_columnas={9, 10}, wrap_columnas={13, 14}, freeze=True)
+
+
+def _escribir_pagos_inconsistentes(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:
+    columnas = ("Fila original", "ID movimiento", "ID orden", "Importe",
+                "Motivo de exclusión", "Estado", "Acción recomendada")
+    ws.append(list(columnas))
+    pagos = diag.diagnostico_pagos_aprobados
+    for grupo in (() if pagos is None else pagos.inconsistentes):
+        for mov in grupo.movimientos_asociados:
+            ws.append([mov.fila_origen, _texto_seguro(mov.id_movimiento_mp),
+                       _texto_seguro(mov.id_orden), _decimal_o_vacio(mov.monto_neto_impactado),
+                       _texto_seguro(grupo.motivo_coherencia), _texto_seguro(grupo.estado_coherencia.value),
+                       _texto_seguro("Revisar la semántica del movimiento en Mercado Pago antes de considerarlo candidato.")])
+    _formatear_tabla(ws, moneda_columnas={4}, wrap_columnas={5, 7}, freeze=True)
 
 
 def _escribir_fondos_bloque_b(ws: Worksheet, diag: DiagnosticoBloqueB) -> None:

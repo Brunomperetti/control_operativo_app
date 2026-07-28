@@ -143,7 +143,7 @@ class EnriquecimientoMovimientoMpPorFila:
     id_movimiento: str
     id_orden: str | None
     tipo_operacion: str
-    monto_neto_impactado: Decimal
+    monto_neto_impactado: Decimal | None
     tratamiento: TratamientoNetoComparable
     fecha_origen: date | datetime | None
     fecha_aprobacion: date | datetime | None
@@ -277,6 +277,37 @@ class CalidadMonetariaMpSinVenta:
 
 
 @dataclass(frozen=True)
+class DiagnosticoPagosAprobadosSinVenta:
+    """Universos separados de pagos puros detectados, válidos e inconsistentes."""
+
+    detectados: tuple[MovimientoMpSinVentaML, ...]
+    candidatos_validos: tuple[MovimientoMpSinVentaML, ...]
+    inconsistentes: tuple[MovimientoMpSinVentaML, ...]
+    no_candidatos_importe_no_positivo: tuple[MovimientoMpSinVentaML, ...]
+    importe_valido_candidatos: Decimal
+    detectados_con_id: int
+    detectados_sin_id: int
+    candidatos_con_id: int
+    candidatos_sin_id: int
+
+    @property
+    def conclusion_ejecutiva(self) -> str:
+        from kiki_control.presentation.formatters import formato_pesos_argentino
+
+        return (
+            f"Se detectaron {len(self.detectados)} grupos con movimientos exclusivamente "
+            "clasificados como pagos aprobados dentro del período ML. De ellos, "
+            f"{len(self.candidatos_validos)} cumplen los controles de correspondencia y "
+            "coherencia monetaria y se consideran candidatos a venta ML no encontrada, "
+            f"por un importe total de {formato_pesos_argentino(self.importe_valido_candidatos)}. "
+            + (f"Los {len(self.inconsistentes)} casos restantes fueron excluidos por inconsistencias monetarias."
+               if not self.no_candidatos_importe_no_positivo else
+               f"Se excluyeron {len(self.inconsistentes)} casos por inconsistencias monetarias y "
+               f"{len(self.no_candidatos_importe_no_positivo)} casos coherentes por importe no positivo.")
+        )
+
+
+@dataclass(frozen=True)
 class ResumenBloqueB:
     """Resumen compacto de Bloque B para presentación."""
 
@@ -325,6 +356,7 @@ class DiagnosticoBloqueB:
     composicion_neto_financiero_coherente: bool = True
     existen_grupos_monetarios_inconsistentes: bool = False
     calidad_monetaria_mp_sin_venta: CalidadMonetariaMpSinVenta | None = None
+    diagnostico_pagos_aprobados: DiagnosticoPagosAprobadosSinVenta | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -678,7 +710,8 @@ def _construir_detalle_movimientos(
             estado = "CORRESPONDENCIA_OK"
             if e.fila_origen != fila:
                 estado = "ESTADO_DATO_INCONSISTENTE: clave y fila original no coinciden"
-            if e.tipo_operacion == "PAGO_APROBADO" and e.monto_neto_impactado < _ZERO:
+            if (e.tipo_operacion == "PAGO_APROBADO" and e.monto_neto_impactado is not None
+                    and e.monto_neto_impactado < _ZERO):
                 estado = "ESTADO_DATO_INCONSISTENTE: PAGO_APROBADO negativo"
             detalles.append(DetalleMovimientoMp(
                 e.id_movimiento, e.id_orden or "—", e.tipo_operacion, e.tipo_operacion,
@@ -1008,7 +1041,9 @@ def diagnosticar_bloque_b(
             combinacion_resumida=combinacion_resumida(tipos_grupo),
             interpretacion=interpretacion if dentro_periodo else _motivo_categoria(categoria),
             posible_venta_faltante=(dentro_periodo and coherencia_grupo
-                                    and subclasificacion == SubclasificacionFinanciera.PAGO_APROBADO),
+                                    and subclasificacion == SubclasificacionFinanciera.PAGO_APROBADO
+                                    and neto_financiero_detalle is not None
+                                    and neto_financiero_detalle > _ZERO),
             suma_reconstruida_movimientos_mp=neto_financiero_detalle,
             neto_financiero_agregado_original_mp=r.neto_financiero_total_mp,
             diferencia_agregado_detalle_mp=diferencia_detalle,
@@ -1141,6 +1176,35 @@ def diagnosticar_bloque_b(
         cantidad_grupos_excluidos=len(grupos_excluidos),
         cantidad_grupos_sin_reconstruccion=sum(v is None for v in reconstruidos_excluidos),
     )
+    pagos_detectados = tuple(
+        m for m in dentro_periodo
+        if m.subclasificacion_financiera == SubclasificacionFinanciera.PAGO_APROBADO
+    )
+    candidatos = tuple(m for m in pagos_detectados if m.posible_venta_faltante)
+    inconsistentes = tuple(
+        m for m in pagos_detectados
+        if m.estado_coherencia in {EstadoCoherenciaGrupo.INCOHERENTE,
+                                  EstadoCoherenciaGrupo.NO_VERIFICABLE}
+        or any(d.estado_correspondencia_fila != "CORRESPONDENCIA_OK"
+               for d in m.movimientos_asociados)
+    )
+    no_positivos = tuple(
+        m for m in pagos_detectados
+        if m not in candidatos and m not in inconsistentes
+    )
+    diagnostico_pagos = DiagnosticoPagosAprobadosSinVenta(
+        detectados=pagos_detectados,
+        candidatos_validos=candidatos,
+        inconsistentes=inconsistentes,
+        no_candidatos_importe_no_positivo=no_positivos,
+        importe_valido_candidatos=_sum_decimals(
+            m.suma_reconstruida_movimientos_mp for m in candidatos
+        ),
+        detectados_con_id=sum(m.tiene_id_orden_utilizable for m in pagos_detectados),
+        detectados_sin_id=sum(not m.tiene_id_orden_utilizable for m in pagos_detectados),
+        candidatos_con_id=sum(m.tiene_id_orden_utilizable for m in candidatos),
+        candidatos_sin_id=sum(not m.tiene_id_orden_utilizable for m in candidatos),
+    )
 
     return DiagnosticoBloqueB(
         resumen=resumen,
@@ -1167,4 +1231,5 @@ def diagnosticar_bloque_b(
         composicion_neto_financiero_coherente=composicion_financiero,
         existen_grupos_monetarios_inconsistentes=bool(grupos_excluidos),
         calidad_monetaria_mp_sin_venta=calidad,
+        diagnostico_pagos_aprobados=diagnostico_pagos,
     )

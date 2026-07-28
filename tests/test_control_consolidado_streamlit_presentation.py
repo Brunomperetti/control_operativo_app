@@ -111,6 +111,10 @@ def test_bloque_d_renderiza_siete_generales_y_cuatro_operativos_sin_descartes(mo
         item("RECLAMO_O_DISPUTA", "NO_ES_VENTA", 0, "0"),
         item("DEVOLUCION", "NO_ES_VENTA", 0, "0"),
         item("OTRO_MOVIMIENTO", "NO_ES_VENTA", 1, "5"),
+    ), diagnostico_pagos_aprobados=SimpleNamespace(
+        detectados=tuple(range(22)), candidatos_validos=tuple(range(19)),
+        inconsistentes=tuple(range(3)), importe_valido_candidatos=Decimal("1000"),
+        no_candidatos_importe_no_positivo=(),
     ))
     renderizados = []
 
@@ -130,7 +134,7 @@ def test_bloque_d_renderiza_siete_generales_y_cuatro_operativos_sin_descartes(mo
         ), start=1)
     ]
     _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", generales, (3, 3, 1))
-    _mostrar_kpis_en_filas("Diagnóstico operativo MP sin venta dentro del período", kpis, (4,))
+    _mostrar_kpis_en_filas("Diagnóstico operativo MP sin venta dentro del período", kpis, (3, 3))
 
     assert [rotulo for rotulo, _ in renderizados[:7]] == [
         "Resultados completos",
@@ -142,14 +146,18 @@ def test_bloque_d_renderiza_siete_generales_y_cuatro_operativos_sin_descartes(mo
         "Duplicados o ambiguos",
     ]
     assert [rotulo for rotulo, _ in renderizados[7:]] == [
-        "Pagos aprobados sin venta ML",
+        "Pagos aprobados puros detectados",
+        "Candidatos válidos a venta faltante",
+        "Pagos aprobados inconsistentes",
         "Grupos financieros mixtos",
         "Componentes de envío",
         "Otros movimientos no asociados a venta",
     ]
-    assert len(renderizados) == len(generales) + len(kpis) == 11
+    assert len(renderizados) == len(generales) + len(kpis) == 13
     assert dict(renderizados[7:]) == {
-        "Pagos aprobados sin venta ML": "22 · $ 1.000,00",
+        "Pagos aprobados puros detectados": "22",
+        "Candidatos válidos a venta faltante": "19 · $ 1.000,00",
+        "Pagos aprobados inconsistentes": "3",
         "Grupos financieros mixtos": "74 · $ 2.000,00",
         "Componentes de envío": "71 · $ 300,00",
         "Otros movimientos no asociados a venta": "1 · $ 5,00",
