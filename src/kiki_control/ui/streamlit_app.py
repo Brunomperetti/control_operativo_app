@@ -43,7 +43,13 @@ from kiki_control.presentation.reconciliation_view import (
 )
 from kiki_control.linking.commercial import vincular_ventas_oficiales_con_eccomapp
 from kiki_control.linking.ml_eccomapp_diagnostic import diagnosticar_ml_eccomapp
-from kiki_control.presentation.ml_eccomapp_view import conclusion_ejecutiva_ml_eccomapp, filas_casos_ml_eccomapp, resumen_estados_ml_eccomapp
+from kiki_control.presentation.ml_eccomapp_view import (
+    conclusion_ejecutiva_ml_eccomapp,
+    etiqueta_aptitud_ml_eccomapp,
+    etiqueta_estado_ml_eccomapp,
+    filas_casos_ml_eccomapp,
+    resumen_estados_ml_eccomapp,
+)
 from kiki_control.linking.control_financiero import consolidar_control_financiero
 from kiki_control.presentation.control_consolidado_view import (
     TITULO_BLOQUE_A,
@@ -849,30 +855,38 @@ def _mostrar_cruce_ml_eccomapp(diag) -> None:
     st.info(conclusion_ejecutiva_ml_eccomapp(diag))
     st.table(resumen_estados_ml_eccomapp(diag))
     c1, c2, c3, c4, c5 = st.columns(5)
-    estados = c1.multiselect("Estado de vinculación", sorted({c.estado.value for c in diag.casos}), key="ml_ec_estado")
-    aptitudes = c2.multiselect("Aptitud para utilidad", sorted({c.aptitud_utilidad.value for c in diag.casos}), key="ml_ec_aptitud")
+    estados_disponibles = {etiqueta_estado_ml_eccomapp(c.estado): c.estado for c in diag.casos}
+    aptitudes_disponibles = {etiqueta_aptitud_ml_eccomapp(c.aptitud_utilidad): c.aptitud_utilidad for c in diag.casos}
+    estados_visibles = c1.multiselect("Estado de vinculación", sorted(estados_disponibles), key="ml_ec_estado")
+    aptitudes_visibles = c2.multiselect("Aptitud para utilidad", sorted(aptitudes_disponibles), key="ml_ec_aptitud")
+    estados = {estados_disponibles[e] for e in estados_visibles}
+    aptitudes = {aptitudes_disponibles[a] for a in aptitudes_visibles}
     buscar = c3.text_input("Buscar por ID", key="ml_ec_busqueda").strip().lower()
     costo = c4.selectbox("Costo", ("Todos", "Con costo", "Sin costo"), key="ml_ec_con_costo")
     prioritarios = c5.checkbox("Solo casos prioritarios", key="ml_ec_prioritarios")
     f1, f2 = st.columns(2)
     fecha_desde = f1.date_input("Fecha desde", value=None, key="ml_ec_fecha_desde")
     fecha_hasta = f2.date_input("Fecha hasta", value=None, key="ml_ec_fecha_hasta")
-    casos = tuple(c for c in diag.casos if (not estados or c.estado.value in estados) and (not aptitudes or c.aptitud_utilidad.value in aptitudes)
+    casos = tuple(c for c in diag.casos if (not estados or c.estado in estados) and (not aptitudes or c.aptitud_utilidad in aptitudes)
                   and (not buscar or buscar in " ".join((c.id_grupo or "", *c.ids_venta_ml, *c.ids_orden_eccomapp)).lower())
                   and (costo == "Todos" or (costo == "Con costo") == (c.costo_eccomapp is not None)) and (not prioritarios or c.requiere_revision)
                   and (fecha_desde is None or (c.fecha is not None and c.fecha.date() >= fecha_desde))
                   and (fecha_hasta is None or (c.fecha is not None and c.fecha.date() <= fecha_hasta)))
-    grupos = (("Ventas ML sin Eccomapp", tuple(c for c in casos if c.estado.value == "SOLO_ML")),
-              ("Operaciones Eccomapp sin ML", tuple(c for c in casos if c.estado.value == "SOLO_ECCOMAPP")),
-              ("Coincidencias agrupadas o ambiguas", tuple(c for c in casos if c.estado.value not in {"SOLO_ML", "SOLO_ECCOMAPP"})))
-    for titulo, subset in grupos:
+    grupos = (("Ventas de Mercado Libre sin operación en Eccomapp", tuple(c for c in casos if c.estado.value == "SOLO_ML"), "No se encontraron ventas de Mercado Libre sin operación en Eccomapp."),
+              ("Operaciones Eccomapp sin venta en Mercado Libre", tuple(c for c in casos if c.estado.value == "SOLO_ECCOMAPP"), "No se encontraron operaciones Eccomapp sin Mercado Libre."),
+              ("Coincidencias agrupadas por carrito u orden", tuple(c for c in casos if c.estado.value not in {"SOLO_ML", "SOLO_ECCOMAPP"}), "No se encontraron coincidencias ni casos de identificación para los filtros seleccionados."))
+    for titulo, subset, mensaje_vacio in grupos:
         st.markdown(f"**{titulo}**")
-        st.dataframe(filas_casos_ml_eccomapp(subset), use_container_width=True, hide_index=True)
+        if subset:
+            st.dataframe(filas_casos_ml_eccomapp(subset), use_container_width=True, hide_index=True)
+        else:
+            st.info(mensaje_vacio)
     if casos:
         selected = st.selectbox("Seleccionar operación del cruce", [c.clave for c in casos], key="ml_ec_detalle")
         case = next(c for c in casos if c.clave == selected)
+        st.markdown("**Detalle de la operación seleccionada**")
         st.table(filas_casos_ml_eccomapp((case,)))
-        with st.expander("Filas originales de ambas fuentes", expanded=False):
+        with st.expander("Filas originales utilizadas en el cruce", expanded=False):
             st.write({"ML": case.filas_origen_ml if hasattr(case, "filas_origen_ml") else tuple(v.fila_origen for v in case.ventas_ml), "Eccomapp": tuple(o.numero_fila_origen for o in case.operaciones_eccomapp)})
 
 
