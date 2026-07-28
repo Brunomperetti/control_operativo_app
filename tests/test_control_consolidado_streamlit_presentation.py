@@ -82,10 +82,10 @@ def test_kpis_comparables_utilidad_parcial_y_mp_sin_ml():
     assert b["Cobertura de utilidad"] == "1 de 3"
 
 
-def test_subseccion_operativa_renderiza_los_cuatro_kpis_desde_el_resumen(monkeypatch):
+def test_bloque_d_renderiza_siete_generales_y_cuatro_operativos_sin_descartes(monkeypatch):
     import streamlit as st
 
-    from kiki_control.presentation.control_consolidado_view import kpis_diagnostico_operativo_mp
+    from kiki_control.presentation.control_consolidado_view import Kpi, kpis_diagnostico_operativo_mp
     from kiki_control.ui.streamlit_app import _mostrar_kpis_en_filas
 
     def item(subclasificacion, prioridad, cantidad, neto):
@@ -114,15 +114,33 @@ def test_subseccion_operativa_renderiza_los_cuatro_kpis_desde_el_resumen(monkeyp
     monkeypatch.setattr(st, "columns", lambda cantidad: [Columna() for _ in range(cantidad)])
 
     kpis = kpis_diagnostico_operativo_mp(diag)
+    generales = [
+        Kpi(nombre, str(indice), "")
+        for indice, nombre in enumerate((
+            "Resultados completos", "Requieren revisión", "Venta oficial sin Total (ARS)",
+            "Sin costo", "Sin MP", "Sin venta oficial", "Duplicados o ambiguos",
+        ), start=1)
+    ]
+    _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", generales, (3, 3, 1))
     _mostrar_kpis_en_filas("Diagnóstico operativo MP sin venta dentro del período", kpis, (4,))
 
-    assert [rotulo for rotulo, _ in renderizados] == [
+    assert [rotulo for rotulo, _ in renderizados[:7]] == [
+        "Resultados completos",
+        "Requieren revisión",
+        "Venta oficial sin Total (ARS)",
+        "Sin costo",
+        "Sin MP",
+        "Sin venta oficial",
+        "Duplicados o ambiguos",
+    ]
+    assert [rotulo for rotulo, _ in renderizados[7:]] == [
         "Pagos aprobados sin venta ML",
         "Grupos financieros mixtos",
         "Componentes de envío",
         "Otros movimientos no asociados a venta",
     ]
-    assert dict(renderizados) == {
+    assert len(renderizados) == len(generales) + len(kpis) == 11
+    assert dict(renderizados[7:]) == {
         "Pagos aprobados sin venta ML": "22 · $ 1.000,00",
         "Grupos financieros mixtos": "74 · $ 2.000,00",
         "Componentes de envío": "71 · $ 300,00",

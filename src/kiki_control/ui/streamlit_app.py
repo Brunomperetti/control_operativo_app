@@ -805,7 +805,7 @@ def _mostrar_resultados() -> None:
             st.warning(mensaje_conciliacion_bloque_a(reporte, diagnostico))
         _mostrar_bloque_b(reporte, diag_bloque_b)
         _mostrar_kpis_en_filas("Bloque C — Costos y utilidad", bloques["Bloque C — Costos y utilidad"], (3,))
-        _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", bloques["Bloque D — Calidad y pendientes"], (3, 3))
+        _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", bloques["Bloque D — Calidad y pendientes"], (3, 3, 1))
         _mostrar_kpis_en_filas(
             "Diagnóstico operativo MP sin venta dentro del período",
             bloques["Diagnóstico operativo MP sin venta dentro del período"],

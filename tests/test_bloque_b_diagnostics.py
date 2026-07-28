@@ -729,6 +729,8 @@ def test_resumen_operativo_posible_venta_faltante_filtros_bloque_d_y_excel():
     assert [m.id_grupo for m in filtrar_mp_sin_venta(diag.movimientos_mp_sin_venta, filtro_combinacion="PAGO + DEVOLUCIÓN")] == ["mixto"]
     bloques = kpis_consolidados(_rep(casos), diag)
     bloque_d = {k.nombre: k for k in bloques["Bloque D — Calidad y pendientes"]}
+    assert len(bloque_d) == 7
+    assert "Duplicados o ambiguos" in bloque_d
     assert not ({"Pagos aprobados sin venta ML", "Grupos financieros mixtos", "Componentes de envío", "Otros movimientos no asociados a venta"} & bloque_d.keys())
     operativos = {k.nombre: k for k in bloques["Diagnóstico operativo MP sin venta dentro del período"]}
     assert {"Pagos aprobados sin venta ML", "Grupos financieros mixtos", "Componentes de envío", "Otros movimientos no asociados a venta"} == operativos.keys()

@@ -283,6 +283,7 @@ def kpis_consolidados(
             Kpi("Sin costo", str(reporte.total_sin_costo_producto), "Resultados sin costo de producto Eccomapp encontrado."),
             Kpi("Sin MP", str(reporte.total_sin_movimiento_financiero), "Resultados sin movimiento Mercado Pago encontrado."),
             Kpi("Sin venta oficial", str(reporte.total_sin_venta_oficial), "Resultados sin venta oficial ML encontrada."),
+            Kpi("Duplicados o ambiguos", str(reporte.total_duplicada_o_ambigua), "Resultados con ambigüedad o duplicados según reglas de dominio."),
         ],
     }
     if diag_bloque_b is not None:
