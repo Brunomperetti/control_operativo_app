@@ -249,12 +249,15 @@ def alcance_completo_consolidado(reporte: ReporteControlConsolidado, diagnostico
     )
 
 
-def kpis_consolidados(reporte: ReporteControlConsolidado) -> dict[str, list[Kpi]]:
+def kpis_consolidados(
+    reporte: ReporteControlConsolidado,
+    diag_bloque_b: DiagnosticoBloqueB | None = None,
+) -> dict[str, list[Kpi]]:
     resultados = reporte.resultados
     comparables = [r for r in resultados if r.total_informado_ml is not None and r.neto_financiero_total_mp is not None]
     utilidad_calc = [r for r in resultados if r.utilidad_preliminar_control is not None]
     ayuda_limite = " Limitación: control operativo preliminar, no es resultado contable o fiscal definitivo."
-    return {
+    bloques = {
         "Bloque A — Importes informados por ML oficial": [
             Kpi("Ventas ML oficial", formato_importe(_sumar(r.monto_venta_ml for r in resultados)), "Fuente: Mercado Libre oficial. Campo interno: monto_venta_ml. Columna externa: Ingresos por productos (ARS). Universo: resultados consolidados con venta oficial." + ayuda_limite),
             Kpi("Cargos e impuestos ML", formato_importe(_sumar(r.cargo_venta_impuestos_ml for r in resultados)), "Fuente: Mercado Libre oficial. Campo interno: cargo_venta_impuestos_ml. Columna externa: Cargo por venta e impuestos (ARS). Universo: resultados con venta oficial." + ayuda_limite),
@@ -283,6 +286,24 @@ def kpis_consolidados(reporte: ReporteControlConsolidado) -> dict[str, list[Kpi]
             Kpi("Duplicados o ambiguos", str(reporte.total_duplicada_o_ambigua), "Resultados con ambigüedad o duplicados según reglas de dominio."),
         ],
     }
+    if diag_bloque_b is not None:
+        nombres = {
+            "PAGO_APROBADO": ("Pagos aprobados sin venta ML", "Revisar prioritariamente la venta oficial y su vinculación."),
+            "MULTIPLES_TIPOS": ("Grupos financieros mixtos", "Revisar el ciclo financiero completo."),
+            "ENVIO": ("Componentes de envío", "Buscar el pago principal; no tratar como venta faltante."),
+        }
+        filas = bloques["Bloque D — Calidad y pendientes"]
+        for r in diag_bloque_b.resumen_operativo_dentro_periodo:
+            if r.subclasificacion_financiera.value in nombres:
+                nombre, accion = nombres[r.subclasificacion_financiera.value]
+                filas.append(Kpi(nombre, f"{r.cantidad_grupos} · {formato_importe(r.neto_financiero_total)}", accion))
+        no_ventas = [r for r in diag_bloque_b.resumen_operativo_dentro_periodo if r.prioridad_operativa.value == "NO_ES_VENTA"]
+        filas.append(Kpi(
+            "Otros movimientos no asociados a venta",
+            f"{sum(r.cantidad_grupos for r in no_ventas)} · {formato_importe(_sumar(r.neto_financiero_total for r in no_ventas))}",
+            "No presentar cashback, promociones, reclamos o devoluciones aisladas como ventas omitidas.",
+        ))
+    return bloques
 
 
 def cobertura_tres_fuentes(ventas_ml: Iterable[Any], operaciones: Iterable[Any], movimientos: Iterable[Any]) -> tuple[CoberturaFuente, ...]:
@@ -616,6 +637,8 @@ def filas_mp_sin_venta(movs: Iterable[MovimientoMpSinVentaML]) -> list[dict[str,
             "ID de grupo u orden": m.id_grupo,
             "IDs de movimiento MP": ", ".join(m.ids_movimiento_mp) if m.ids_movimiento_mp else "—",
             "Subclasificación financiera": m.subclasificacion_financiera.value,
+            "Prioridad operativa": m.prioridad_operativa.value,
+            "Combinación resumida": m.combinacion_resumida.value,
             "Tipos de movimiento": ", ".join(m.tipos_movimiento),
             "Tiene ID de orden": "Sí" if m.tiene_id_orden_utilizable else "No",
             "Fecha de origen desde": m.fecha_min_origen,
@@ -626,7 +649,8 @@ def filas_mp_sin_venta(movs: Iterable[MovimientoMpSinVentaML]) -> list[dict[str,
             "Neto financiero total MP": formato_importe(m.neto_financiero_total_mp),
             "Cantidad de movimientos": m.cantidad_movimientos,
             "Categoría temporal principal": m.categoria_principal.value,
-            "Motivo visible": m.motivo_sin_venta,
+            "Interpretación": m.interpretacion,
+            "Posible venta faltante": "Sí" if m.posible_venta_faltante else "No",
             "Acción recomendada": m.accion_recomendada,
             "Filas de origen MP": ", ".join(map(str, m.filas_origen_mp)),
         }
@@ -642,6 +666,9 @@ def filtrar_mp_sin_venta(
     filtro_subclasificacion: str = "",
     filtro_id_orden: str = "",
     solo_prioritarios: bool = False,
+    filtro_prioridad: str = "",
+    filtro_combinacion: str = "",
+    solo_pagos_aprobados_puros: bool = False,
 ) -> tuple[MovimientoMpSinVentaML, ...]:
     """Filtra movimientos MP sin venta ML por ID, tipo y categoría temporal."""
     q_id = (busqueda_id or "").strip().lower()
@@ -661,10 +688,13 @@ def filtrar_mp_sin_venta(
             continue
         if filtro_id_orden == "Sin ID" and m.tiene_id_orden_utilizable:
             continue
-        if solo_prioritarios and not (
-            m.categoria_principal.value in {"DENTRO_DEL_PERIODO_ML_SIN_VENTA", "SIN_FECHA_DE_ORIGEN"}
-            or m.subclasificacion_financiera.value == "OTRO_MOVIMIENTO"
-        ):
+        if filtro_prioridad and filtro_prioridad != m.prioridad_operativa.value:
+            continue
+        if filtro_combinacion and filtro_combinacion != m.combinacion_resumida.value:
+            continue
+        if solo_pagos_aprobados_puros and not m.posible_venta_faltante:
+            continue
+        if solo_prioritarios and m.prioridad_operativa.value != "PRIORIDAD_ALTA":
             continue
         result.append(m)
     return tuple(result)
@@ -681,6 +711,22 @@ def filas_resumen_mp_sin_venta(diag: DiagnosticoBloqueB) -> list[dict[str, Any]]
         "Sin ID de orden": r.sin_id_orden,
         "Acción recomendada": r.accion_recomendada,
     } for r in diag.resumen_mp_sin_venta]
+
+
+def filas_resumen_operativo_dentro_periodo(diag: DiagnosticoBloqueB) -> list[dict[str, Any]]:
+    """Composición excluyente del universo dentro del período ML."""
+    return [{
+        "Clasificación operativa": r.prioridad_operativa.value,
+        "Subclasificación financiera": r.subclasificacion_financiera.value,
+        "Cantidad de grupos": r.cantidad_grupos,
+        "Cantidad de movimientos": r.cantidad_movimientos,
+        "Neto aprobado bruto": formato_importe(r.neto_aprobado_bruto),
+        "Neto financiero total": formato_importe(r.neto_financiero_total),
+        "Con ID de orden": r.con_id_orden,
+        "Sin ID de orden": r.sin_id_orden,
+        "Interpretación": r.interpretacion,
+        "Acción recomendada": r.accion_recomendada,
+    } for r in diag.resumen_operativo_dentro_periodo]
 
 
 def filas_movimientos_diferencia(grupo: GrupoConDiferencia) -> list[dict[str, Any]]:

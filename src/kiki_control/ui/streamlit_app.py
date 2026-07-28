@@ -64,6 +64,7 @@ from kiki_control.presentation.control_consolidado_view import (
     filas_grupos_involucrados,
     filas_mp_sin_venta,
     filas_resumen_mp_sin_venta,
+    filas_resumen_operativo_dentro_periodo,
     filas_movimientos_bloque_b,
     filas_movimientos_diferencia,
     filas_resumen_revisiones,
@@ -641,6 +642,22 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
     if not diag_bloque_b.coherencia_mp_sin_venta:
         st.error("La suma del resumen por categorías no coincide con el detalle MP sin venta ML.")
 
+    st.subheader("Composición de movimientos dentro del período ML sin venta encontrada")
+    pagos_puros = next(
+        r for r in diag_bloque_b.resumen_operativo_dentro_periodo
+        if r.subclasificacion_financiera.value == "PAGO_APROBADO"
+    )
+    st.markdown("**Pagos aprobados sin venta ML encontrada**")
+    pk = st.columns(5)
+    pk[0].metric("Cantidad de grupos", pagos_puros.cantidad_grupos)
+    pk[1].metric("Neto aprobado bruto", formato_importe(pagos_puros.neto_aprobado_bruto))
+    pk[2].metric("Neto financiero total", formato_importe(pagos_puros.neto_financiero_total))
+    pk[3].metric("Con ID de orden", pagos_puros.con_id_orden)
+    pk[4].metric("Sin ID de orden", pagos_puros.sin_id_orden)
+    st.dataframe(filas_resumen_operativo_dentro_periodo(diag_bloque_b), use_container_width=True, hide_index=True)
+    if not diag_bloque_b.coherencia_operativa_dentro_periodo:
+        st.error("La composición operativa no coincide con el total dentro del período ML.")
+
     movs_sin_venta = diag_bloque_b.movimientos_mp_sin_venta
     if movs_sin_venta:
         b1, b2, b3 = st.columns([2, 2, 2])
@@ -664,7 +681,16 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
         filtro_sub = b4.selectbox("Subclasificación financiera", ("", *subs), format_func=lambda x: "Todas" if not x else x)
         filtro_id = b5.selectbox("Vinculación por ID de orden", ("", "Con ID", "Sin ID"), format_func=lambda x: "Todos" if not x else x)
         prioritarios = b6.checkbox("Solo casos prioritarios")
-        movs_visibles = filtrar_mp_sin_venta(movs_sin_venta, busqueda_id, filtro_tipo, filtro_cat, filtro_sub, filtro_id, prioritarios)
+        b7, b8, b9 = st.columns(3)
+        prioridades = sorted({m.prioridad_operativa.value for m in movs_sin_venta})
+        filtro_prioridad = b7.selectbox("Prioridad operativa", ("", *prioridades), format_func=lambda x: "Todas" if not x else x)
+        combinaciones = sorted({m.combinacion_resumida.value for m in movs_sin_venta})
+        filtro_combinacion = b8.selectbox("Combinación resumida", ("", *combinaciones), format_func=lambda x: "Todas" if not x else x)
+        solo_pagos_puros = b9.checkbox("Solo pagos aprobados puros")
+        movs_visibles = filtrar_mp_sin_venta(
+            movs_sin_venta, busqueda_id, filtro_tipo, filtro_cat, filtro_sub, filtro_id,
+            prioritarios, filtro_prioridad, filtro_combinacion, solo_pagos_puros,
+        )
         st.caption(contar_mostrando(movs_visibles, len(movs_sin_venta)))
         st.dataframe(
             filas_mp_sin_venta(movs_visibles),
@@ -770,7 +796,7 @@ def _mostrar_resultados() -> None:
             st.write(alcance_completo_consolidado(reporte, diagnostico))
         if not diagnostico.particion.cierra_exactamente or not diagnostico.diferencias.identidad_cierra_exactamente:
             st.error("Error de consistencia en diagnósticos: no se presentan KPIs como confiables hasta revisar la partición o la identidad de diferencias.")
-        bloques = kpis_consolidados(reporte)
+        bloques = kpis_consolidados(reporte, diag_bloque_b)
         st.subheader(TITULO_BLOQUE_A)
         st.table(filas_bloque_a(reporte, diagnostico))
         if abs(diagnostico.residual_ml.diferencia_final) <= reporte.tolerancia:
