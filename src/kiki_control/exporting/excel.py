@@ -15,6 +15,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
 from kiki_control.domain.control_consolidado import ReporteControlConsolidado, ResultadoControlConsolidado
+from kiki_control.domain.account_statement import CategoriaEstadoCuentaMp, ControlEstadoCuentaMp
 from kiki_control.domain.reconciliation import ReporteConciliacion, ResultadoConciliacion
 from kiki_control.domain.ml_eccomapp_diagnostic import DiagnosticoMlEccomapp, EstadoCruceMlEccomapp
 from kiki_control.presentation.bloque_b_diagnostics import (
@@ -297,7 +298,7 @@ COLUMNAS_CONTROL_CONSOLIDADO = (
 )
 
 
-def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagnostico: DiagnosticoControlConsolidado | None = None, diag_bloque_b: DiagnosticoBloqueB | None = None, diagnostico_ml_eccomapp: DiagnosticoMlEccomapp | None = None) -> bytes:
+def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagnostico: DiagnosticoControlConsolidado | None = None, diag_bloque_b: DiagnosticoBloqueB | None = None, diagnostico_ml_eccomapp: DiagnosticoMlEccomapp | None = None, control_estado_cuenta: ControlEstadoCuentaMp | None = None) -> bytes:
     wb = Workbook(); ws = wb.active; ws.title = "Resumen"
     diag = diagnostico or diagnosticar_control_consolidado(reporte)
     _escribir_resumen_consolidado(ws, reporte, TIPO_CONSOLIDADO_TRES_FUENTES)
@@ -317,8 +318,59 @@ def generar_reporte_consolidado_excel(reporte: ReporteControlConsolidado, diagno
         _escribir_pagos_inconsistentes(wb.create_sheet("Pagos MP inconsistentes"), diag_bloque_b)
     if diagnostico_ml_eccomapp is not None:
         _agregar_hojas_ml_eccomapp(wb, diagnostico_ml_eccomapp)
+    if control_estado_cuenta is not None:
+        _agregar_hojas_estado_cuenta(wb, control_estado_cuenta)
     _escribir_diccionario_consolidado(wb.create_sheet("Diccionario de cálculos"))
     salida = BytesIO(); wb.save(salida); return salida.getvalue()
+
+
+def generar_control_estado_cuenta_mp_excel(control: ControlEstadoCuentaMp) -> bytes:
+    """Genera el libro específico del control diario, íntegramente en memoria."""
+    wb = Workbook(); wb.remove(wb.active)
+    _agregar_hojas_estado_cuenta(wb, control)
+    salida = BytesIO(); wb.save(salida); return salida.getvalue()
+
+
+def _agregar_hojas_estado_cuenta(wb: Workbook, control: ControlEstadoCuentaMp) -> None:
+    r = control.resumen
+    ws = wb.create_sheet("MP — Control de saldo")
+    ws.append(["Métrica", "Valor"])
+    for fila in (("Saldo inicial", r.saldo_inicial), ("Créditos informados", r.creditos_informados),
+                 ("Débitos informados", r.debitos_informados), ("Variación neta", r.variacion_neta),
+                 ("Saldo final calculado", r.saldo_final_calculado), ("Saldo final informado", r.saldo_final_informado),
+                 ("Diferencia de control", r.diferencia_control)):
+        ws.append(fila)
+    _formatear_tabla(ws, {2}, set(), True)
+    ws = wb.create_sheet("MP — Composición diaria")
+    ws.append(["Métrica", "Valor"])
+    categorias = {c: sum(m.categoria == c for m in control.movimientos) for c in CategoriaEstadoCuentaMp}
+    for fila in (("Líneas del estado de cuenta", len(control.movimientos)), ("Reference IDs únicos", control.reference_ids_unicos),
+                 ("Líneas vinculadas", control.lineas_vinculadas), ("Operaciones settlement vinculadas", control.operaciones_settlement_vinculadas),
+                 ("Líneas sin vínculo", len(control.movimientos) - control.lineas_vinculadas), ("Total líneas de entrada", control.cantidad_lineas_entrada),
+                 ("Clasificadas exactamente una vez", control.cantidad_lineas_clasificadas), ("No clasificadas", control.cantidad_no_clasificadas),
+                 ("Clasificadas más de una vez", control.cantidad_clasificadas_mas_de_una_vez), ("Cobertura completa", "Sí" if control.cobertura_completa else "No"),
+                 ("Suma de categorías", control.suma_categorias), ("Diferencia categorías vs variación", control.diferencia_cobertura_monetaria)):
+        ws.append(fila)
+    for categoria, cantidad in categorias.items(): ws.append((categoria.value, cantidad))
+    _formatear_tabla(ws, {2}, set(), True)
+    mapas = (("MP — Otros ingresos", CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO),
+             ("MP — Salidas y ajustes", CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO),
+             ("MP — Asociados a ML", CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML),
+             ("MP — Sin asociación", CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE))
+    for nombre, categoria in mapas:
+        _escribir_detalle_estado_cuenta(wb.create_sheet(nombre), (m for m in control.movimientos if m.categoria == categoria))
+
+
+def _escribir_detalle_estado_cuenta(ws: Worksheet, movimientos) -> None:
+    ws.append(["reference_id", "Fila Account Statement", "Fila settlement", "ID grupo ML", "Fecha", "Tipo original", "Importe", "Saldo parcial", "Categoría", "Subtipo", "Estado vínculo", "Motivo", "Acción recomendada"])
+    for item in movimientos:
+        m = item.movimiento
+        ws.append([_texto_seguro(m.reference_id), m.numero_fila_origen, _texto_seguro(", ".join(str(f) for f in item.filas_settlement)), _texto_seguro(item.id_grupo_ml), m.fecha_liberacion, _texto_seguro(m.tipo_movimiento_original), m.importe_neto, _decimal_o_vacio(m.saldo_parcial), item.categoria.value, _texto_seguro(item.subtipo), item.estado_vinculacion.value, _texto_seguro(item.motivo), _texto_seguro(item.accion_recomendada)])
+    _formatear_tabla(ws, {7, 8}, {12, 13}, True)
+    for cell in ws["A"][1:]:
+        cell.number_format = "@"
+    for cell in ws["E"][1:]:
+        cell.number_format = _FORMATO_FECHA
 
 
 def generar_diagnostico_ml_eccomapp_excel(diag: DiagnosticoMlEccomapp) -> bytes:
