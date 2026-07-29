@@ -24,6 +24,7 @@ from kiki_control.presentation.explanations import (
     explicar_operacion,
     guia_general,
 )
+from kiki_control.presentation.account_statement_view import aclaracion_b1_b2, aclaracion_sin_movimientos_ml
 from kiki_control.presentation.review_cases import (
     DEFINICIONES_REVISION,
     clasificar_revisiones,
@@ -971,7 +972,7 @@ def _mostrar_resultados() -> None:
         else:
             st.warning(mensaje_conciliacion_bloque_a(reporte, diagnostico))
         _mostrar_bloque_b(reporte, diag_bloque_b)
-        _mostrar_estado_cuenta_mp()
+        _mostrar_estado_cuenta_mp(diag_bloque_b.resumen.coincidencias)
         _mostrar_cruce_ml_eccomapp(diagnostico_ml_ec)
         _mostrar_kpis_en_filas("Bloque C — Costos y utilidad", bloques["Bloque C — Costos y utilidad"], (3,))
         _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", bloques["Bloque D — Calidad y pendientes"], (3, 3, 1))
@@ -1086,19 +1087,19 @@ def _mostrar_resultados() -> None:
                 _mostrar_revisiones_pendientes(st.session_state["reporte"])
                 _mostrar_descargas()
 
-def _mostrar_estado_cuenta_mp() -> None:
+def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
     st.header("Composición y control diario del saldo de Mercado Pago")
     control = st.session_state.get("control_estado_cuenta_mp")
     if control is None:
         st.info("El control diario de saldo no está disponible porque no se cargó el Account Statement opcional.")
         return
     st.markdown("### B2 — Composición del estado de cuenta MP")
-    st.info("B1 concilia las ventas de Mercado Libre originadas en el período. B2 analiza los movimientos que impactaron efectivamente el saldo de Mercado Pago durante el día. Una venta puede originarse un día y liquidarse en otro; por eso los 611 grupos conciliados de B1 no deben coincidir con la cantidad de movimientos asociados a ML en B2.")
+    st.info(aclaracion_b1_b2(cantidad_grupos_conciliados))
     conteos = {c: sum(m.categoria == c for m in control.movimientos) for c in CategoriaEstadoCuentaMp}
     etiquetas = (("Líneas del estado de cuenta", len(control.movimientos), None), ("Reference IDs únicos", control.reference_ids_unicos, None), ("Líneas vinculadas al settlement", control.lineas_vinculadas, None), ("Operaciones settlement vinculadas", control.operaciones_settlement_vinculadas, None), ("Líneas sin vínculo settlement", control.lineas_sin_vinculo_settlement, None), ("Movimientos del saldo asociados a ventas ML del período cargado", conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML], "Corresponde únicamente a movimientos del estado de cuenta que pudieron vincularse al settlement cargado y a un grupo ML del período. No representa la cantidad total de ventas conciliadas en B1."), ("Otros ingresos identificados", conteos[CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO], None), ("Salidas o ajustes identificados", conteos[CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO], None), ("Sin asociación suficiente", conteos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE], None))
     cols = st.columns(3)
     for index, (nombre, valor, ayuda) in enumerate(etiquetas): cols[index % 3].metric(nombre, valor, help=ayuda)
-    st.caption("Con los archivos cargados no se identificaron movimientos del saldo pertenecientes a ventas ML del período. Esto no invalida los 611 grupos conciliados en B1." if not conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML] else "La cantidad refleja movimientos del saldo vinculados al período cargado, no el total de ventas conciliadas en B1.")
+    st.caption(aclaracion_sin_movimientos_ml(cantidad_grupos_conciliados) if not conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML] else "La cantidad refleja movimientos del saldo vinculados al período cargado, no el total de ventas conciliadas en B1.")
 
     interpretaciones = {
         CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML: "Vínculo settlement y grupo ML del período acreditados.",

@@ -171,11 +171,31 @@ def test_exportacion_incluye_desgloses_de_vinculacion_e_importes():
 
 
 def test_textos_b1_b2_distinguen_ventas_de_movimientos_de_saldo():
-    from pathlib import Path
-    texto = Path("src/kiki_control/ui/streamlit_app.py").read_text(encoding="utf-8")
-    assert "Movimientos del saldo asociados a ventas ML del período cargado" in texto
-    assert "No representa la cantidad total de ventas conciliadas en B1" in texto
-    assert "B1 concilia las ventas de Mercado Libre originadas en el período" in texto
+    from kiki_control.presentation.account_statement_view import aclaracion_b1_b2, aclaracion_sin_movimientos_ml
+    assert "37 grupos conciliados" in aclaracion_b1_b2(37)
+    assert "37 grupos conciliados" in aclaracion_sin_movimientos_ml(37)
+    assert "611" not in aclaracion_b1_b2(37)
+    assert "611" not in aclaracion_sin_movimientos_ml(37)
+
+
+def test_acciones_recomendadas_se_diferencian_por_estado_de_vinculacion():
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+
+    def resumen(reference_id="REF", tipo="Liquidación de dinero", importe=Decimal("1")):
+        movimiento = MovimientoEstadoCuentaMp(5, datetime(2026, 7, 28), tipo, reference_id, importe, None, "hash", "ACCOUNT_STATEMENT")
+        return ResumenEstadoCuentaMp(Decimal("0"), Decimal("0"), Decimal("0"), importe, (movimiento,), datetime(2026, 7, 28), datetime(2026, 7, 28))
+
+    sin_vinculo = controlar_estado_cuenta_mp(resumen(), []).movimientos[0]
+    vinculado_sin_origen = controlar_estado_cuenta_mp(resumen(), [_settlement(10, "REF")]).movimientos[0]
+    ambiguo = controlar_estado_cuenta_mp(resumen(), [_settlement(10, "REF", "A"), _settlement(11, "REF", "B")]).movimientos[0]
+    id_vacio = controlar_estado_cuenta_mp(resumen(reference_id=None), []).movimientos[0]
+    identificado = controlar_estado_cuenta_mp(resumen("QR"), [_settlement(12, "QR", None, "Mercado Pago", "Código QR")]).movimientos[0]
+
+    assert sin_vinculo.accion_recomendada == "Revisar con un settlement que cubra la fecha de origen."
+    assert vinculado_sin_origen.accion_recomendada == "Revisar el detalle comercial de la operación o ampliar la información del canal de cobro."
+    assert ambiguo.accion_recomendada == "Revisar las filas settlement contradictorias y definir la operación comercial correcta."
+    assert id_vacio.accion_recomendada == "Completar o verificar el reference ID en el estado de cuenta."
+    assert identificado.accion_recomendada == "Sin acción; conservar para trazabilidad."
 
 
 def test_consolidado_agrega_hojas_solo_cuando_hay_account_statement():
