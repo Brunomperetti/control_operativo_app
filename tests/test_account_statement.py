@@ -110,11 +110,15 @@ def archivo_productivo_anonimizado():
         if i == 0:
             ref, tipo, importe = linked_ids[0], "Liquidación de dinero", Decimal("54875.24")
         elif i == 1:
-            ref, tipo, importe = linked_ids[1], "Liquidación de dinero", Decimal("9167850.51")
-        elif i == 2:
-            ref, tipo, importe = linked_ids[2], "Transferencia enviada", Decimal("-16575362.17")
+            ref, tipo, importe = linked_ids[1], "Rendimiento", Decimal("9167850.36")
+        elif i < 17:
+            ref, tipo, importe = linked_ids[i], "Rendimiento", Decimal("0.01")
+        elif i == 17:
+            ref, tipo, importe = linked_ids[i], "Transferencia enviada", Decimal("-16575362.17")
+        elif i < 137:
+            ref, tipo, importe = linked_ids[i % 79], "Transferencia enviada", Decimal("0")
         elif i < 139:
-            ref, tipo, importe = linked_ids[1 + (i - 1) % 78], "Liquidación de dinero", Decimal("0")
+            ref, tipo, importe = linked_ids[i % 79], "Liquidación de dinero", Decimal("0")
         else:
             ref, tipo, importe = f"U-{i:03}", "Liquidación de dinero", Decimal("0")
         ws.append([datetime(2026, 7, 28), tipo, ref, importe, None])
@@ -130,21 +134,68 @@ def test_regresion_anonimizada_cuatro_archivos_productivos():
         if i == 0:
             settlements.append(_settlement(781, ref, None, "Mercado Pago", "Código QR"))
         else:
-            settlements.append(_settlement(800 + i, ref, f"ORD-{i % 79:03}"))
-    # Las múltiples filas de un ID pertenecen al mismo grupo canónico aunque sus
-    # IDs de orden representen componentes diferentes de ese grupo.
-    indice = {ref: (f"GRUPO-{n:03}",) for n, ref in enumerate(linked_ids[1:], 1)}
-    control = controlar_estado_cuenta_mp(resumen, settlements, indice)
+            settlements.append(_settlement(800 + i, ref, f"ORD-{linked_ids.index(ref):03}"))
+    control = controlar_estado_cuenta_mp(resumen, settlements)
     assert (len(resumen.movimientos), resumen.saldo_inicial, resumen.creditos_informados, resumen.debitos_informados, resumen.saldo_final_informado) == (646, Decimal("26316618.06"), Decimal("9222725.75"), Decimal("-16575362.17"), Decimal("18963981.64"))
     assert resumen.diferencia_control == Decimal("0.00")
     assert control.lineas_vinculadas == 139
     assert control.operaciones_settlement_vinculadas == 79
-    assert len(control.movimientos) - control.lineas_vinculadas == 507
+    assert control.lineas_sin_vinculo_settlement == 507
+    categorias = {categoria: control.estadisticas_categoria(categoria) for categoria in CategoriaEstadoCuentaMp}
+    assert [categorias[c].cantidad_movimientos for c in CategoriaEstadoCuentaMp] == [0, 17, 120, 509]
+    vinculadas = {categoria: control.estadisticas_vinculadas_categoria(categoria) for categoria in CategoriaEstadoCuentaMp}
+    assert [vinculadas[c].cantidad_movimientos for c in CategoriaEstadoCuentaMp] == [0, 17, 120, 2]
+    assert sum(v.cantidad_movimientos for v in vinculadas.values()) == control.lineas_vinculadas
+    assert sum((v.impacto_neto for v in vinculadas.values()), Decimal("0")) == control.importe_neto_lineas_vinculadas
+    assert control.estadisticas_estado(EstadoVinculacionEstadoCuentaMp.VINCULADO_SIN_ORIGEN_COMERCIAL).cantidad_movimientos == 2
+    assert categorias[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE].cantidad_movimientos == 507 + 2
+    assert [categorias[c].impacto_neto for c in CategoriaEstadoCuentaMp] == [Decimal("0"), Decimal("9222725.75"), Decimal("-16575362.17"), Decimal("0")]
+    assert sum((categorias[c].impacto_neto for c in CategoriaEstadoCuentaMp), Decimal("0")) == resumen.variacion_neta
     qr = next(m for m in control.movimientos if m.movimiento.reference_id == "169679883346")
     assert qr.fila_settlement == 781 and qr.movimiento.importe_neto == Decimal("54875.24")
     assert qr.categoria == CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO
     assert qr.subtipo == "Venta por mostrador con Código QR"
     assert control.cobertura_completa
+
+
+def test_exportacion_incluye_desgloses_de_vinculacion_e_importes():
+    resumen = normalizar_estado_cuenta_mp("a.xlsx", archivo_estado())
+    control = controlar_estado_cuenta_mp(resumen, [settlement()])
+    wb = load_workbook(BytesIO(generar_control_estado_cuenta_mp_excel(control)), data_only=True)
+    composicion = tuple(cell.value for row in wb["MP — Composición diaria"] for cell in row)
+    sin_asociacion = tuple(cell.value for row in wb["MP — Sin asociación"] for cell in row)
+    assert "Importes por categoría" in composicion
+    assert "Composición de las líneas vinculadas al settlement" in composicion
+    assert "Estados de vinculación" in composicion
+    assert "VINCULADO_SIN_ORIGEN_COMERCIAL" in sin_asociacion
+
+
+def test_textos_b1_b2_distinguen_ventas_de_movimientos_de_saldo():
+    from kiki_control.presentation.account_statement_view import aclaracion_b1_b2, aclaracion_sin_movimientos_ml
+    assert "37 grupos conciliados" in aclaracion_b1_b2(37)
+    assert "37 grupos conciliados" in aclaracion_sin_movimientos_ml(37)
+    assert "611" not in aclaracion_b1_b2(37)
+    assert "611" not in aclaracion_sin_movimientos_ml(37)
+
+
+def test_acciones_recomendadas_se_diferencian_por_estado_de_vinculacion():
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+
+    def resumen(reference_id="REF", tipo="Liquidación de dinero", importe=Decimal("1")):
+        movimiento = MovimientoEstadoCuentaMp(5, datetime(2026, 7, 28), tipo, reference_id, importe, None, "hash", "ACCOUNT_STATEMENT")
+        return ResumenEstadoCuentaMp(Decimal("0"), Decimal("0"), Decimal("0"), importe, (movimiento,), datetime(2026, 7, 28), datetime(2026, 7, 28))
+
+    sin_vinculo = controlar_estado_cuenta_mp(resumen(), []).movimientos[0]
+    vinculado_sin_origen = controlar_estado_cuenta_mp(resumen(), [_settlement(10, "REF")]).movimientos[0]
+    ambiguo = controlar_estado_cuenta_mp(resumen(), [_settlement(10, "REF", "A"), _settlement(11, "REF", "B")]).movimientos[0]
+    id_vacio = controlar_estado_cuenta_mp(resumen(reference_id=None), []).movimientos[0]
+    identificado = controlar_estado_cuenta_mp(resumen("QR"), [_settlement(12, "QR", None, "Mercado Pago", "Código QR")]).movimientos[0]
+
+    assert sin_vinculo.accion_recomendada == "Revisar con un settlement que cubra la fecha de origen."
+    assert vinculado_sin_origen.accion_recomendada == "Revisar el detalle comercial de la operación o ampliar la información del canal de cobro."
+    assert ambiguo.accion_recomendada == "Revisar las filas settlement contradictorias y definir la operación comercial correcta."
+    assert id_vacio.accion_recomendada == "Completar o verificar el reference ID en el estado de cuenta."
+    assert identificado.accion_recomendada == "Sin acción; conservar para trazabilidad."
 
 
 def test_consolidado_agrega_hojas_solo_cuando_hay_account_statement():

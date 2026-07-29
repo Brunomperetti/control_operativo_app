@@ -15,7 +15,7 @@ from kiki_control.domain.control_consolidado import ErrorControlConsolidado
 from kiki_control.exporting import generar_control_estado_cuenta_mp_excel, generar_diagnostico_ml_eccomapp_excel, generar_excepciones_consolidadas_excel, generar_reporte_completo_excel, generar_reporte_consolidado_excel, generar_reporte_excepciones_excel, generar_revisiones_consolidadas_excel, generar_revisiones_pendientes_excel
 from kiki_control.normalization.account_statement import normalizar_estado_cuenta_mp
 from kiki_control.linking.account_statement import construir_indice_operacion_mp_a_grupo_ml, controlar_estado_cuenta_mp
-from kiki_control.domain.account_statement import CategoriaEstadoCuentaMp
+from kiki_control.domain.account_statement import CategoriaEstadoCuentaMp, EstadoVinculacionEstadoCuentaMp
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
 from kiki_control.presentation.explanations import (
     COLUMNAS_TABLA,
@@ -24,6 +24,7 @@ from kiki_control.presentation.explanations import (
     explicar_operacion,
     guia_general,
 )
+from kiki_control.presentation.account_statement_view import aclaracion_b1_b2, aclaracion_sin_movimientos_ml
 from kiki_control.presentation.review_cases import (
     DEFINICIONES_REVISION,
     clasificar_revisiones,
@@ -971,7 +972,7 @@ def _mostrar_resultados() -> None:
         else:
             st.warning(mensaje_conciliacion_bloque_a(reporte, diagnostico))
         _mostrar_bloque_b(reporte, diag_bloque_b)
-        _mostrar_estado_cuenta_mp()
+        _mostrar_estado_cuenta_mp(diag_bloque_b.resumen.coincidencias)
         _mostrar_cruce_ml_eccomapp(diagnostico_ml_ec)
         _mostrar_kpis_en_filas("Bloque C — Costos y utilidad", bloques["Bloque C — Costos y utilidad"], (3,))
         _mostrar_kpis_en_filas("Bloque D — Calidad y pendientes", bloques["Bloque D — Calidad y pendientes"], (3, 3, 1))
@@ -1086,25 +1087,51 @@ def _mostrar_resultados() -> None:
                 _mostrar_revisiones_pendientes(st.session_state["reporte"])
                 _mostrar_descargas()
 
-def _mostrar_estado_cuenta_mp() -> None:
+def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
     st.header("Composición y control diario del saldo de Mercado Pago")
     control = st.session_state.get("control_estado_cuenta_mp")
     if control is None:
         st.info("El control diario de saldo no está disponible porque no se cargó el Account Statement opcional.")
         return
     st.markdown("### B2 — Composición del estado de cuenta MP")
-    st.info("El estado de cuenta contiene movimientos que impactaron el saldo durante el día. El settlement report contiene operaciones según su fecha de origen, incluso cuando se liquidan posteriormente. Por eso algunos movimientos del estado de cuenta pueden no tener correspondencia en el settlement cargado.")
+    st.info(aclaracion_b1_b2(cantidad_grupos_conciliados))
     conteos = {c: sum(m.categoria == c for m in control.movimientos) for c in CategoriaEstadoCuentaMp}
-    etiquetas = (("Líneas del estado de cuenta", len(control.movimientos)), ("Reference IDs únicos", control.reference_ids_unicos), ("Líneas asociadas a ventas ML", conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML]), ("Otros ingresos identificados", conteos[CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO]), ("Salidas o ajustes identificados", conteos[CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO]), ("Sin asociación suficiente", conteos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE]))
+    etiquetas = (("Líneas del estado de cuenta", len(control.movimientos), None), ("Reference IDs únicos", control.reference_ids_unicos, None), ("Líneas vinculadas al settlement", control.lineas_vinculadas, None), ("Operaciones settlement vinculadas", control.operaciones_settlement_vinculadas, None), ("Líneas sin vínculo settlement", control.lineas_sin_vinculo_settlement, None), ("Movimientos del saldo asociados a ventas ML del período cargado", conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML], "Corresponde únicamente a movimientos del estado de cuenta que pudieron vincularse al settlement cargado y a un grupo ML del período. No representa la cantidad total de ventas conciliadas en B1."), ("Otros ingresos identificados", conteos[CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO], None), ("Salidas o ajustes identificados", conteos[CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO], None), ("Sin asociación suficiente", conteos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE], None))
     cols = st.columns(3)
-    for index, (nombre, valor) in enumerate(etiquetas): cols[index % 3].metric(nombre, valor)
-    st.caption(f"{control.lineas_vinculadas} líneas vinculadas · {control.operaciones_settlement_vinculadas} operaciones settlement vinculadas · {len(control.movimientos) - control.lineas_vinculadas} líneas sin vínculo")
+    for index, (nombre, valor, ayuda) in enumerate(etiquetas): cols[index % 3].metric(nombre, valor, help=ayuda)
+    st.caption(aclaracion_sin_movimientos_ml(cantidad_grupos_conciliados) if not conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML] else "La cantidad refleja movimientos del saldo vinculados al período cargado, no el total de ventas conciliadas en B1.")
+
+    interpretaciones = {
+        CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML: "Vínculo settlement y grupo ML del período acreditados.",
+        CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO: "Ingreso identificado con evidencia de origen no ML.",
+        CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO: "Salida o ajuste identificado por el tipo de movimiento.",
+        CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE: "Vínculo settlement existente, sin evidencia comercial suficiente.",
+    }
+    nombres = {
+        CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML: "Asociadas a ventas ML del período",
+        CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO: "Otros ingresos no ML identificados",
+        CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO: "Salidas o ajustes identificados",
+        CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE: "Vinculadas pero sin atribución comercial suficiente",
+    }
+    st.markdown("#### Composición de las líneas vinculadas al settlement")
+    st.table([{"Clasificación": nombres[c], "Cantidad de líneas": (e := control.estadisticas_vinculadas_categoria(c)).cantidad_movimientos, "Reference IDs únicos": e.reference_ids_unicos, "Importe neto": formato_importe(e.impacto_neto), "Interpretación": interpretaciones[c]} for c in CategoriaEstadoCuentaMp])
+
+    st.markdown("#### Importes por categoría")
+    st.table([{"Categoría": nombres[c] if c != CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE else "Sin asociación suficiente", "Cantidad de movimientos": (e := control.estadisticas_categoria(c)).cantidad_movimientos, "Reference IDs únicos": e.reference_ids_unicos, "Total de importes positivos": formato_importe(e.importes_positivos), "Total de importes negativos": formato_importe(e.importes_negativos), "Impacto neto": formato_importe(e.impacto_neto)} for c in CategoriaEstadoCuentaMp])
+
+    etiquetas_estado = {EstadoVinculacionEstadoCuentaMp.SIN_VINCULO_SETTLEMENT: "SIN_VINCULO_SETTLEMENT", EstadoVinculacionEstadoCuentaMp.VINCULADO_SIN_ORIGEN_COMERCIAL: "VINCULADO_SIN_ORIGEN_COMERCIAL", EstadoVinculacionEstadoCuentaMp.ID_AMBIGUO: "ID_AMBIGUO", EstadoVinculacionEstadoCuentaMp.ID_VACIO: "ID_VACIO"}
+    st.markdown("#### Desglose de sin asociación suficiente")
+    st.table([{"Estado de vinculación": etiqueta, "Cantidad": (e := control.estadisticas_estado(estado)).cantidad_movimientos, "Importe": formato_importe(e.impacto_neto)} for estado, etiqueta in etiquetas_estado.items()])
     for titulo, categoria in (("Otros ingresos no asociados a ML", CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO), ("Salidas y ajustes", CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO), ("Movimientos asociados a ventas ML", CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML), ("Movimientos sin asociación suficiente", CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE)):
         with st.expander(titulo):
             st.dataframe([{"Reference ID": x.movimiento.reference_id, "Fila": x.movimiento.numero_fila_origen, "Fecha": x.movimiento.fecha_liberacion, "Tipo": x.movimiento.tipo_movimiento_original, "Importe": x.movimiento.importe_neto, "Subtipo": x.subtipo, "Motivo": x.motivo, "Acción recomendada": x.accion_recomendada} for x in control.movimientos if x.categoria == categoria], hide_index=True, use_container_width=True)
     st.markdown("### B3 — Control de saldo diario")
     r = control.resumen
     st.table([{"Saldo inicial": formato_importe(r.saldo_inicial), "Créditos informados": formato_importe(r.creditos_informados), "Débitos informados": formato_importe(r.debitos_informados), "Variación neta": formato_importe(r.variacion_neta), "Saldo final calculado": formato_importe(r.saldo_final_calculado), "Saldo final informado": formato_importe(r.saldo_final_informado), "Diferencia de control": formato_importe(r.diferencia_control)}])
+    impactos = {c: control.estadisticas_categoria(c).impacto_neto for c in CategoriaEstadoCuentaMp}
+    st.table([{"Impacto neto de ventas ML identificadas": formato_importe(impactos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML]), "Impacto neto de otros ingresos": formato_importe(impactos[CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO]), "Impacto neto de salidas y ajustes": formato_importe(impactos[CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO]), "Impacto neto sin asociación suficiente": formato_importe(impactos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE]), "Suma total de categorías": formato_importe(control.suma_categorias), "Variación neta del estado de cuenta": formato_importe(r.variacion_neta), "Diferencia": formato_importe(control.diferencia_cobertura_monetaria)}])
+    if conteos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE]:
+        st.info("El control monetario cierra, pero existen movimientos sin asociación suficiente; por lo tanto, el saldo no puede atribuirse comercialmente en su totalidad.")
     st.caption(f"Cobertura calculada: {control.cantidad_lineas_entrada} líneas · {control.cantidad_lineas_clasificadas} clasificadas exactamente una vez · {control.cantidad_no_clasificadas} sin clasificación · {control.cantidad_clasificadas_mas_de_una_vez} con conflicto · diferencia monetaria {formato_importe(control.diferencia_cobertura_monetaria)}")
     if not control.cobertura_completa:
         st.warning("La cobertura de clasificación presenta inconsistencias. Se conserva el detalle auditable, pero no se informa cobertura correcta.")

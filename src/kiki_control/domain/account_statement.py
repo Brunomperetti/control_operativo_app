@@ -9,6 +9,7 @@ from collections import Counter
 
 class EstadoVinculacionEstadoCuentaMp(StrEnum):
     VINCULADO_SETTLEMENT = "VINCULADO_SETTLEMENT"
+    VINCULADO_SIN_ORIGEN_COMERCIAL = "VINCULADO_SIN_ORIGEN_COMERCIAL"
     SIN_VINCULO_SETTLEMENT = "SIN_VINCULO_SETTLEMENT"
     ID_VACIO = "ID_VACIO"
     ID_AMBIGUO = "ID_AMBIGUO"
@@ -74,6 +75,15 @@ class MovimientoEstadoCuentaClasificado:
 
 
 @dataclass(frozen=True)
+class EstadisticasMovimientosMp:
+    cantidad_movimientos: int
+    reference_ids_unicos: int
+    importes_positivos: Decimal
+    importes_negativos: Decimal
+    impacto_neto: Decimal
+
+
+@dataclass(frozen=True)
 class GrupoSettlementPorOperacionMp:
     """Todas las filas settlement que describen un mismo ID de operación."""
 
@@ -130,11 +140,48 @@ class ControlEstadoCuentaMp:
 
     @property
     def lineas_vinculadas(self) -> int:
-        return sum(m.estado_vinculacion == EstadoVinculacionEstadoCuentaMp.VINCULADO_SETTLEMENT for m in self.movimientos)
+        return sum(m.estado_vinculacion in self._estados_vinculados for m in self.movimientos)
+
+    @property
+    def _estados_vinculados(self) -> frozenset[EstadoVinculacionEstadoCuentaMp]:
+        return frozenset({
+            EstadoVinculacionEstadoCuentaMp.VINCULADO_SETTLEMENT,
+            EstadoVinculacionEstadoCuentaMp.VINCULADO_SIN_ORIGEN_COMERCIAL,
+        })
+
+    @property
+    def lineas_sin_vinculo_settlement(self) -> int:
+        return sum(m.estado_vinculacion == EstadoVinculacionEstadoCuentaMp.SIN_VINCULO_SETTLEMENT for m in self.movimientos)
 
     @property
     def operaciones_settlement_vinculadas(self) -> int:
-        return len({m.movimiento.reference_id for m in self.movimientos if m.estado_vinculacion == EstadoVinculacionEstadoCuentaMp.VINCULADO_SETTLEMENT})
+        return len({m.movimiento.reference_id for m in self.movimientos if m.estado_vinculacion in self._estados_vinculados})
+
+    def estadisticas(self, movimientos: tuple[MovimientoEstadoCuentaClasificado, ...]) -> EstadisticasMovimientosMp:
+        importes = tuple(m.movimiento.importe_neto for m in movimientos)
+        return EstadisticasMovimientosMp(
+            cantidad_movimientos=len(movimientos),
+            reference_ids_unicos=len({m.movimiento.reference_id for m in movimientos if m.movimiento.reference_id}),
+            importes_positivos=sum((importe for importe in importes if importe > 0), Decimal("0")),
+            importes_negativos=sum((importe for importe in importes if importe < 0), Decimal("0")),
+            impacto_neto=sum(importes, Decimal("0")),
+        )
+
+    def estadisticas_categoria(self, categoria: CategoriaEstadoCuentaMp) -> EstadisticasMovimientosMp:
+        return self.estadisticas(tuple(m for m in self.movimientos if m.categoria == categoria))
+
+    def estadisticas_estado(self, estado: EstadoVinculacionEstadoCuentaMp) -> EstadisticasMovimientosMp:
+        return self.estadisticas(tuple(m for m in self.movimientos if m.estado_vinculacion == estado))
+
+    def estadisticas_vinculadas_categoria(self, categoria: CategoriaEstadoCuentaMp) -> EstadisticasMovimientosMp:
+        return self.estadisticas(tuple(
+            m for m in self.movimientos
+            if m.estado_vinculacion in self._estados_vinculados and m.categoria == categoria
+        ))
+
+    @property
+    def importe_neto_lineas_vinculadas(self) -> Decimal:
+        return self.estadisticas(tuple(m for m in self.movimientos if m.estado_vinculacion in self._estados_vinculados)).impacto_neto
 
     @property
     def suma_categorias(self) -> Decimal:
