@@ -346,9 +346,10 @@ def _agregar_hojas_estado_cuenta(wb: Workbook, control: ControlEstadoCuentaMp) -
     categorias = {c: sum(m.categoria == c for m in control.movimientos) for c in CategoriaEstadoCuentaMp}
     for fila in (("Líneas del estado de cuenta", len(control.movimientos)), ("Reference IDs únicos", control.reference_ids_unicos),
                  ("Líneas vinculadas", control.lineas_vinculadas), ("Operaciones settlement vinculadas", control.operaciones_settlement_vinculadas),
-                 ("Líneas sin vínculo", len(control.movimientos) - control.lineas_vinculadas), ("Total clasificados", len(control.movimientos)),
-                 ("No clasificados", 0), ("Clasificados más de una vez", 0), ("Suma de categorías", control.suma_categorias),
-                 ("Diferencia categorías vs variación", control.diferencia_cobertura)):
+                 ("Líneas sin vínculo", len(control.movimientos) - control.lineas_vinculadas), ("Total líneas de entrada", control.cantidad_lineas_entrada),
+                 ("Clasificadas exactamente una vez", control.cantidad_lineas_clasificadas), ("No clasificadas", control.cantidad_no_clasificadas),
+                 ("Clasificadas más de una vez", control.cantidad_clasificadas_mas_de_una_vez), ("Cobertura completa", "Sí" if control.cobertura_completa else "No"),
+                 ("Suma de categorías", control.suma_categorias), ("Diferencia categorías vs variación", control.diferencia_cobertura_monetaria)):
         ws.append(fila)
     for categoria, cantidad in categorias.items(): ws.append((categoria.value, cantidad))
     _formatear_tabla(ws, {2}, set(), True)
@@ -364,7 +365,7 @@ def _escribir_detalle_estado_cuenta(ws: Worksheet, movimientos) -> None:
     ws.append(["reference_id", "Fila Account Statement", "Fila settlement", "ID grupo ML", "Fecha", "Tipo original", "Importe", "Saldo parcial", "Categoría", "Subtipo", "Estado vínculo", "Motivo", "Acción recomendada"])
     for item in movimientos:
         m = item.movimiento
-        ws.append([_texto_seguro(m.reference_id), m.numero_fila_origen, item.fila_settlement or "", _texto_seguro(item.id_grupo_ml), m.fecha_liberacion, _texto_seguro(m.tipo_movimiento_original), m.importe_neto, _decimal_o_vacio(m.saldo_parcial), item.categoria.value, _texto_seguro(item.subtipo), item.estado_vinculacion.value, _texto_seguro(item.motivo), _texto_seguro(item.accion_recomendada)])
+        ws.append([_texto_seguro(m.reference_id), m.numero_fila_origen, _texto_seguro(", ".join(str(f) for f in item.filas_settlement)), _texto_seguro(item.id_grupo_ml), m.fecha_liberacion, _texto_seguro(m.tipo_movimiento_original), m.importe_neto, _decimal_o_vacio(m.saldo_parcial), item.categoria.value, _texto_seguro(item.subtipo), item.estado_vinculacion.value, _texto_seguro(item.motivo), _texto_seguro(item.accion_recomendada)])
     _formatear_tabla(ws, {7, 8}, {12, 13}, True)
     for cell in ws["A"][1:]:
         cell.number_format = "@"

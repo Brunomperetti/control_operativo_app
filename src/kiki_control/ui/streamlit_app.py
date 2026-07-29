@@ -14,7 +14,7 @@ from kiki_control.domain.enums import TipoFuente
 from kiki_control.domain.control_consolidado import ErrorControlConsolidado
 from kiki_control.exporting import generar_control_estado_cuenta_mp_excel, generar_diagnostico_ml_eccomapp_excel, generar_excepciones_consolidadas_excel, generar_reporte_completo_excel, generar_reporte_consolidado_excel, generar_reporte_excepciones_excel, generar_revisiones_consolidadas_excel, generar_revisiones_pendientes_excel
 from kiki_control.normalization.account_statement import normalizar_estado_cuenta_mp
-from kiki_control.linking.account_statement import controlar_estado_cuenta_mp
+from kiki_control.linking.account_statement import construir_indice_operacion_mp_a_grupo_ml, controlar_estado_cuenta_mp
 from kiki_control.domain.account_statement import CategoriaEstadoCuentaMp
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
 from kiki_control.presentation.explanations import (
@@ -330,8 +330,8 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
         st.session_state.pop("control_estado_cuenta_mp", None)
         if info_estado is not None:
             resumen_estado = normalizar_estado_cuenta_mp(info_estado["nombre"], info_estado["contenido"])
-            ids_ml = {r.id_grupo for r in reporte_consolidado.resultados if getattr(r, "id_grupo", None)}
-            st.session_state["control_estado_cuenta_mp"] = controlar_estado_cuenta_mp(resumen_estado, mercado_pago.movimientos, ids_ml)
+            indice_ml = construir_indice_operacion_mp_a_grupo_ml(reporte_consolidado, mercado_pago.movimientos)
+            st.session_state["control_estado_cuenta_mp"] = controlar_estado_cuenta_mp(resumen_estado, mercado_pago.movimientos, indice_ml)
         # Datos de enriquecimiento para Bloque B
         st.session_state["enriq_movimientos_mp_por_fila"] = enriquecimientos_movimientos_mp_por_fila(
             mercado_pago.movimientos
@@ -1105,7 +1105,9 @@ def _mostrar_estado_cuenta_mp() -> None:
     st.markdown("### B3 — Control de saldo diario")
     r = control.resumen
     st.table([{"Saldo inicial": formato_importe(r.saldo_inicial), "Créditos informados": formato_importe(r.creditos_informados), "Débitos informados": formato_importe(r.debitos_informados), "Variación neta": formato_importe(r.variacion_neta), "Saldo final calculado": formato_importe(r.saldo_final_calculado), "Saldo final informado": formato_importe(r.saldo_final_informado), "Diferencia de control": formato_importe(r.diferencia_control)}])
-    st.caption(f"Cobertura: {len(control.movimientos)} clasificados exactamente una vez · 0 no clasificados · 0 duplicados · diferencia monetaria {formato_importe(control.diferencia_cobertura)}")
+    st.caption(f"Cobertura calculada: {control.cantidad_lineas_entrada} líneas · {control.cantidad_lineas_clasificadas} clasificadas exactamente una vez · {control.cantidad_no_clasificadas} sin clasificación · {control.cantidad_clasificadas_mas_de_una_vez} con conflicto · diferencia monetaria {formato_importe(control.diferencia_cobertura_monetaria)}")
+    if not control.cobertura_completa:
+        st.warning("La cobertura de clasificación presenta inconsistencias. Se conserva el detalle auditable, pero no se informa cobertura correcta.")
 
 
 if __name__ == "__main__":

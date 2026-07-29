@@ -40,7 +40,9 @@ def normalizar_estado_cuenta_mp(nombre: str, contenido: bytes, tolerancia: Decim
         raise ErrorEstadoCuentaMp("El Account Statement debe ser XLSX")
     if tolerancia < Decimal("0"):
         raise ErrorEstadoCuentaMp("La tolerancia de validación no puede ser negativa")
-    wb = load_workbook(BytesIO(contenido), read_only=True, data_only=True)
+    # El modo normal evita el acceso cuadrático de ``ReadOnlyWorksheet.cell`` y
+    # sigue procesando el libro completamente en memoria, como el resto del flujo.
+    wb = load_workbook(BytesIO(contenido), read_only=False, data_only=True)
     ws = wb.active
     cabecera_resumen = tuple(ws.cell(1, c).value for c in range(1, 5))
     cabecera_movimientos = tuple(ws.cell(4, c).value for c in range(1, 6))

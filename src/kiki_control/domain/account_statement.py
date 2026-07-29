@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+from collections import Counter
 
 
 class EstadoVinculacionEstadoCuentaMp(StrEnum):
@@ -63,14 +64,65 @@ class MovimientoEstadoCuentaClasificado:
     subtipo: str
     motivo: str
     accion_recomendada: str
-    fila_settlement: int | None = None
+    filas_settlement: tuple[int, ...] = tuple()
     id_grupo_ml: str | None = None
+
+    @property
+    def fila_settlement(self) -> int | None:
+        """Primera fila, conservada únicamente como atajo de compatibilidad."""
+        return self.filas_settlement[0] if self.filas_settlement else None
+
+
+@dataclass(frozen=True)
+class GrupoSettlementPorOperacionMp:
+    """Todas las filas settlement que describen un mismo ID de operación."""
+
+    id_operacion_mp: str
+    filas_origen: tuple[int, ...]
+    ids_orden: tuple[str, ...]
+    canales: tuple[str, ...]
+    plataformas: tuple[str, ...]
+    ids_grupo_ml: tuple[str, ...]
+    movimientos: tuple[object, ...]
+    es_ambiguo: bool
+    motivo_ambiguedad: str | None
 
 
 @dataclass(frozen=True)
 class ControlEstadoCuentaMp:
     resumen: ResumenEstadoCuentaMp
     movimientos: tuple[MovimientoEstadoCuentaClasificado, ...]
+
+    @property
+    def cantidad_lineas_entrada(self) -> int:
+        return len(self.resumen.movimientos)
+
+    def _frecuencias_clasificacion(self) -> Counter[int]:
+        return Counter(m.movimiento.numero_fila_origen for m in self.movimientos)
+
+    @property
+    def cantidad_lineas_clasificadas(self) -> int:
+        frecuencias = self._frecuencias_clasificacion()
+        return sum(frecuencias[m.numero_fila_origen] == 1 for m in self.resumen.movimientos)
+
+    @property
+    def cantidad_no_clasificadas(self) -> int:
+        frecuencias = self._frecuencias_clasificacion()
+        return sum(frecuencias[m.numero_fila_origen] == 0 for m in self.resumen.movimientos)
+
+    @property
+    def cantidad_clasificadas_mas_de_una_vez(self) -> int:
+        frecuencias = self._frecuencias_clasificacion()
+        return sum(frecuencias[m.numero_fila_origen] > 1 for m in self.resumen.movimientos)
+
+    @property
+    def cobertura_completa(self) -> bool:
+        return (
+            self.cantidad_lineas_clasificadas == self.cantidad_lineas_entrada
+            and self.cantidad_no_clasificadas == 0
+            and self.cantidad_clasificadas_mas_de_una_vez == 0
+            and self.diferencia_cobertura_monetaria == Decimal("0")
+        )
 
     @property
     def reference_ids_unicos(self) -> int:
@@ -91,3 +143,7 @@ class ControlEstadoCuentaMp:
     @property
     def diferencia_cobertura(self) -> Decimal:
         return self.suma_categorias - self.resumen.variacion_neta
+
+    @property
+    def diferencia_cobertura_monetaria(self) -> Decimal:
+        return self.diferencia_cobertura
