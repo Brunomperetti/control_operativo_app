@@ -22,6 +22,16 @@ class CategoriaEstadoCuentaMp(StrEnum):
     SIN_ASOCIACION_SUFICIENTE = "SIN_ASOCIACION_SUFICIENTE"
 
 
+class OrigenComercialOperacionMp(StrEnum):
+    MERCADO_LIBRE_PERIODO_B1 = "MERCADO_LIBRE_PERIODO_B1"
+    MERCADO_LIBRE_HISTORICO = "MERCADO_LIBRE_HISTORICO"
+    MERCADO_PAGO_QR = "MERCADO_PAGO_QR"
+    MERCADO_PAGO_POINT = "MERCADO_PAGO_POINT"
+    OTRO = "OTRO"
+    NO_DETERMINADO = "NO_DETERMINADO"
+    AMBIGUO = "AMBIGUO"
+
+
 @dataclass(frozen=True)
 class MovimientoEstadoCuentaMp:
     numero_fila_origen: int
@@ -36,25 +46,40 @@ class MovimientoEstadoCuentaMp:
 
 @dataclass(frozen=True)
 class ResumenEstadoCuentaMp:
-    saldo_inicial: Decimal
+    saldo_inicial: Decimal | None
     creditos_informados: Decimal
     debitos_informados: Decimal
-    saldo_final_informado: Decimal
+    saldo_final_informado: Decimal | None
     movimientos: tuple[MovimientoEstadoCuentaMp, ...]
     fecha_desde: datetime
     fecha_hasta: datetime
+    motivo_control_no_disponible: str | None = None
 
     @property
     def variacion_neta(self) -> Decimal:
         return sum((m.importe_neto for m in self.movimientos), Decimal("0"))
 
     @property
-    def saldo_final_calculado(self) -> Decimal:
-        return self.saldo_inicial + self.variacion_neta
+    def saldo_inicial_calculable(self) -> bool:
+        return self.saldo_inicial is not None
 
     @property
-    def diferencia_control(self) -> Decimal:
+    def saldo_final_calculable(self) -> bool:
+        return self.saldo_final_calculado is not None
+
+    @property
+    def saldo_final_calculado(self) -> Decimal | None:
+        return None if self.saldo_inicial is None else self.saldo_inicial + self.variacion_neta
+
+    @property
+    def diferencia_control(self) -> Decimal | None:
+        if self.saldo_final_calculado is None or self.saldo_final_informado is None:
+            return None
         return self.saldo_final_calculado - self.saldo_final_informado
+
+    @property
+    def control_contable_verificable(self) -> bool:
+        return self.diferencia_control is not None
 
 
 @dataclass(frozen=True)
@@ -99,9 +124,24 @@ class GrupoSettlementPorOperacionMp:
 
 
 @dataclass(frozen=True)
+class EvidenciaComercialOperacionMp:
+    id_operacion_mp: str
+    origen_comercial: OrigenComercialOperacionMp
+    evidencia: tuple[str, ...]
+    filas_settlement: tuple[int, ...]
+    canales: tuple[str, ...]
+    plataformas: tuple[str, ...]
+    ids_orden: tuple[str, ...]
+    es_ambiguo: bool
+    motivo_ambiguedad: str | None
+    grupo_b1_canonico: str | None = None
+
+
+@dataclass(frozen=True)
 class ControlEstadoCuentaMp:
     resumen: ResumenEstadoCuentaMp
     movimientos: tuple[MovimientoEstadoCuentaClasificado, ...]
+    metadatos_procesamiento: tuple[tuple[str, str], ...] = tuple()
 
     @property
     def cantidad_lineas_entrada(self) -> int:
@@ -133,6 +173,21 @@ class ControlEstadoCuentaMp:
             and self.cantidad_clasificadas_mas_de_una_vez == 0
             and self.diferencia_cobertura_monetaria == Decimal("0")
         )
+
+    @property
+    def cobertura_comercial_completa(self) -> bool:
+        return self.cobertura_completa and self.cantidad_sin_clasificacion_comercial == 0
+
+    @property
+    def cantidad_sin_clasificacion_comercial(self) -> int:
+        return sum(m.categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE for m in self.movimientos)
+
+    @property
+    def porcentaje_cobertura_comercial(self) -> Decimal:
+        if not self.cantidad_lineas_entrada:
+            return Decimal("0")
+        cubiertas = self.cantidad_lineas_entrada - self.cantidad_sin_clasificacion_comercial
+        return Decimal(cubiertas) * Decimal("100") / Decimal(self.cantidad_lineas_entrada)
 
     @property
     def reference_ids_unicos(self) -> int:

@@ -335,11 +335,15 @@ def _agregar_hojas_estado_cuenta(wb: Workbook, control: ControlEstadoCuentaMp) -
     r = control.resumen
     ws = wb.create_sheet("MP — Control de saldo")
     ws.append(["Métrica", "Valor"])
+    for nombre, valor in control.metadatos_procesamiento:
+        ws.append((nombre, valor))
     for fila in (("Saldo inicial", r.saldo_inicial), ("Créditos informados", r.creditos_informados),
                  ("Débitos informados", r.debitos_informados), ("Variación neta", r.variacion_neta),
                  ("Saldo final calculado", r.saldo_final_calculado), ("Saldo final informado", r.saldo_final_informado),
                  ("Diferencia de control", r.diferencia_control)):
         ws.append(fila)
+    ws.append(("Control contable verificable", "Sí" if r.control_contable_verificable else "No"))
+    ws.append(("Motivo control no disponible", r.motivo_control_no_disponible or ""))
     ws.append([])
     ws.append(["Control por categorías", "Impacto neto"])
     for categoria in CategoriaEstadoCuentaMp:

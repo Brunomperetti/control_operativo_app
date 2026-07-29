@@ -323,3 +323,11 @@ def test_cambio_zona_o_tolerancia_invalida_enriquecimiento_atomico():
         estado = {"enriq_movimientos_mp_por_fila": {2: "anterior"}}
         invalidar_resultados_conocidos(estado)
         assert "enriq_movimientos_mp_por_fila" not in estado
+
+
+def test_cambio_periodo_elimina_resultados_y_estados_de_ambos_bloques():
+    claves = {"reporte_consolidado", "control_estado_cuenta_mp", "estado_b1", "estado_b2_b3",
+              "motivo_b1", "motivo_b2_b3", "disponibilidad_bloques", "firma_procesamiento"}
+    estado = dict.fromkeys(claves, "resultado-del-periodo-anterior")
+    invalidar_resultados_conocidos(estado)
+    assert claves.isdisjoint(estado)
