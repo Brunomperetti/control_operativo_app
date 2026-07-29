@@ -141,6 +141,7 @@ class EvidenciaComercialOperacionMp:
 class ControlEstadoCuentaMp:
     resumen: ResumenEstadoCuentaMp
     movimientos: tuple[MovimientoEstadoCuentaClasificado, ...]
+    metadatos_procesamiento: tuple[tuple[str, str], ...] = tuple()
 
     @property
     def cantidad_lineas_entrada(self) -> int:

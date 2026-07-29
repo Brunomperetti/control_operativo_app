@@ -39,6 +39,23 @@ class TipoSeleccionPeriodo(StrEnum):
     PERSONALIZADO = "Rango personalizado"
 
 
+class EstadoBloqueB1(StrEnum):
+    COMPLETO = "COMPLETO"
+    PARCIAL = "PARCIAL"
+    SIN_ACTIVIDAD_COMERCIAL = "SIN_ACTIVIDAD_COMERCIAL"
+    SIN_ECCOMAPP = "SIN_ECCOMAPP"
+    SIN_VINCULO_MP = "SIN_VINCULO_MP"
+    NO_CALCULABLE = "NO_CALCULABLE"
+
+
+class EstadoBloqueB2B3(StrEnum):
+    COMPLETO = "COMPLETO"
+    COBERTURA_COMERCIAL_PARCIAL = "COBERTURA_COMERCIAL_PARCIAL"
+    CONTROL_CONTABLE_NO_VERIFICABLE = "CONTROL_CONTABLE_NO_VERIFICABLE"
+    SIN_MOVIMIENTOS_EN_PERIODO = "SIN_MOVIMIENTOS_EN_PERIODO"
+    NO_CALCULABLE = "NO_CALCULABLE"
+
+
 @dataclass(frozen=True)
 class PeriodoAnalisis:
     fecha_desde: date
@@ -49,6 +66,42 @@ class PeriodoAnalisis:
     def __post_init__(self) -> None:
         if self.fecha_desde > self.fecha_hasta:
             raise ValueError("La fecha desde no puede ser posterior a la fecha hasta.")
+
+
+@dataclass(frozen=True)
+class DisponibilidadBloques:
+    periodo_solicitado: PeriodoAnalisis
+    periodo_efectivo_b1: PeriodoAnalisis | None
+    periodo_efectivo_b2_b3: PeriodoAnalisis | None
+    fechas_sin_cobertura_b1: tuple[date, ...]
+    fechas_sin_cobertura_b2_b3: tuple[date, ...]
+
+
+def periodo_efectivo(periodo: PeriodoAnalisis, cobertura_disponible: tuple[date, date] | None) -> PeriodoAnalisis | None:
+    if cobertura_disponible is None:
+        return None
+    inicio = max(periodo.fecha_desde, cobertura_disponible[0])
+    fin = min(periodo.fecha_hasta, cobertura_disponible[1])
+    return None if inicio > fin else PeriodoAnalisis(inicio, fin, periodo.zona_horaria, periodo.tipo_seleccion)
+
+
+def fechas_sin_cobertura(periodo: PeriodoAnalisis, efectivo: PeriodoAnalisis | None) -> tuple[date, ...]:
+    cubiertas = set()
+    if efectivo is not None:
+        cubiertas = {efectivo.fecha_desde + timedelta(days=i)
+                     for i in range((efectivo.fecha_hasta - efectivo.fecha_desde).days + 1)}
+    return tuple(periodo.fecha_desde + timedelta(days=i)
+                 for i in range((periodo.fecha_hasta - periodo.fecha_desde).days + 1)
+                 if periodo.fecha_desde + timedelta(days=i) not in cubiertas)
+
+
+def calcular_disponibilidad_bloques(periodo: PeriodoAnalisis,
+                                    cobertura_b1: tuple[date, date] | None,
+                                    cobertura_b2_b3: tuple[date, date] | None) -> DisponibilidadBloques:
+    b1 = periodo_efectivo(periodo, cobertura_b1)
+    b23 = periodo_efectivo(periodo, cobertura_b2_b3)
+    return DisponibilidadBloques(periodo, b1, b23, fechas_sin_cobertura(periodo, b1),
+                                 fechas_sin_cobertura(periodo, b23))
 
 
 @dataclass(frozen=True)

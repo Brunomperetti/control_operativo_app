@@ -19,7 +19,8 @@ from kiki_control.normalization.account_statement import normalizar_estado_cuent
 from kiki_control.linking.account_statement import construir_indice_operacion_mp_a_grupo_ml, controlar_estado_cuenta_mp
 from kiki_control.domain.account_statement import CategoriaEstadoCuentaMp, EstadoVinculacionEstadoCuentaMp
 from kiki_control.domain.temporal import (
-    ETIQUETAS_ESTADO, TipoSeleccionPeriodo, filtrar_estado_cuenta,
+    ETIQUETAS_ESTADO, EstadoBloqueB1, EstadoBloqueB2B3, TipoSeleccionPeriodo,
+    calcular_disponibilidad_bloques, filtrar_estado_cuenta,
     filtrar_por_periodo, reconocer_cuatro_fuentes, resolver_periodo,
     universos_settlement,
 )
@@ -123,7 +124,7 @@ from kiki_control.presentation.control_consolidado_diagnostics import diagnostic
 from kiki_control.reconciliation import reconciliar
 from kiki_control.ui.session_cycle import (
     construir_firma_procesamiento,
-    construir_firma_procesamiento_tres_fuentes,
+    construir_firma_procesamiento_cuatro_fuentes,
     detectar_cambio,
     invalidar_resultados_conocidos,
     limpiar_claves_conocidas,
@@ -251,9 +252,26 @@ def main() -> None:
     firma_actual = _firma_actual(tolerancia, zona)
     if firma_actual is not None:
         st.session_state["firma_actual"] = firma_actual
-    if "reporte_consolidado" in st.session_state and st.session_state.get("firma_procesamiento") == firma_actual:
-        _mostrar_resultados()
-    elif "reporte_consolidado" in st.session_state:
+    if st.session_state.get("firma_procesamiento") == firma_actual and st.session_state.get("estado_b1"):
+        _mostrar_encabezado_bloques()
+        if "reporte_consolidado" in st.session_state:
+            _mostrar_resultados()
+        else:
+            st.info(st.session_state.get("motivo_b1", "B1 no calculable."))
+            if st.session_state.get("control_estado_cuenta_mp") is not None:
+                st.info("La falta de actividad comercial B1 no impide analizar los movimientos y el saldo de Mercado Pago.")
+                _mostrar_estado_cuenta_mp(0)
+                control_independiente = st.session_state["control_estado_cuenta_mp"]
+                periodo_archivo = st.session_state["periodo_analisis"]
+                st.download_button(
+                    "Descargar composición y control de Mercado Pago",
+                    data=generar_control_estado_cuenta_mp_excel(control_independiente),
+                    file_name=f"kiki_control_mp_{periodo_archivo.fecha_desde:%Y%m%d}_{periodo_archivo.fecha_hasta:%Y%m%d}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            else:
+                st.info(st.session_state.get("motivo_b2_b3", "No hay datos para B2/B3."))
+    elif st.session_state.get("firma_procesamiento") is not None:
         invalidar_resultados_conocidos(st.session_state)
 
 def _limpiar_sesion_streamlit() -> None:
@@ -275,6 +293,25 @@ def _inicializar_estado() -> None:
 
 def _mostrar_rango(rango: tuple[date, date] | None) -> str:
     return "Sin datos" if rango is None else f"{rango[0].strftime('%d/%m/%Y')} — {rango[1].strftime('%d/%m/%Y')}"
+
+
+def _texto_periodo(periodo) -> str:
+    return "Sin datos" if periodo is None else f"{periodo.fecha_desde.strftime('%d/%m/%Y')} — {periodo.fecha_hasta.strftime('%d/%m/%Y')}"
+
+
+def _mostrar_encabezado_bloques() -> None:
+    disponibilidad = st.session_state.get("disponibilidad_bloques")
+    if disponibilidad is None:
+        return
+    st.header("Períodos y disponibilidad por bloque")
+    st.table([
+        {"Alcance": "Período solicitado", "Período": _texto_periodo(disponibilidad.periodo_solicitado)},
+        {"Alcance": "B1 — Período comercial efectivo", "Período": _texto_periodo(disponibilidad.periodo_efectivo_b1) if st.session_state.get("estado_b1") != EstadoBloqueB1.SIN_ACTIVIDAD_COMERCIAL else "Sin actividad comercial"},
+        {"Alcance": "B2/B3 — Período financiero efectivo", "Período": _texto_periodo(disponibilidad.periodo_efectivo_b2_b3) if st.session_state.get("estado_b2_b3") != EstadoBloqueB2B3.SIN_MOVIMIENTOS_EN_PERIODO else "Sin movimientos en el estado de cuenta"},
+    ])
+    if disponibilidad.fechas_sin_cobertura_b2_b3:
+        faltantes = ", ".join(f.strftime("%d/%m/%Y") for f in disponibilidad.fechas_sin_cobertura_b2_b3)
+        st.warning(f"El Account Statement no cubre: {faltantes}. El control de saldo se limita a su período efectivo.")
 
 
 def _normalizar_cuatro_fuentes(info_ml, info_ec, info_mp, info_estado, zona):
@@ -373,64 +410,112 @@ def _firma_actual(tolerancia: Decimal | None, zona: str) -> str | None:
     h1 = st.session_state.get("hash_ml_oficial")
     h2 = st.session_state.get("hash_eccomapp")
     h3 = st.session_state.get("hash_mp")
-    if not h1 or not h2 or not h3 or tolerancia is None:
+    h4 = st.session_state.get("hash_estado_cuenta_mp")
+    periodo = st.session_state.get("periodo_analisis")
+    if not h1 or not h2 or not h3 or not h4 or tolerancia is None or periodo is None:
         return None
-    return construir_firma_procesamiento_tres_fuentes(h1, h2, h3, zona, tolerancia) + (st.session_state.get("hash_estado_cuenta_mp") or "")
+    return construir_firma_procesamiento_cuatro_fuentes(h1, h2, h3, h4, zona, tolerancia, periodo)
 
 
 def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], info_mp: dict[str, Any], zona: str, tolerancia: Decimal, info_estado: dict[str, Any] | None = None, periodo=None, normalizados=None) -> None:
     with st.spinner("Normalizando, vinculando, conciliando y consolidando…"):
+        # Nunca conservar resultados de un bloque pertenecientes al período anterior.
+        for clave in ("reporte_comercial", "reporte_financiero", "reporte", "reporte_consolidado",
+                      "diagnostico_ml_eccomapp", "control_estado_cuenta_mp", "cobertura",
+                      "cobertura_consolidada", "estado_b1", "estado_b2_b3", "motivo_b1",
+                      "motivo_b2_b3", "disponibilidad_bloques"):
+            st.session_state.pop(clave, None)
         if normalizados is None:
             if info_estado is None:
                 raise ValueError("Se requieren las cuatro fuentes normalizadas.")
             normalizados = _normalizar_cuatro_fuentes(info_ml_oficial, info_eccomapp, info_mp, info_estado, zona)
         ventas_ml, eccomapp, mercado_pago, resumen_estado_completo = normalizados
         settlement_completo = mercado_pago.movimientos
-        if periodo is not None:
-            ventas_ml = replace(ventas_ml, ventas=filtrar_por_periodo(ventas_ml.ventas, "fecha_venta", periodo))
-            # El motor comercial selecciona Eccomapp por orden/carrito canónico;
-            # no se lo limita prematuramente solo por fecha.
-            reporte_preliminar = vincular_ventas_oficiales_con_eccomapp(ventas_ml.ventas, eccomapp.operaciones)
-            operaciones_b1 = tuple(op for r in reporte_preliminar.resultados
-                                   if r.venta_principal_ml or r.ventas_detalle_ml
-                                   for op in r.operaciones_eccomapp)
-            eccomapp = replace(eccomapp, operaciones=operaciones_b1)
-            reporte_comercial = vincular_ventas_oficiales_con_eccomapp(ventas_ml.ventas, eccomapp.operaciones)
-            settlement_b1, _ = universos_settlement(ventas_ml.ventas, eccomapp.operaciones, settlement_completo, periodo, reporte_comercial)
-            mercado_pago = replace(mercado_pago, movimientos=settlement_b1)
+        reconocimiento = reconocer_cuatro_fuentes(ventas_ml.ventas, eccomapp.operaciones, settlement_completo, resumen_estado_completo)
+        cobertura_ml = reconocimiento.coberturas[0]
+        rango_ml = ((cobertura_ml.fecha_desde, cobertura_ml.fecha_hasta)
+                    if cobertura_ml.fecha_desde and cobertura_ml.fecha_hasta else None)
+        disponibilidad = calcular_disponibilidad_bloques(
+            periodo, rango_ml, reconocimiento.periodo_b2_b3_disponible)
+        st.session_state["disponibilidad_bloques"] = disponibilidad
+
+        periodo_b1 = disponibilidad.periodo_efectivo_b1
+        ventas_b1 = filtrar_por_periodo(ventas_ml.ventas, "fecha_venta", periodo_b1) if periodo_b1 else tuple()
+        ventas_ml = replace(ventas_ml, ventas=ventas_b1)
+        eccomapp_b1 = tuple()
+        settlement_b1 = tuple()
+        reporte_consolidado = None
+        indice_ml = {}
+
+        # B1 es opcional para la ejecución global.
+        if not ventas_b1:
+            st.session_state["estado_b1"] = EstadoBloqueB1.SIN_ACTIVIDAD_COMERCIAL
+            st.session_state["motivo_b1"] = "No hay ventas de Mercado Libre originadas en el período seleccionado."
+        else:
+            reporte_preliminar = vincular_ventas_oficiales_con_eccomapp(ventas_b1, eccomapp.operaciones)
+            eccomapp_b1 = tuple(op for r in reporte_preliminar.resultados
+                               if r.venta_principal_ml or r.ventas_detalle_ml
+                               for op in r.operaciones_eccomapp)
+            if not eccomapp_b1:
+                st.session_state["estado_b1"] = EstadoBloqueB1.SIN_ECCOMAPP
+                st.session_state["motivo_b1"] = "Hay ventas ML, pero no existen operaciones Eccomapp coincidentes para el período."
+            else:
+                eccomapp = replace(eccomapp, operaciones=eccomapp_b1)
+                reporte_comercial = vincular_ventas_oficiales_con_eccomapp(ventas_b1, eccomapp_b1)
+                settlement_b1, _ = universos_settlement(ventas_b1, eccomapp_b1, settlement_completo, periodo_b1, reporte_comercial)
+                if not settlement_b1:
+                    st.session_state["estado_b1"] = EstadoBloqueB1.SIN_VINCULO_MP
+                    st.session_state["motivo_b1"] = "El Settlement no contiene operaciones vinculadas a los grupos comerciales seleccionados."
+                else:
+                    reporte_financiero = reconciliar(eccomapp_b1, settlement_b1, tolerancia)
+                    reporte_consolidado = consolidar_control_financiero(reporte_comercial, reporte_financiero)
+                    estado_b1 = (EstadoBloqueB1.PARCIAL if any(r.requiere_revision for r in reporte_consolidado.resultados)
+                                 else EstadoBloqueB1.COMPLETO)
+                    st.session_state["estado_b1"] = estado_b1
+                    st.session_state["motivo_b1"] = "Conciliación comercial procesada." if estado_b1 == EstadoBloqueB1.COMPLETO else "La conciliación comercial requiere revisión."
+                    st.session_state["reporte_comercial"] = reporte_comercial
+                    st.session_state["reporte_financiero"] = reporte_financiero
+                    st.session_state["reporte"] = reporte_financiero
+                    st.session_state["reporte_consolidado"] = reporte_consolidado
+                    st.session_state["diagnostico_ml_eccomapp"] = diagnosticar_ml_eccomapp(ventas_b1, eccomapp_b1)
+                    st.session_state["cobertura_consolidada"] = cobertura_tres_fuentes(ventas_b1, eccomapp_b1, settlement_b1)
+                    st.session_state["cobertura"] = cobertura_archivos(eccomapp_b1, settlement_b1)
+                    indice_ml = construir_indice_operacion_mp_a_grupo_ml(reporte_consolidado, settlement_b1)
+
+        eccomapp = replace(eccomapp, operaciones=eccomapp_b1)
+
+        # B2/B3 siempre se intenta con Statement filtrado y Settlement completo,
+        # aunque B1 no haya podido construir su índice canónico.
+        resumen_estado = filtrar_estado_cuenta(resumen_estado_completo, disponibilidad.periodo_efectivo_b2_b3) if disponibilidad.periodo_efectivo_b2_b3 else None
+        if resumen_estado is None:
+            st.session_state["estado_b2_b3"] = EstadoBloqueB2B3.SIN_MOVIMIENTOS_EN_PERIODO
+            st.session_state["motivo_b2_b3"] = "No hay movimientos del estado de cuenta dentro del período seleccionado."
+        else:
+            control = controlar_estado_cuenta_mp(resumen_estado, settlement_completo, indice_ml)
+            if not control.cobertura_comercial_completa:
+                estado_b23 = EstadoBloqueB2B3.COBERTURA_COMERCIAL_PARCIAL
+            elif not control.resumen.control_contable_verificable:
+                estado_b23 = EstadoBloqueB2B3.CONTROL_CONTABLE_NO_VERIFICABLE
+            else:
+                estado_b23 = EstadoBloqueB2B3.COMPLETO
+            st.session_state["estado_b2_b3"] = estado_b23
+            st.session_state["motivo_b2_b3"] = "Composición financiera procesada de forma independiente de B1."
+            control = replace(control, metadatos_procesamiento=(
+                ("Período solicitado", _texto_periodo(periodo)),
+                ("Período efectivo B1", _texto_periodo(disponibilidad.periodo_efectivo_b1)),
+                ("Período efectivo B2/B3", _texto_periodo(disponibilidad.periodo_efectivo_b2_b3)),
+                ("Estado B1", st.session_state["estado_b1"].value),
+                ("Estado B2/B3", estado_b23.value),
+            ))
+            st.session_state["control_estado_cuenta_mp"] = control
+
+        mercado_pago = replace(mercado_pago, movimientos=settlement_b1)
         st.session_state["normalizacion"] = {"Ventas oficiales ML": ventas_ml, "Eccomapp": eccomapp, "Mercado Pago": mercado_pago}
         _mostrar_normalizacion("Ventas oficiales ML", ventas_ml)
         _mostrar_normalizacion("Eccomapp", eccomapp)
         _mostrar_normalizacion("Mercado Pago", mercado_pago)
-        if not ventas_ml.ventas:
-            st.error("No quedaron ventas oficiales de Mercado Libre válidas; no se puede consolidar.")
-            return
-        if not eccomapp.operaciones:
-            st.error("No quedaron operaciones/costos de Eccomapp válidos; no se puede consolidar.")
-            return
-        if not mercado_pago.movimientos:
-            st.error("No quedaron movimientos de Mercado Pago válidos; no se puede consolidar.")
-            return
-        reporte_comercial = locals().get("reporte_comercial") or vincular_ventas_oficiales_con_eccomapp(ventas_ml.ventas, eccomapp.operaciones)
-        reporte_financiero = reconciliar(eccomapp.operaciones, mercado_pago.movimientos, tolerancia)
-        reporte_consolidado = consolidar_control_financiero(reporte_comercial, reporte_financiero)
-        firma = construir_firma_procesamiento_tres_fuentes(st.session_state["hash_ml_oficial"], st.session_state["hash_eccomapp"], st.session_state["hash_mp"], zona, tolerancia) + (st.session_state.get("hash_estado_cuenta_mp") or "")
-        st.session_state["reporte_comercial"] = reporte_comercial
-        st.session_state["reporte_financiero"] = reporte_financiero
-        st.session_state["reporte"] = reporte_financiero
-        st.session_state["reporte_consolidado"] = reporte_consolidado
-        st.session_state["diagnostico_ml_eccomapp"] = diagnosticar_ml_eccomapp(ventas_ml.ventas, eccomapp.operaciones)
-        st.session_state["cobertura_consolidada"] = cobertura_tres_fuentes(ventas_ml.ventas, eccomapp.operaciones, mercado_pago.movimientos)
-        st.session_state["cobertura"] = cobertura_archivos(eccomapp.operaciones, mercado_pago.movimientos)
+        firma = construir_firma_procesamiento_cuatro_fuentes(st.session_state["hash_ml_oficial"], st.session_state["hash_eccomapp"], st.session_state["hash_mp"], st.session_state.get("hash_estado_cuenta_mp"), zona, tolerancia, periodo)
         st.session_state["firma_procesamiento"] = firma
-        st.session_state.pop("control_estado_cuenta_mp", None)
-        if info_estado is not None:
-            resumen_estado = resumen_estado_completo
-            resumen_estado = filtrar_estado_cuenta(resumen_estado, periodo) if periodo is not None else resumen_estado
-            indice_ml = construir_indice_operacion_mp_a_grupo_ml(reporte_consolidado, mercado_pago.movimientos)
-            if resumen_estado is not None:
-                # B2/B3 busca REFERENCE_ID en toda la cobertura del único Settlement.
-                st.session_state["control_estado_cuenta_mp"] = controlar_estado_cuenta_mp(resumen_estado, settlement_completo, indice_ml)
         # Datos de enriquecimiento para Bloque B
         st.session_state["enriq_movimientos_mp_por_fila"] = enriquecimientos_movimientos_mp_por_fila(
             mercado_pago.movimientos
@@ -1204,7 +1289,10 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
     st.header("Mercado Pago — composición comercial y control de saldo")
     control = st.session_state.get("control_estado_cuenta_mp")
     if control is None:
-        st.info("El control diario de saldo no está disponible porque no se cargó el Account Statement opcional.")
+        if st.session_state.get("estado_b2_b3") == EstadoBloqueB2B3.SIN_MOVIMIENTOS_EN_PERIODO:
+            st.info("No hay movimientos del estado de cuenta dentro del período seleccionado. La conciliación comercial B1 puede continuar disponible.")
+        else:
+            st.info(st.session_state.get("motivo_b2_b3", "El control de saldo no está disponible para este período."))
         return
     st.markdown("### B2 — Composición comercial de los movimientos de Mercado Pago")
     st.info(aclaracion_b1_b2(cantidad_grupos_conciliados))

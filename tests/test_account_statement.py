@@ -60,6 +60,18 @@ def test_excel_real_preserva_ids_fechas_y_no_contiene_formulas_rotas():
     assert not any(isinstance(c.value, str) and c.value.startswith("#") for sheet in wb for row in sheet for c in row)
 
 
+def test_exportacion_b2_independiente_incluye_metadatos_de_periodos_y_estados():
+    from dataclasses import replace
+    control = controlar_estado_cuenta_mp(normalizar_estado_cuenta_mp("a.xlsx", archivo_estado()), [settlement()])
+    control = replace(control, metadatos_procesamiento=(("Período solicitado", "18/07/2026 — 20/07/2026"),
+                                                       ("Estado B1", "SIN_ACTIVIDAD_COMERCIAL"),
+                                                       ("Estado B2/B3", "COMPLETO")))
+    wb = load_workbook(BytesIO(generar_control_estado_cuenta_mp_excel(control)), data_only=True)
+    valores = {(r[0].value, r[1].value) for r in wb["MP — Control de saldo"].iter_rows(min_row=2) if r[0].value}
+    assert ("Estado B1", "SIN_ACTIVIDAD_COMERCIAL") in valores
+    assert ("Estado B2/B3", "COMPLETO") in valores
+
+
 def _settlement(fila, operacion="OP-1", orden="ORD-1", canal="Mercado Libre", plataforma="Checkout"):
     return SimpleNamespace(id_operacion_mercado_pago=operacion, numero_fila_origen=fila, id_orden=orden, canal_venta=canal, plataforma_cobro=plataforma)
 

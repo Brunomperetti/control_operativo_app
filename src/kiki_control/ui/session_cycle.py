@@ -20,6 +20,11 @@ SESSION_KEYS_TO_CLEAR = (
     "reconocimiento_cuatro_fuentes",
     "periodo_analisis",
     "resumen_diario_mp",
+    "estado_b1",
+    "estado_b2_b3",
+    "motivo_b1",
+    "motivo_b2_b3",
+    "disponibilidad_bloques",
     "normalizacion",
     "cobertura",
     "cobertura_consolidada",
@@ -83,6 +88,12 @@ RESULT_KEYS_TO_CLEAR = (
     "diagnostico_ml_eccomapp",
     "firma_procesamiento",
     "firma_actual",
+    "control_estado_cuenta_mp",
+    "estado_b1",
+    "estado_b2_b3",
+    "motivo_b1",
+    "motivo_b2_b3",
+    "disponibilidad_bloques",
     "filtro_estados",
     "filtro_busqueda_orden",
     "filtro_solo_revision",
@@ -163,6 +174,31 @@ def construir_firma_procesamiento_tres_fuentes(hash_ml_oficial: str | None, hash
         "hash_mp": hash_mp or "",
         "zona_horaria": zona_horaria,
         "tolerancia": tolerancia_canonica(tolerancia),
+    }
+    serializado = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serializado.encode("utf-8")).hexdigest()
+
+
+def construir_firma_procesamiento_cuatro_fuentes(
+    hash_ml_oficial: str | None,
+    hash_eccomapp: str | None,
+    hash_mp: str | None,
+    hash_estado: str | None,
+    zona_horaria: str,
+    tolerancia: Decimal,
+    periodo: Any,
+) -> str:
+    """Firma archivos, configuración y período; dos rangos nunca comparten resultados."""
+    payload = {
+        "hash_ml_oficial": hash_ml_oficial or "",
+        "hash_eccomapp": hash_eccomapp or "",
+        "hash_mp": hash_mp or "",
+        "hash_estado": hash_estado or "",
+        "zona_horaria": zona_horaria,
+        "tolerancia": tolerancia_canonica(tolerancia),
+        "fecha_desde": periodo.fecha_desde.isoformat(),
+        "fecha_hasta": periodo.fecha_hasta.isoformat(),
+        "tipo_seleccion": str(periodo.tipo_seleccion),
     }
     serializado = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serializado.encode("utf-8")).hexdigest()

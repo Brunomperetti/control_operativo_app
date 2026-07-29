@@ -62,3 +62,8 @@ def test_operacion_b1_canonica_tiene_evidencia_prioritaria():
     evidencia = construir_evidencias_comerciales_operaciones(
         agrupar_settlement_por_operacion([settlement()], {"HIST": ("GRUPO-B1",)}))["HIST"]
     assert evidencia.origen_comercial == OrigenComercialOperacionMp.MERCADO_LIBRE_PERIODO_B1
+
+
+def test_transferencia_se_identifica_sin_indice_b1():
+    item = controlar_estado_cuenta_mp(resumen("Transferencia enviada", "-10", "TRANSFER"), []).movimientos[0]
+    assert item.categoria == CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO

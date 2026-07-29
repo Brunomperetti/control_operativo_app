@@ -7,9 +7,11 @@ import pytest
 
 from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
 from kiki_control.domain.temporal import (
-    EstadoReconocimiento, TipoSeleccionPeriodo, filtrar_estado_cuenta,
+    EstadoBloqueB1, EstadoBloqueB2B3, EstadoReconocimiento, TipoSeleccionPeriodo,
+    calcular_disponibilidad_bloques, filtrar_estado_cuenta,
     reconocer_cuatro_fuentes, resolver_periodo, universos_settlement,
 )
+from kiki_control.ui.session_cycle import construir_firma_procesamiento_cuatro_fuentes
 
 
 @dataclass(frozen=True)
@@ -127,3 +129,21 @@ def test_rango_completo_sin_partial_usa_saldo_inicial_informado():
     filtrado = filtrar_estado_cuenta(original, p)
     assert filtrado is not None and filtrado.control_contable_verificable
     assert filtrado.saldo_inicial == Decimal("100") and filtrado.diferencia_control == Decimal("0")
+
+
+def test_periodos_efectivos_independientes_y_fechas_sin_cobertura():
+    solicitado = resolver_periodo(TipoSeleccionPeriodo.PERSONALIZADO, "UTC", desde=date(2026, 7, 18), hasta=date(2026, 7, 20))
+    disponibilidad = calcular_disponibilidad_bloques(
+        solicitado, (date(2026, 7, 18), date(2026, 7, 20)), (date(2026, 7, 20), date(2026, 7, 20)))
+    assert (disponibilidad.periodo_efectivo_b1.fecha_desde, disponibilidad.periodo_efectivo_b1.fecha_hasta) == (date(2026, 7, 18), date(2026, 7, 20))
+    assert disponibilidad.periodo_efectivo_b2_b3.fecha_desde == date(2026, 7, 20)
+    assert disponibilidad.fechas_sin_cobertura_b2_b3 == (date(2026, 7, 18), date(2026, 7, 19))
+
+
+def test_firma_de_cuatro_fuentes_cambia_con_periodo_y_tipo():
+    p1 = resolver_periodo(TipoSeleccionPeriodo.PERSONALIZADO, "UTC", desde=date(2026, 7, 18), hasta=date(2026, 7, 20))
+    p2 = resolver_periodo(TipoSeleccionPeriodo.PERSONALIZADO, "UTC", desde=date(2026, 7, 20), hasta=date(2026, 7, 20))
+    f1 = construir_firma_procesamiento_cuatro_fuentes("1", "2", "3", "4", "UTC", Decimal("0.01"), p1)
+    f2 = construir_firma_procesamiento_cuatro_fuentes("1", "2", "3", "4", "UTC", Decimal("0.01"), p2)
+    assert f1 != f2
+    assert set(EstadoBloqueB1) and set(EstadoBloqueB2B3)
