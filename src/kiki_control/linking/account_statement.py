@@ -8,8 +8,10 @@ from kiki_control.domain.account_statement import (
     CategoriaEstadoCuentaMp,
     ControlEstadoCuentaMp,
     EstadoVinculacionEstadoCuentaMp,
+    EvidenciaComercialOperacionMp,
     GrupoSettlementPorOperacionMp,
     MovimientoEstadoCuentaClasificado,
+    OrigenComercialOperacionMp,
 )
 
 
@@ -87,11 +89,56 @@ def controlar_estado_cuenta_mp(
     operacion_a_grupo_ml: Mapping[str, str | Iterable[str]] | None = None,
 ) -> ControlEstadoCuentaMp:
     grupos = agrupar_settlement_por_operacion(movimientos_settlement, operacion_a_grupo_ml)
-    clasificados = tuple(_clasificar(m, grupos) for m in resumen.movimientos)
+    evidencias = construir_evidencias_comerciales_operaciones(grupos)
+    clasificados = tuple(_clasificar(m, grupos, evidencias) for m in resumen.movimientos)
     return ControlEstadoCuentaMp(resumen, clasificados)
 
 
-def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp]) -> MovimientoEstadoCuentaClasificado:
+def construir_evidencias_comerciales_operaciones(
+    grupos: Mapping[str, GrupoSettlementPorOperacionMp],
+) -> dict[str, EvidenciaComercialOperacionMp]:
+    """Resuelve evidencia histórica desde el Settlement completo, separada de B1."""
+    resultado = {}
+    for operacion, grupo in grupos.items():
+        canales = tuple(c.casefold() for c in grupo.canales)
+        plataformas = tuple(p.casefold() for p in grupo.plataformas)
+        canal_ml = any("mercado libre" in c for c in canales)
+        canal_mp = any("mercado pago" in c for c in canales)
+        qr = any("código qr" in p or "codigo qr" in p or "qr" == p.strip() for p in plataformas)
+        point = any("point" in p for p in plataformas)
+        evidencia = []
+        if grupo.es_ambiguo or len(grupo.ids_grupo_ml) > 1 or (canal_ml and (canal_mp or qr or point)):
+            origen = OrigenComercialOperacionMp.AMBIGUO
+            evidencia.append(grupo.motivo_ambiguedad or "El Settlement mezcla evidencia ML y Mercado Pago/QR/Point.")
+        elif grupo.ids_grupo_ml:
+            origen = OrigenComercialOperacionMp.MERCADO_LIBRE_PERIODO_B1
+            evidencia.append("Vínculo canónico con un grupo ML del período B1.")
+        elif canal_ml and grupo.ids_orden and not (qr or point or canal_mp):
+            origen = OrigenComercialOperacionMp.MERCADO_LIBRE_HISTORICO
+            evidencia.extend(("Canal de venta Mercado Libre.", "ID de orden ML presente en una agrupación Settlement coherente."))
+        elif qr and not canal_ml:
+            origen = OrigenComercialOperacionMp.MERCADO_PAGO_QR
+            evidencia.append("Plataforma Código QR informada por el Settlement.")
+        elif point and not canal_ml:
+            origen = OrigenComercialOperacionMp.MERCADO_PAGO_POINT
+            evidencia.append("Plataforma Point informada por el Settlement.")
+        elif grupo.canales or grupo.plataformas:
+            origen = OrigenComercialOperacionMp.OTRO
+            evidencia.append("El Settlement aporta canal o plataforma no ML.")
+        else:
+            origen = OrigenComercialOperacionMp.NO_DETERMINADO
+            evidencia.append("El Settlement no aporta evidencia comercial suficiente.")
+        resultado[operacion] = EvidenciaComercialOperacionMp(
+            operacion, origen, tuple(evidencia), grupo.filas_origen, grupo.canales,
+            grupo.plataformas, grupo.ids_orden, origen == OrigenComercialOperacionMp.AMBIGUO,
+            grupo.motivo_ambiguedad if origen == OrigenComercialOperacionMp.AMBIGUO else None,
+            grupo.ids_grupo_ml[0] if len(grupo.ids_grupo_ml) == 1 else None,
+        )
+    return resultado
+
+
+def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp],
+                evidencias: Mapping[str, EvidenciaComercialOperacionMp]) -> MovimientoEstadoCuentaClasificado:
     grupo_settlement = grupos.get(m.reference_id or "")
     if not m.reference_id:
         estado = EstadoVinculacionEstadoCuentaMp.ID_VACIO
@@ -106,11 +153,20 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp]) -> 
     canales = tuple(c.casefold() for c in coherente.canales) if coherente else tuple()
     plataformas = tuple(p.casefold() for p in coherente.plataformas) if coherente else tuple()
     id_grupo_ml = coherente.ids_grupo_ml[0] if coherente and len(coherente.ids_grupo_ml) == 1 else None
+    evidencia = evidencias.get(m.reference_id or "")
     es_salida = any(x in texto for x in ("transferencia enviada", "pago a proveedor", "retenido", "cancelada", "devolución", "devolucion", "reclamo", "impuesto", "comisión", "comision", "débito", "debito"))
     # La evidencia canónica ML prevalece sobre el signo y sobre el tipo: una
     # devolución, retención o comisión vinculada continúa perteneciendo a ML.
-    if id_grupo_ml:
+    if evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.MERCADO_LIBRE_PERIODO_B1:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML, "Movimiento de venta Mercado Libre", "El motor consolidado vinculó las filas settlement a un único grupo ML canónico."
+    elif evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.MERCADO_LIBRE_HISTORICO:
+        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML, "Movimiento de operación Mercado Libre histórica", " ".join(evidencia.evidencia)
+    elif evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.MERCADO_PAGO_QR and m.importe_neto > 0:
+        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta por mostrador con Código QR", " ".join(evidencia.evidencia)
+    elif evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.MERCADO_PAGO_POINT and m.importe_neto > 0:
+        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta con Point", " ".join(evidencia.evidencia)
+    elif evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.AMBIGUO:
+        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE, "Origen comercial ambiguo", " ".join(evidencia.evidencia)
     elif es_salida:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO, m.tipo_movimiento_original, "El tipo original identifica explícitamente una salida o ajuste no vinculada a ML."
     elif coherente and m.importe_neto > 0 and ("mercado pago" in canales or any("código qr" in p or "codigo qr" in p for p in plataformas)):

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 from zoneinfo import ZoneInfo
 
 from kiki_control.domain.account_statement import ResumenEstadoCuentaMp
@@ -91,7 +91,9 @@ def cobertura(fuente: str, tipo: str, registros: Sequence[object], atributo_fech
               atributo_id: str, observacion: str) -> CoberturaTemporalFuente:
     fechas = tuple(filter(None, (_fecha(getattr(r, atributo_fecha, None)) for r in registros)))
     ids = {str(v).strip() for r in registros if (v := getattr(r, atributo_id, None)) is not None and str(v).strip()}
-    estado = EstadoReconocimiento.LISTO_PARA_ANALIZAR if fechas else EstadoReconocimiento.ARCHIVO_SIN_FECHAS_VALIDAS
+    # Las fechas solo acreditan cobertura temporal preliminar; la suficiencia
+    # definitiva requiere vínculos por IDs y cobertura comercial/monetaria.
+    estado = EstadoReconocimiento.PENDIENTE_DE_VALIDACION_POR_IDS if fechas else EstadoReconocimiento.ARCHIVO_SIN_FECHAS_VALIDAS
     return CoberturaTemporalFuente(fuente, tipo, min(fechas) if fechas else None,
                                    max(fechas) if fechas else None, len(registros), len(ids),
                                    len(registros) - len(fechas), estado, observacion)
@@ -155,23 +157,65 @@ def filtrar_estado_cuenta(resumen: ResumenEstadoCuentaMp, periodo: PeriodoAnalis
     if not movimientos:
         return None
     primero, ultimo = movimientos[0], movimientos[-1]
-    inicial = primero.saldo_parcial - primero.importe_neto if primero.saldo_parcial is not None else (
-        resumen.saldo_inicial if _fecha(resumen.fecha_desde) == periodo.fecha_desde else Decimal("0"))
-    final = ultimo.saldo_parcial if ultimo.saldo_parcial is not None else inicial + sum((m.importe_neto for m in movimientos), Decimal("0"))
+    comienza_con_statement = _fecha(resumen.fecha_desde) == periodo.fecha_desde
+    inicial = (primero.saldo_parcial - primero.importe_neto if primero.saldo_parcial is not None
+               else resumen.saldo_inicial if comienza_con_statement else None)
+    motivo = None
+    if inicial is None:
+        motivo = ("La composición de movimientos puede analizarse, pero el archivo no aporta evidencia suficiente "
+                  "para reconstruir el saldo inicial de este recorte.")
+    # PARTIAL_BALANCE es evidencia explícita del saldo posterior al movimiento.
+    # Sin él solo se deriva el final si el saldo inicial del recorte es conocido.
+    final = (ultimo.saldo_parcial if ultimo.saldo_parcial is not None else
+             inicial + sum((m.importe_neto for m in movimientos), Decimal("0")) if inicial is not None else None)
     creditos = sum((m.importe_neto for m in movimientos if m.importe_neto > 0), Decimal("0"))
     debitos = sum((m.importe_neto for m in movimientos if m.importe_neto < 0), Decimal("0"))
     return ResumenEstadoCuentaMp(inicial, creditos, debitos, final, movimientos,
-                                 min(m.fecha_liberacion for m in movimientos), max(m.fecha_liberacion for m in movimientos))
+                                 min(m.fecha_liberacion for m in movimientos), max(m.fecha_liberacion for m in movimientos), motivo)
 
 
 def universos_settlement(ventas: Sequence[object], operaciones: Sequence[object], settlement: Sequence[object],
-                         periodo: PeriodoAnalisis) -> tuple[tuple[object, ...], tuple[object, ...]]:
-    """Deriva B1 por vínculos comerciales y conserva Settlement completo para B2/B3."""
+                         periodo: PeriodoAnalisis, reporte_comercial: Any | None = None) -> tuple[tuple[object, ...], tuple[object, ...]]:
+    """Deriva B1 desde grupos comerciales y conserva Settlement completo para B2/B3.
+
+    ``id_venta`` nunca se compara con el ID de operación MP. El reporte del
+    motor aporta órdenes/carritos canónicos; una vez hallada una fila se
+    expanden todas las filas de la misma operación y órdenes relacionadas.
+    """
     ventas_periodo = filtrar_por_periodo(ventas, "fecha_venta", periodo)
     ops_periodo = filtrar_por_periodo(operaciones, "fecha_hora_venta", periodo)
-    ids = {str(getattr(x, a)).strip() for x, a in
-           ((*((x, "id_venta") for x in ventas_periodo), *((x, "id_orden") for x in ops_periodo)))
-           if getattr(x, a, None)}
-    b1 = tuple(m for m in settlement if any(str(getattr(m, a, "") or "").strip() in ids
-                                            for a in ("id_operacion_mercado_pago", "id_orden", "id_paquete")))
+    ids_orden = {str(getattr(x, "id_orden")).strip() for x in ops_periodo if getattr(x, "id_orden", None)}
+    grupos = set()
+    if reporte_comercial is not None:
+        for resultado in reporte_comercial.resultados:
+            tiene_venta_periodo = any(v in ventas_periodo for v in (
+                *((resultado.venta_principal_ml,) if resultado.venta_principal_ml else ()),
+                *resultado.ventas_detalle_ml,
+            ))
+            if not tiene_venta_periodo:
+                continue
+            grupos.add(resultado.id_grupo_canonico)
+            ids_orden.update(str(x).strip() for x in resultado.ids_orden if x)
+            ids_orden.update(str(op.id_orden).strip() for op in resultado.operaciones_eccomapp if op.id_orden)
+            ids_orden.update(str(op.id_carrito).strip() for op in resultado.operaciones_eccomapp if getattr(op, "id_carrito", None))
+    # Semilla exclusivamente por orden/grupo comercial, nunca por id_venta=id_operación MP.
+    ids_operacion = {str(m.id_operacion_mercado_pago).strip() for m in settlement
+                     if str(getattr(m, "id_orden", "") or "").strip() in ids_orden
+                     or str(getattr(m, "id_paquete", "") or "").strip() in grupos}
+    # Expansión transitiva: devoluciones/ajustes pueden aportar la operación en
+    # otra fila, pero comparten orden, paquete o referencia de reembolso.
+    cambio = True
+    while cambio:
+        cambio = False
+        for m in settlement:
+            operacion = str(getattr(m, "id_operacion_mercado_pago", "") or "").strip()
+            orden = str(getattr(m, "id_orden", "") or "").strip()
+            paquete = str(getattr(m, "id_paquete", "") or "").strip()
+            relacionada = operacion in ids_operacion or orden in ids_orden or paquete in grupos
+            if relacionada:
+                if operacion and operacion not in ids_operacion:
+                    ids_operacion.add(operacion); cambio = True
+                if orden and orden not in ids_orden:
+                    ids_orden.add(orden); cambio = True
+    b1 = tuple(m for m in settlement if str(getattr(m, "id_operacion_mercado_pago", "") or "").strip() in ids_operacion)
     return b1, tuple(settlement)

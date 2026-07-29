@@ -134,7 +134,9 @@ def test_regresion_anonimizada_cuatro_archivos_productivos():
         if i == 0:
             settlements.append(_settlement(781, ref, None, "Mercado Pago", "Código QR"))
         else:
-            settlements.append(_settlement(800 + i, ref, f"ORD-{linked_ids.index(ref):03}"))
+                # Esta regresión histórica prueba cobertura sin atribución de
+                # canal; la evidencia ML histórica se cubre en pruebas propias.
+                settlements.append(_settlement(800 + i, ref, f"ORD-{linked_ids.index(ref):03}", None, None))
     control = controlar_estado_cuenta_mp(resumen, settlements)
     assert (len(resumen.movimientos), resumen.saldo_inicial, resumen.creditos_informados, resumen.debitos_informados, resumen.saldo_final_informado) == (646, Decimal("26316618.06"), Decimal("9222725.75"), Decimal("-16575362.17"), Decimal("18963981.64"))
     assert resumen.diferencia_control == Decimal("0.00")
@@ -186,7 +188,7 @@ def test_acciones_recomendadas_se_diferencian_por_estado_de_vinculacion():
         return ResumenEstadoCuentaMp(Decimal("0"), Decimal("0"), Decimal("0"), importe, (movimiento,), datetime(2026, 7, 28), datetime(2026, 7, 28))
 
     sin_vinculo = controlar_estado_cuenta_mp(resumen(), []).movimientos[0]
-    vinculado_sin_origen = controlar_estado_cuenta_mp(resumen(), [_settlement(10, "REF")]).movimientos[0]
+    vinculado_sin_origen = controlar_estado_cuenta_mp(resumen(), [_settlement(10, "REF", canal=None, plataforma=None)]).movimientos[0]
     ambiguo = controlar_estado_cuenta_mp(resumen(), [_settlement(10, "REF", "A"), _settlement(11, "REF", "B")]).movimientos[0]
     id_vacio = controlar_estado_cuenta_mp(resumen(reference_id=None), []).movimientos[0]
     identificado = controlar_estado_cuenta_mp(resumen("QR"), [_settlement(12, "QR", None, "Mercado Pago", "Código QR")]).movimientos[0]
