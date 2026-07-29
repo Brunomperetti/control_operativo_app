@@ -107,13 +107,15 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp]) -> 
     plataformas = tuple(p.casefold() for p in coherente.plataformas) if coherente else tuple()
     id_grupo_ml = coherente.ids_grupo_ml[0] if coherente and len(coherente.ids_grupo_ml) == 1 else None
     es_salida = any(x in texto for x in ("transferencia enviada", "pago a proveedor", "retenido", "cancelada", "devolución", "devolucion", "reclamo", "impuesto", "comisión", "comision", "débito", "debito"))
-    if es_salida:
-        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO, m.tipo_movimiento_original, "El tipo original identifica explícitamente una salida o ajuste."
-    elif id_grupo_ml:
+    # La evidencia canónica ML prevalece sobre el signo y sobre el tipo: una
+    # devolución, retención o comisión vinculada continúa perteneciendo a ML.
+    if id_grupo_ml:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML, "Movimiento de venta Mercado Libre", "El motor consolidado vinculó las filas settlement a un único grupo ML canónico."
+    elif es_salida:
+        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO, m.tipo_movimiento_original, "El tipo original identifica explícitamente una salida o ajuste no vinculada a ML."
     elif coherente and m.importe_neto > 0 and ("mercado pago" in canales or any("código qr" in p or "codigo qr" in p for p in plataformas)):
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta por mostrador con Código QR", "El settlement identifica canal Mercado Pago o plataforma Código QR y no pertenece a un grupo ML."
-    elif m.importe_neto > 0 and any(x in texto for x in ("rendimiento", "código qr", "codigo qr", "programa de protección", "programa de proteccion")):
+    elif m.importe_neto > 0 and any(x in texto for x in ("rendimiento", "código qr", "codigo qr", "programa de protección", "programa de proteccion", "reintegro de comisión", "reintegro de comision")):
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, m.tipo_movimiento_original, "El tipo original aporta evidencia explícita de un ingreso no ML."
     else:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE, "Origen no determinado", "No existe vínculo settlement inequívoco ni evidencia suficiente en el estado de cuenta."

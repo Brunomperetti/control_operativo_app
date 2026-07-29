@@ -135,6 +135,21 @@ class ControlEstadoCuentaMp:
         )
 
     @property
+    def cobertura_comercial_completa(self) -> bool:
+        return self.cobertura_completa and self.cantidad_sin_clasificacion_comercial == 0
+
+    @property
+    def cantidad_sin_clasificacion_comercial(self) -> int:
+        return sum(m.categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE for m in self.movimientos)
+
+    @property
+    def porcentaje_cobertura_comercial(self) -> Decimal:
+        if not self.cantidad_lineas_entrada:
+            return Decimal("0")
+        cubiertas = self.cantidad_lineas_entrada - self.cantidad_sin_clasificacion_comercial
+        return Decimal(cubiertas) * Decimal("100") / Decimal(self.cantidad_lineas_entrada)
+
+    @property
     def reference_ids_unicos(self) -> int:
         return len({m.movimiento.reference_id for m in self.movimientos if m.movimiento.reference_id})
 

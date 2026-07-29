@@ -3,6 +3,8 @@
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Any
+from datetime import date
+from dataclasses import replace
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import streamlit as st
@@ -16,6 +18,11 @@ from kiki_control.exporting import generar_control_estado_cuenta_mp_excel, gener
 from kiki_control.normalization.account_statement import normalizar_estado_cuenta_mp
 from kiki_control.linking.account_statement import construir_indice_operacion_mp_a_grupo_ml, controlar_estado_cuenta_mp
 from kiki_control.domain.account_statement import CategoriaEstadoCuentaMp, EstadoVinculacionEstadoCuentaMp
+from kiki_control.domain.temporal import (
+    ETIQUETAS_ESTADO, TipoSeleccionPeriodo, filtrar_estado_cuenta,
+    filtrar_por_periodo, reconocer_cuatro_fuentes, resolver_periodo,
+    universos_settlement,
+)
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
 from kiki_control.presentation.explanations import (
     COLUMNAS_TABLA,
@@ -135,7 +142,7 @@ def main() -> None:
     _inicializar_estado()
     st.title("Kiki Control Financiero")
     st.subheader("Control financiero consolidado ML oficial / Eccomapp / Mercado Pago")
-    st.info("Tus tres archivos se procesan únicamente durante esta sesión y no son almacenados por la aplicación.")
+    st.info("Tus cuatro archivos se procesan únicamente durante esta sesión y no son almacenados por la aplicación.")
     with st.expander("Cómo se tratan tus datos"):
         st.write(
             "Los reportes de ventas oficiales de Mercado Libre, costos de Eccomapp y movimientos de Mercado Pago "
@@ -153,20 +160,41 @@ def main() -> None:
         eccomapp_file = st.file_uploader("Costos y rentabilidad de Eccomapp", type=["csv"], help="Reporte que aporta costo de productos y valores de rentabilidad informados.", key="archivo_eccomapp")
         info_eccomapp = _inspeccionar_upload("eccomapp", eccomapp_file, TipoFuente.ECCOMAPP_RENTABILIDAD)
     with col_mp:
-        mp = st.file_uploader("Movimientos de Mercado Pago", type=["xlsx"], help="Reporte financiero de pagos, liquidaciones, devoluciones y reclamos.", key="archivo_mp")
+        mp = st.file_uploader("Movimientos de Mercado Pago — Settlement Report", type=["xlsx"], help="Podés cargar un reporte de período corto o ampliado. La aplicación utilizará las operaciones vinculadas al período comercial para B1 y toda la cobertura disponible para identificar los movimientos del estado de cuenta en B2/B3.", key="archivo_mp")
         info_mp = _inspeccionar_upload("mp", mp, TipoFuente.MERCADO_PAGO)
     with col_estado:
-        estado_upload = st.file_uploader("Estado de cuenta de Mercado Pago (opcional)", type=["xlsx"], help="Account Statement diario; no reemplaza el settlement report.", key="archivo_estado_cuenta_mp")
+        estado_upload = st.file_uploader("Estado de cuenta de Mercado Pago — Account Statement", type=["xlsx"], help="Aporta RELEASE_DATE y los saldos para B2/B3; no reemplaza el Settlement Report.", key="archivo_estado_cuenta_mp")
         info_estado = None
         if estado_upload is not None:
             contenido_estado = estado_upload.getvalue()
             hash_estado = sha256(contenido_estado).hexdigest()
             st.session_state["hash_estado_cuenta_mp"] = hash_estado
             info_estado = {"nombre": estado_upload.name, "contenido": contenido_estado}
-            st.caption(f"Archivo opcional cargado · SHA-256: `{hash_estado[:12]}`")
+            st.caption(f"Archivo cargado · SHA-256: `{hash_estado[:12]}`")
         else:
             st.session_state.pop("hash_estado_cuenta_mp", None)
-            st.info("El control diario de saldo no está disponible hasta cargar el Account Statement.")
+            st.info("Cargá el Account Statement para reconocer y controlar el saldo.")
+
+    reconocimiento = None
+    normalizados = None
+    st.header("Etapa 1.5 — Reconocimiento y compatibilidad de archivos")
+    if info_ml_oficial and info_eccomapp and info_mp and info_estado:
+        try:
+            normalizados = _normalizar_cuatro_fuentes(info_ml_oficial, info_eccomapp, info_mp, info_estado, st.session_state["zona_horaria"])
+            reconocimiento = reconocer_cuatro_fuentes(*normalizados)
+            st.session_state["reconocimiento_cuatro_fuentes"] = reconocimiento
+            st.dataframe(reconocimiento.filas_tabla(), hide_index=True, use_container_width=True)
+            c_b1, c_b23 = st.columns(2)
+            c_b1.metric("Período disponible para conciliación comercial", _mostrar_rango(reconocimiento.periodo_b1_disponible))
+            c_b1.caption(f"Cobertura temporal preliminar: {ETIQUETAS_ESTADO[reconocimiento.estado_b1]}. La cobertura comercial definitiva se validará por IDs al procesar.")
+            c_b23.metric("Período disponible para control de saldo", _mostrar_rango(reconocimiento.periodo_b2_b3_disponible))
+            c_b23.caption(f"Estado: {ETIQUETAS_ESTADO[reconocimiento.estado_b2_b3]}. El Settlement se buscará completo por REFERENCE_ID.")
+            for aviso in reconocimiento.advertencias:
+                st.warning(aviso)
+        except Exception as exc:
+            st.error(f"No se pudo reconocer una de las cuatro fuentes: {exc}")
+    else:
+        st.info("La tabla de reconocimiento estará disponible al cargar los cuatro archivos.")
 
     st.header("Etapa 2 — Configuración")
     c1, c2 = st.columns(2)
@@ -185,11 +213,33 @@ def main() -> None:
     if zona_error: st.error(zona_error)
     if tolerancia_error: st.error(tolerancia_error)
 
+    periodo = None
+    st.subheader("Período a analizar")
+    tipo_periodo = TipoSeleccionPeriodo(st.selectbox("Selección rápida", [x.value for x in TipoSeleccionPeriodo], key="tipo_periodo"))
+    rango_total = None
+    if reconocimiento:
+        rangos = [r for r in (reconocimiento.periodo_b1_disponible, reconocimiento.periodo_b2_b3_disponible) if r]
+        if rangos:
+            rango_total = (min(r[0] for r in rangos), max(r[1] for r in rangos))
+        st.caption(f"Rango B1: {_mostrar_rango(reconocimiento.periodo_b1_disponible)} · Rango B2/B3: {_mostrar_rango(reconocimiento.periodo_b2_b3_disponible)}")
+    desde = hasta = None
+    if tipo_periodo == TipoSeleccionPeriodo.PERSONALIZADO:
+        pc1, pc2 = st.columns(2)
+        desde = pc1.date_input("Fecha desde", value=rango_total[0] if rango_total else date.today())
+        hasta = pc2.date_input("Fecha hasta", value=rango_total[1] if rango_total else date.today())
+    try:
+        periodo = resolver_periodo(tipo_periodo, zona, rango_total, desde, hasta)
+    except ValueError as exc:
+        st.error(str(exc))
+    if periodo and detectar_cambio(st.session_state.get("periodo_analisis"), periodo):
+        invalidar_resultados_conocidos(st.session_state)
+    st.session_state["periodo_analisis"] = periodo
+
     st.header("Etapa 3 — Procesamiento")
-    listo = bool(info_ml_oficial and info_eccomapp and info_mp and info_ml_oficial["valido_fuente"] and info_eccomapp["valido_fuente"] and info_mp["valido_fuente"] and zona_valida and tolerancia is not None)
+    listo = bool(info_ml_oficial and info_eccomapp and info_mp and info_estado and reconocimiento and periodo and info_ml_oficial["valido_fuente"] and info_eccomapp["valido_fuente"] and info_mp["valido_fuente"] and zona_valida and tolerancia is not None)
     if st.button("Procesar y consolidar", disabled=not listo):
         try:
-            _procesar(info_ml_oficial, info_eccomapp, info_mp, zona, tolerancia, info_estado)
+            _procesar(info_ml_oficial, info_eccomapp, info_mp, zona, tolerancia, info_estado, periodo, normalizados)
         except ErrorControlConsolidado as exc:
             st.error(str(exc))
         except Exception:
@@ -218,6 +268,19 @@ def _limpiar_detalle_revision_por_cambio_de_filtro() -> None:
 def _inicializar_estado() -> None:
     st.session_state.setdefault("zona_horaria", ZONA_DEFAULT)
     st.session_state.setdefault("tolerancia_texto", TOLERANCIA_DEFAULT)
+
+
+def _mostrar_rango(rango: tuple[date, date] | None) -> str:
+    return "Sin datos" if rango is None else f"{rango[0].strftime('%d/%m/%Y')} — {rango[1].strftime('%d/%m/%Y')}"
+
+
+def _normalizar_cuatro_fuentes(info_ml, info_ec, info_mp, info_estado, zona):
+    return (
+        normalizar_ventas_mercado_libre(info_ml["nombre"], info_ml["contenido"], zona_horaria=zona).ventas,
+        normalizar_mercado_libre(info_ec["nombre"], info_ec["contenido"], zona).operaciones,
+        normalizar_mercado_pago(info_mp["nombre"], info_mp["contenido"], zona).movimientos,
+        normalizar_estado_cuenta_mp(info_estado["nombre"], info_estado["contenido"]),
+    )
 
 
 def _inspeccionar_upload(clave: str, upload: Any, fuente_esperada: TipoFuente) -> dict[str, Any] | None:
@@ -298,11 +361,17 @@ def _firma_actual(tolerancia: Decimal | None, zona: str) -> str | None:
     return construir_firma_procesamiento_tres_fuentes(h1, h2, h3, zona, tolerancia) + (st.session_state.get("hash_estado_cuenta_mp") or "")
 
 
-def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], info_mp: dict[str, Any], zona: str, tolerancia: Decimal, info_estado: dict[str, Any] | None = None) -> None:
+def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], info_mp: dict[str, Any], zona: str, tolerancia: Decimal, info_estado: dict[str, Any] | None = None, periodo=None, normalizados=None) -> None:
     with st.spinner("Normalizando, vinculando, conciliando y consolidando…"):
         ventas_ml = normalizar_ventas_mercado_libre(info_ml_oficial["nombre"], info_ml_oficial["contenido"], zona_horaria=zona)
         eccomapp = normalizar_mercado_libre(info_eccomapp["nombre"], info_eccomapp["contenido"], zona)
         mercado_pago = normalizar_mercado_pago(info_mp["nombre"], info_mp["contenido"], zona)
+        settlement_completo = mercado_pago.movimientos
+        if periodo is not None:
+            ventas_ml = replace(ventas_ml, ventas=filtrar_por_periodo(ventas_ml.ventas, "fecha_venta", periodo))
+            eccomapp = replace(eccomapp, operaciones=filtrar_por_periodo(eccomapp.operaciones, "fecha_hora_venta", periodo))
+            settlement_b1, _ = universos_settlement(ventas_ml.ventas, eccomapp.operaciones, settlement_completo, periodo)
+            mercado_pago = replace(mercado_pago, movimientos=settlement_b1)
         st.session_state["normalizacion"] = {"Ventas oficiales ML": ventas_ml, "Eccomapp": eccomapp, "Mercado Pago": mercado_pago}
         _mostrar_normalizacion("Ventas oficiales ML", ventas_ml)
         _mostrar_normalizacion("Eccomapp", eccomapp)
@@ -331,8 +400,11 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
         st.session_state.pop("control_estado_cuenta_mp", None)
         if info_estado is not None:
             resumen_estado = normalizar_estado_cuenta_mp(info_estado["nombre"], info_estado["contenido"])
+            resumen_estado = filtrar_estado_cuenta(resumen_estado, periodo) if periodo is not None else resumen_estado
             indice_ml = construir_indice_operacion_mp_a_grupo_ml(reporte_consolidado, mercado_pago.movimientos)
-            st.session_state["control_estado_cuenta_mp"] = controlar_estado_cuenta_mp(resumen_estado, mercado_pago.movimientos, indice_ml)
+            if resumen_estado is not None:
+                # B2/B3 busca REFERENCE_ID en toda la cobertura del único Settlement.
+                st.session_state["control_estado_cuenta_mp"] = controlar_estado_cuenta_mp(resumen_estado, settlement_completo, indice_ml)
         # Datos de enriquecimiento para Bloque B
         st.session_state["enriq_movimientos_mp_por_fila"] = enriquecimientos_movimientos_mp_por_fila(
             mercado_pago.movimientos
@@ -1088,17 +1160,20 @@ def _mostrar_resultados() -> None:
                 _mostrar_descargas()
 
 def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
-    st.header("Composición y control diario del saldo de Mercado Pago")
+    st.header("Mercado Pago — composición comercial y control de saldo")
     control = st.session_state.get("control_estado_cuenta_mp")
     if control is None:
         st.info("El control diario de saldo no está disponible porque no se cargó el Account Statement opcional.")
         return
-    st.markdown("### B2 — Composición del estado de cuenta MP")
+    st.markdown("### B2 — Composición comercial de los movimientos de Mercado Pago")
     st.info(aclaracion_b1_b2(cantidad_grupos_conciliados))
     conteos = {c: sum(m.categoria == c for m in control.movimientos) for c in CategoriaEstadoCuentaMp}
     etiquetas = (("Líneas del estado de cuenta", len(control.movimientos), None), ("Reference IDs únicos", control.reference_ids_unicos, None), ("Líneas vinculadas al settlement", control.lineas_vinculadas, None), ("Operaciones settlement vinculadas", control.operaciones_settlement_vinculadas, None), ("Líneas sin vínculo settlement", control.lineas_sin_vinculo_settlement, None), ("Movimientos del saldo asociados a ventas ML del período cargado", conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML], "Corresponde únicamente a movimientos del estado de cuenta que pudieron vincularse al settlement cargado y a un grupo ML del período. No representa la cantidad total de ventas conciliadas en B1."), ("Otros ingresos identificados", conteos[CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO], None), ("Salidas o ajustes identificados", conteos[CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO], None), ("Sin asociación suficiente", conteos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE], None))
     cols = st.columns(3)
     for index, (nombre, valor, ayuda) in enumerate(etiquetas): cols[index % 3].metric(nombre, valor, help=ayuda)
+    st.metric("Cobertura comercial", f"{control.porcentaje_cobertura_comercial.quantize(Decimal('0.01'))}%")
+    if not control.cobertura_comercial_completa:
+        st.warning("Cobertura comercial parcial. El Settlement Report cargado no cubre todas las operaciones que impactaron el saldo durante el período seleccionado. Descargá el mismo reporte de Mercado Pago con un período de origen más amplio.")
     st.caption(aclaracion_sin_movimientos_ml(cantidad_grupos_conciliados) if not conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML] else "La cantidad refleja movimientos del saldo vinculados al período cargado, no el total de ventas conciliadas en B1.")
 
     interpretaciones = {
@@ -1125,7 +1200,7 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
     for titulo, categoria in (("Otros ingresos no asociados a ML", CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO), ("Salidas y ajustes", CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO), ("Movimientos asociados a ventas ML", CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML), ("Movimientos sin asociación suficiente", CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE)):
         with st.expander(titulo):
             st.dataframe([{"Reference ID": x.movimiento.reference_id, "Fila": x.movimiento.numero_fila_origen, "Fecha": x.movimiento.fecha_liberacion, "Tipo": x.movimiento.tipo_movimiento_original, "Importe": x.movimiento.importe_neto, "Subtipo": x.subtipo, "Motivo": x.motivo, "Acción recomendada": x.accion_recomendada} for x in control.movimientos if x.categoria == categoria], hide_index=True, use_container_width=True)
-    st.markdown("### B3 — Control de saldo diario")
+    st.markdown("### B3 — Control de saldo de Mercado Pago")
     r = control.resumen
     st.table([{"Saldo inicial": formato_importe(r.saldo_inicial), "Créditos informados": formato_importe(r.creditos_informados), "Débitos informados": formato_importe(r.debitos_informados), "Variación neta": formato_importe(r.variacion_neta), "Saldo final calculado": formato_importe(r.saldo_final_calculado), "Saldo final informado": formato_importe(r.saldo_final_informado), "Diferencia de control": formato_importe(r.diferencia_control)}])
     impactos = {c: control.estadisticas_categoria(c).impacto_neto for c in CategoriaEstadoCuentaMp}
