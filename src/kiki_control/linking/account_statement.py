@@ -119,6 +119,8 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp]) -> 
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE, "Origen no determinado", "No existe vínculo settlement inequívoco ni evidencia suficiente en el estado de cuenta."
         if grupo_settlement and grupo_settlement.es_ambiguo:
             motivo = f"El ID settlement es ambiguo: {grupo_settlement.motivo_ambiguedad}."
+    if estado == EstadoVinculacionEstadoCuentaMp.VINCULADO_SETTLEMENT and categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE:
+        estado = EstadoVinculacionEstadoCuentaMp.VINCULADO_SIN_ORIGEN_COMERCIAL
     accion = "Revisar con un settlement que cubra la fecha de origen." if categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE else "Sin acción; conservar para trazabilidad."
     filas = grupo_settlement.filas_origen if grupo_settlement else tuple()
     return MovimientoEstadoCuentaClasificado(m, estado, categoria, subtipo, motivo, accion, filas, id_grupo_ml)

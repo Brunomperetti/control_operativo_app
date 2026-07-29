@@ -15,7 +15,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
 from kiki_control.domain.control_consolidado import ReporteControlConsolidado, ResultadoControlConsolidado
-from kiki_control.domain.account_statement import CategoriaEstadoCuentaMp, ControlEstadoCuentaMp
+from kiki_control.domain.account_statement import CategoriaEstadoCuentaMp, ControlEstadoCuentaMp, EstadoVinculacionEstadoCuentaMp
 from kiki_control.domain.reconciliation import ReporteConciliacion, ResultadoConciliacion
 from kiki_control.domain.ml_eccomapp_diagnostic import DiagnosticoMlEccomapp, EstadoCruceMlEccomapp
 from kiki_control.presentation.bloque_b_diagnostics import (
@@ -340,36 +340,71 @@ def _agregar_hojas_estado_cuenta(wb: Workbook, control: ControlEstadoCuentaMp) -
                  ("Saldo final calculado", r.saldo_final_calculado), ("Saldo final informado", r.saldo_final_informado),
                  ("Diferencia de control", r.diferencia_control)):
         ws.append(fila)
+    ws.append([])
+    ws.append(["Control por categorías", "Impacto neto"])
+    for categoria in CategoriaEstadoCuentaMp:
+        ws.append((categoria.value, control.estadisticas_categoria(categoria).impacto_neto))
+    ws.append(("Suma total de categorías", control.suma_categorias))
+    ws.append(("Variación neta del estado de cuenta", r.variacion_neta))
+    ws.append(("Diferencia categorías vs variación", control.diferencia_cobertura_monetaria))
     _formatear_tabla(ws, {2}, set(), True)
     ws = wb.create_sheet("MP — Composición diaria")
     ws.append(["Métrica", "Valor"])
     categorias = {c: sum(m.categoria == c for m in control.movimientos) for c in CategoriaEstadoCuentaMp}
     for fila in (("Líneas del estado de cuenta", len(control.movimientos)), ("Reference IDs únicos", control.reference_ids_unicos),
-                 ("Líneas vinculadas", control.lineas_vinculadas), ("Operaciones settlement vinculadas", control.operaciones_settlement_vinculadas),
-                 ("Líneas sin vínculo", len(control.movimientos) - control.lineas_vinculadas), ("Total líneas de entrada", control.cantidad_lineas_entrada),
+                 ("Líneas vinculadas al settlement", control.lineas_vinculadas), ("Operaciones settlement vinculadas", control.operaciones_settlement_vinculadas),
+                 ("Líneas sin vínculo settlement", control.lineas_sin_vinculo_settlement), ("Total líneas de entrada", control.cantidad_lineas_entrada),
                  ("Clasificadas exactamente una vez", control.cantidad_lineas_clasificadas), ("No clasificadas", control.cantidad_no_clasificadas),
                  ("Clasificadas más de una vez", control.cantidad_clasificadas_mas_de_una_vez), ("Cobertura completa", "Sí" if control.cobertura_completa else "No"),
                  ("Suma de categorías", control.suma_categorias), ("Diferencia categorías vs variación", control.diferencia_cobertura_monetaria)):
         ws.append(fila)
-    for categoria, cantidad in categorias.items(): ws.append((categoria.value, cantidad))
-    _formatear_tabla(ws, {2}, set(), True)
+    ws.append([])
+    ws.append(["Importes por categoría", "Cantidad de movimientos", "Reference IDs únicos", "Total importes positivos", "Total importes negativos", "Impacto neto"])
+    for categoria, cantidad in categorias.items():
+        estadisticas = control.estadisticas_categoria(categoria)
+        ws.append((categoria.value, cantidad, estadisticas.reference_ids_unicos, estadisticas.importes_positivos, estadisticas.importes_negativos, estadisticas.impacto_neto))
+    ws.append([])
+    ws.append(["Composición de las líneas vinculadas al settlement", "Cantidad de líneas", "Reference IDs únicos", "Importe neto", "Interpretación"])
+    interpretaciones = {
+        CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML: "Vínculo settlement y grupo ML del período acreditados.",
+        CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO: "Ingreso identificado con evidencia de origen no ML.",
+        CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO: "Salida o ajuste identificado por el tipo de movimiento.",
+        CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE: "Vínculo settlement existente, sin atribución comercial suficiente.",
+    }
+    for categoria in CategoriaEstadoCuentaMp:
+        estadisticas = control.estadisticas_vinculadas_categoria(categoria)
+        ws.append((categoria.value, estadisticas.cantidad_movimientos, estadisticas.reference_ids_unicos, estadisticas.impacto_neto, interpretaciones[categoria]))
+    ws.append([])
+    ws.append(["Estados de vinculación", "Cantidad", "Importe neto"])
+    for estado in EstadoVinculacionEstadoCuentaMp:
+        estadisticas = control.estadisticas_estado(estado)
+        ws.append((estado.value, estadisticas.cantidad_movimientos, estadisticas.impacto_neto))
+    _formatear_tabla(ws, {2, 4, 5, 6}, {5}, True)
     mapas = (("MP — Otros ingresos", CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO),
              ("MP — Salidas y ajustes", CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO),
              ("MP — Asociados a ML", CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML),
              ("MP — Sin asociación", CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE))
     for nombre, categoria in mapas:
-        _escribir_detalle_estado_cuenta(wb.create_sheet(nombre), (m for m in control.movimientos if m.categoria == categoria))
+        ws_detalle = wb.create_sheet(nombre)
+        if categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE:
+            ws_detalle.append(["Desglose de estados de vinculación", "Cantidad", "Importe neto"])
+            for estado in (EstadoVinculacionEstadoCuentaMp.SIN_VINCULO_SETTLEMENT, EstadoVinculacionEstadoCuentaMp.VINCULADO_SIN_ORIGEN_COMERCIAL, EstadoVinculacionEstadoCuentaMp.ID_AMBIGUO, EstadoVinculacionEstadoCuentaMp.ID_VACIO):
+                estadisticas = control.estadisticas_estado(estado)
+                ws_detalle.append((estado.value, estadisticas.cantidad_movimientos, estadisticas.impacto_neto))
+            ws_detalle.append([])
+        _escribir_detalle_estado_cuenta(ws_detalle, (m for m in control.movimientos if m.categoria == categoria))
 
 
 def _escribir_detalle_estado_cuenta(ws: Worksheet, movimientos) -> None:
+    fila_encabezado = ws.max_row + 1
     ws.append(["reference_id", "Fila Account Statement", "Fila settlement", "ID grupo ML", "Fecha", "Tipo original", "Importe", "Saldo parcial", "Categoría", "Subtipo", "Estado vínculo", "Motivo", "Acción recomendada"])
     for item in movimientos:
         m = item.movimiento
         ws.append([_texto_seguro(m.reference_id), m.numero_fila_origen, _texto_seguro(", ".join(str(f) for f in item.filas_settlement)), _texto_seguro(item.id_grupo_ml), m.fecha_liberacion, _texto_seguro(m.tipo_movimiento_original), m.importe_neto, _decimal_o_vacio(m.saldo_parcial), item.categoria.value, _texto_seguro(item.subtipo), item.estado_vinculacion.value, _texto_seguro(item.motivo), _texto_seguro(item.accion_recomendada)])
     _formatear_tabla(ws, {7, 8}, {12, 13}, True)
-    for cell in ws["A"][1:]:
+    for cell in ws["A"][fila_encabezado - 1:]:
         cell.number_format = "@"
-    for cell in ws["E"][1:]:
+    for cell in ws["E"][fila_encabezado - 1:]:
         cell.number_format = _FORMATO_FECHA
 
 
