@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Iterable, Sequence
+from time import perf_counter
 from zoneinfo import ZoneInfo
 
 from kiki_control.domain.account_statement import ResumenEstadoCuentaMp
@@ -227,8 +228,15 @@ def filtrar_estado_cuenta(resumen: ResumenEstadoCuentaMp, periodo: PeriodoAnalis
                                  min(m.fecha_liberacion for m in movimientos), max(m.fecha_liberacion for m in movimientos), motivo)
 
 
-def universos_settlement(ventas: Sequence[object], operaciones: Sequence[object], settlement: Sequence[object],
-                         periodo: PeriodoAnalisis, reporte_comercial: Any | None = None) -> tuple[tuple[object, ...], tuple[object, ...]]:
+@dataclass(frozen=True)
+class UniversosSettlement:
+    settlement_comparable_b1: tuple[object, ...]
+    settlement_diagnostico_periodo: tuple[object, ...]
+    metadatos: tuple[tuple[str, str], ...]
+
+
+def construir_universos_settlement(ventas: Sequence[object], operaciones: Sequence[object], settlement: Sequence[object],
+                         periodo: PeriodoAnalisis, reporte_comercial: Any | None = None) -> UniversosSettlement:
     """Deriva B1 desde grupos comerciales y conserva Settlement completo para B2/B3.
 
     ``id_venta`` nunca se compara con el ID de operación MP. El reporte del
@@ -251,6 +259,7 @@ def universos_settlement(ventas: Sequence[object], operaciones: Sequence[object]
             ids_orden.update(str(x).strip() for x in resultado.ids_orden if x)
             ids_orden.update(str(op.id_orden).strip() for op in resultado.operaciones_eccomapp if op.id_orden)
             ids_orden.update(str(op.id_carrito).strip() for op in resultado.operaciones_eccomapp if getattr(op, "id_carrito", None))
+    inicio = perf_counter()
     # Semilla exclusivamente por orden/grupo comercial, nunca por id_venta=id_operación MP.
     ids_operacion = {str(m.id_operacion_mercado_pago).strip() for m in settlement
                      if str(getattr(m, "id_orden", "") or "").strip() in ids_orden
@@ -271,4 +280,60 @@ def universos_settlement(ventas: Sequence[object], operaciones: Sequence[object]
                 if orden and orden not in ids_orden:
                     ids_orden.add(orden); cambio = True
     b1 = tuple(m for m in settlement if str(getattr(m, "id_operacion_mercado_pago", "") or "").strip() in ids_operacion)
-    return b1, tuple(settlement)
+
+    # Diagnóstico: semillas por origen dentro del período y por pertenencia
+    # comparable. La expansión relacional incorpora antecedentes y liquidaciones
+    # posteriores sin usar un margen fijo de días.
+    objetos_b1 = {id(m) for m in b1}
+    indices_b1 = {i for i, m in enumerate(settlement) if id(m) in objetos_b1}
+    indices_diagnostico = set(indices_b1)
+    for i, m in enumerate(settlement):
+        fecha = _fecha(getattr(m, "fecha_origen_local", None))
+        if fecha is not None and periodo.fecha_desde <= fecha <= periodo.fecha_hasta:
+            indices_diagnostico.add(i)
+    atributos = ("id_operacion_mercado_pago", "id_orden", "id_paquete", "refund_id")
+    indice_relaciones: dict[tuple[str, str], set[int]] = {}
+    for i, m in enumerate(settlement):
+        for atributo in atributos:
+            valor = str(getattr(m, atributo, "") or "").strip()
+            if valor:
+                indice_relaciones.setdefault((atributo, valor), set()).add(i)
+    pendientes = list(indices_diagnostico)
+    while pendientes:
+        i = pendientes.pop()
+        m = settlement[i]
+        for atributo in atributos:
+            valor = str(getattr(m, atributo, "") or "").strip()
+            for relacionado in indice_relaciones.get((atributo, valor), ()) if valor else ():
+                if relacionado not in indices_diagnostico:
+                    indices_diagnostico.add(relacionado)
+                    pendientes.append(relacionado)
+            # Relación semántica cruzada segura: una referencia de devolución
+            # apunta al ID de la operación original. No se cruzan orden, paquete
+            # u otros campos solo porque contengan el mismo texto.
+            atributo_cruzado = ({"refund_id": "id_operacion_mercado_pago",
+                                 "id_operacion_mercado_pago": "refund_id"}.get(atributo))
+            for relacionado in indice_relaciones.get((atributo_cruzado, valor), ()) if valor and atributo_cruzado else ():
+                if relacionado not in indices_diagnostico:
+                    indices_diagnostico.add(relacionado)
+                    pendientes.append(relacionado)
+    diag = tuple(m for i, m in enumerate(settlement) if i in indices_diagnostico)
+    ids = lambda filas: len({str(getattr(m, "id_operacion_mercado_pago", "") or "").strip()
+                             for m in filas if str(getattr(m, "id_operacion_mercado_pago", "") or "").strip()})
+    meta = (
+        ("Filas Settlement totales", str(len(settlement))),
+        ("Filas settlement_comparable_b1", str(len(b1))),
+        ("IDs settlement_comparable_b1", str(ids(b1))),
+        ("Filas settlement_diagnostico_periodo", str(len(diag))),
+        ("IDs settlement_diagnostico_periodo", str(ids(diag))),
+        ("Criterio diagnóstico", "Origen en período + expansión por operación/orden/paquete y refund↔operación + comparable B1"),
+        ("Tiempo construcción universos (s)", f"{perf_counter() - inicio:.3f}"),
+    )
+    return UniversosSettlement(b1, diag, meta)
+
+
+def universos_settlement(ventas: Sequence[object], operaciones: Sequence[object], settlement: Sequence[object],
+                         periodo: PeriodoAnalisis, reporte_comercial: Any | None = None) -> tuple[tuple[object, ...], tuple[object, ...]]:
+    """Atajo compatible: comparable B1 y diagnóstico temporal relacionado."""
+    universos = construir_universos_settlement(ventas, operaciones, settlement, periodo, reporte_comercial)
+    return universos.settlement_comparable_b1, universos.settlement_diagnostico_periodo

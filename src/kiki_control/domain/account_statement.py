@@ -20,6 +20,12 @@ class CategoriaEstadoCuentaMp(StrEnum):
     OTRO_INGRESO_NO_ML_IDENTIFICADO = "OTRO_INGRESO_NO_ML_IDENTIFICADO"
     SALIDA_O_AJUSTE_IDENTIFICADO = "SALIDA_O_AJUSTE_IDENTIFICADO"
     SIN_ASOCIACION_SUFICIENTE = "SIN_ASOCIACION_SUFICIENTE"
+    # Nombres comerciales de la especificación. Los alias conservan la
+    # compatibilidad de libros y sesiones creados por versiones anteriores.
+    MOVIMIENTOS_ASOCIADOS_A_ML = ASOCIADO_A_VENTA_ML
+    OTROS_INGRESOS_NO_ML = OTRO_INGRESO_NO_ML_IDENTIFICADO
+    SALIDAS_NO_ML = SALIDA_O_AJUSTE_IDENTIFICADO
+    SIN_CLASIFICACION_COMERCIAL = SIN_ASOCIACION_SUFICIENTE
 
 
 class OrigenComercialOperacionMp(StrEnum):
@@ -92,6 +98,11 @@ class MovimientoEstadoCuentaClasificado:
     accion_recomendada: str
     filas_settlement: tuple[int, ...] = tuple()
     id_grupo_ml: str | None = None
+    canales: tuple[str, ...] = tuple()
+    plataformas: tuple[str, ...] = tuple()
+    ids_orden: tuple[str, ...] = tuple()
+    evidencia_encontrada: tuple[str, ...] = tuple()
+    evidencia_faltante: str | None = None
 
     @property
     def fila_settlement(self) -> int | None:
@@ -176,7 +187,31 @@ class ControlEstadoCuentaMp:
 
     @property
     def cobertura_comercial_completa(self) -> bool:
-        return self.cobertura_completa and self.cantidad_sin_clasificacion_comercial == 0
+        return (
+            self.cobertura_completa
+            and self.cantidad_sin_clasificacion_comercial == 0
+            and not any(m.estado_vinculacion == EstadoVinculacionEstadoCuentaMp.ID_AMBIGUO
+                        for m in self.movimientos)
+        )
+
+    @property
+    def estado_cobertura_comercial(self) -> str:
+        if not self.cantidad_lineas_entrada:
+            return "Sin movimientos en el período."
+        return ("Cobertura comercial completa." if self.cobertura_comercial_completa
+                else "Cobertura comercial parcial.")
+
+    @property
+    def estado_contable(self) -> str:
+        if not self.cantidad_lineas_entrada:
+            return "Sin movimientos en el período."
+        if not self.resumen.control_contable_verificable:
+            return "Control contable no verificable."
+        if self.resumen.diferencia_control != Decimal("0"):
+            return "No cierra."
+        if self.cobertura_comercial_completa:
+            return "Cierra con cobertura comercial completa."
+        return "Cierra contablemente con cobertura comercial parcial."
 
     @property
     def cantidad_sin_clasificacion_comercial(self) -> int:

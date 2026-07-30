@@ -391,9 +391,13 @@ def _agregar_hojas_estado_cuenta(wb: Workbook, control: ControlEstadoCuentaMp) -
     for nombre, categoria in mapas:
         ws_detalle = wb.create_sheet(nombre)
         if categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE:
-            ws_detalle.append(["Desglose de estados de vinculación", "Cantidad", "Importe neto"])
+            ws_detalle.append(["Movimientos sin clasificación comercial", "Cantidad", "Importe neto"])
             for estado in (EstadoVinculacionEstadoCuentaMp.SIN_VINCULO_SETTLEMENT, EstadoVinculacionEstadoCuentaMp.VINCULADO_SIN_ORIGEN_COMERCIAL, EstadoVinculacionEstadoCuentaMp.ID_AMBIGUO, EstadoVinculacionEstadoCuentaMp.ID_VACIO):
-                estadisticas = control.estadisticas_estado(estado)
+                estadisticas = control.estadisticas(tuple(
+                    m for m in control.movimientos
+                    if m.categoria == CategoriaEstadoCuentaMp.SIN_CLASIFICACION_COMERCIAL
+                    and m.estado_vinculacion == estado
+                ))
                 ws_detalle.append((estado.value, estadisticas.cantidad_movimientos, estadisticas.impacto_neto))
             ws_detalle.append([])
         _escribir_detalle_estado_cuenta(ws_detalle, (m for m in control.movimientos if m.categoria == categoria))
@@ -401,11 +405,11 @@ def _agregar_hojas_estado_cuenta(wb: Workbook, control: ControlEstadoCuentaMp) -
 
 def _escribir_detalle_estado_cuenta(ws: Worksheet, movimientos) -> None:
     fila_encabezado = ws.max_row + 1
-    ws.append(["reference_id", "Fila Account Statement", "Fila settlement", "ID grupo ML", "Fecha", "Tipo original", "Importe", "Saldo parcial", "Categoría", "Subtipo", "Estado vínculo", "Motivo", "Acción recomendada"])
+    ws.append(["reference_id", "Fila Account Statement", "Fila settlement", "ID grupo ML", "Fecha", "Tipo original", "Importe", "Saldo parcial", "Categoría", "Subtipo", "Estado vínculo", "Canal", "Plataforma", "IDs de orden", "Evidencia encontrada", "Evidencia faltante", "Motivo", "Acción recomendada"])
     for item in movimientos:
         m = item.movimiento
-        ws.append([_texto_seguro(m.reference_id), m.numero_fila_origen, _texto_seguro(", ".join(str(f) for f in item.filas_settlement)), _texto_seguro(item.id_grupo_ml), m.fecha_liberacion, _texto_seguro(m.tipo_movimiento_original), m.importe_neto, _decimal_o_vacio(m.saldo_parcial), item.categoria.value, _texto_seguro(item.subtipo), item.estado_vinculacion.value, _texto_seguro(item.motivo), _texto_seguro(item.accion_recomendada)])
-    _formatear_tabla(ws, {7, 8}, {12, 13}, True)
+        ws.append([_texto_seguro(m.reference_id), m.numero_fila_origen, _texto_seguro(", ".join(str(f) for f in item.filas_settlement)), _texto_seguro(item.id_grupo_ml), m.fecha_liberacion, _texto_seguro(m.tipo_movimiento_original), m.importe_neto, _decimal_o_vacio(m.saldo_parcial), item.categoria.value, _texto_seguro(item.subtipo), item.estado_vinculacion.value, _texto_seguro(", ".join(item.canales)), _texto_seguro(", ".join(item.plataformas)), _texto_seguro(", ".join(item.ids_orden)), _texto_seguro(" ".join(item.evidencia_encontrada)), _texto_seguro(item.evidencia_faltante), _texto_seguro(item.motivo), _texto_seguro(item.accion_recomendada)])
+    _formatear_tabla(ws, {7, 8}, {15, 16, 17, 18}, True)
     for cell in ws["A"][fila_encabezado - 1:]:
         cell.number_format = "@"
     for cell in ws["E"][fila_encabezado - 1:]:
@@ -528,6 +532,16 @@ def _escribir_puente_consolidado(ws: Worksheet, diag: Any) -> None:
             filas_monetarias.add(ws.max_row)
     ws.append(["Advertencia", "No comparar importes de universos distintos sin revisar Cobertura y universos.", "", ""])
     ws.append(["Aclaración temporal", "Si se genera sin diagnóstico de sesión, la distribución temporal no puede clasificar contra período ML ni fechas MP y queda sin fecha.", "", ""])
+    ws.append([])
+    ws.append(["Grupos excluidos de comparabilidad", "Motivo", "IDs de orden", "Filas ML", "Filas Eccomapp", "Filas MP", "Total ML", "Costo", "Neto MP", "Tiene Total (ARS)", "Tiene pago principal"])
+    for g in p.grupos_excluidos_universo_triple:
+        ws.append([
+            _texto_seguro(g.grupo), _texto_seguro(g.motivo), _texto_seguro(", ".join(g.ids_orden)),
+            _texto_seguro(", ".join(map(str, g.filas_ml))), _texto_seguro(", ".join(map(str, g.filas_eccomapp))),
+            _texto_seguro(", ".join(map(str, g.filas_mp))), _decimal_o_vacio(g.neto_ml),
+            _decimal_o_vacio(g.costo), _decimal_o_vacio(g.neto_aprobado_mp),
+            "Sí" if g.tiene_total_ars else "No", "Sí" if g.tiene_pago_principal else "No",
+        ])
     _formatear_tabla(ws, moneda_columnas=set(), wrap_columnas={3, 4}, freeze=False)
     for row_idx in filas_monetarias:
         ws.cell(row=row_idx, column=2).number_format = _FORMATO_MONEDA_ARS

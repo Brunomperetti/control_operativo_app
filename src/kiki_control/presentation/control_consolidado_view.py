@@ -447,6 +447,13 @@ def filas_grupos_excluidos(grupos: Iterable[Any]) -> list[dict[str, str]]:
         "Neto Eccomapp": formato_importe(g.neto_eccomapp),
         "Neto aprobado MP": formato_importe(g.neto_aprobado_mp),
         "Aporte MP–ML": formato_importe(g.aporte_diferencia_ml_mp),
+        "IDs de orden": ", ".join(g.ids_orden),
+        "Filas ML": ", ".join(map(str, g.filas_ml)),
+        "Filas Eccomapp": ", ".join(map(str, g.filas_eccomapp)),
+        "Filas MP": ", ".join(map(str, g.filas_mp)),
+        "Costo": formato_importe(g.costo),
+        "Presencia Total (ARS)": "Sí" if g.tiene_total_ars else "No",
+        "Presencia pago principal": "Sí" if g.tiene_pago_principal else "No",
     } for g in grupos]
 
 

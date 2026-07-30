@@ -4,6 +4,7 @@ from io import BytesIO
 from types import SimpleNamespace
 
 from openpyxl import Workbook, load_workbook
+import pytest
 
 from kiki_control.domain.account_statement import CategoriaEstadoCuentaMp, EstadoVinculacionEstadoCuentaMp
 from kiki_control.exporting import generar_control_estado_cuenta_mp_excel
@@ -39,12 +40,13 @@ def test_parser_decimal_argentino_y_control_de_saldo():
 
 def test_vinculo_repetido_no_es_ambiguo_y_clasificacion_excluyente():
     control = controlar_estado_cuenta_mp(normalizar_estado_cuenta_mp("a.xlsx", archivo_estado()), [settlement()])
-    assert [m.estado_vinculacion for m in control.movimientos[:2]] == [EstadoVinculacionEstadoCuentaMp.VINCULADO_SETTLEMENT] * 2
+    assert control.movimientos[0].estado_vinculacion == EstadoVinculacionEstadoCuentaMp.VINCULADO_SETTLEMENT
+    assert control.movimientos[1].estado_vinculacion == EstadoVinculacionEstadoCuentaMp.VINCULADO_SIN_ORIGEN_COMERCIAL
     assert control.lineas_vinculadas == 2
     assert control.operaciones_settlement_vinculadas == 1
     assert control.movimientos[0].categoria == CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO
     assert control.movimientos[0].subtipo == "Venta por mostrador con Código QR"
-    assert control.movimientos[1].categoria == CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO
+    assert control.movimientos[1].categoria == CategoriaEstadoCuentaMp.SIN_CLASIFICACION_COMERCIAL
     assert control.movimientos[2].categoria == CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO
     assert control.movimientos[3].categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE
     assert len(control.movimientos) == 4 and control.diferencia_cobertura == Decimal("0.00")
@@ -210,6 +212,126 @@ def test_acciones_recomendadas_se_diferencian_por_estado_de_vinculacion():
     assert ambiguo.accion_recomendada == "Revisar las filas settlement contradictorias y definir la operación comercial correcta."
     assert id_vacio.accion_recomendada == "Completar o verificar el reference ID en el estado de cuenta."
     assert identificado.accion_recomendada == "Sin acción; conservar para trazabilidad."
+
+
+def test_prioridad_reintegros_comision_positivos_sin_settlement():
+    """La semántica explícita prevalece sobre la palabra genérica comisión."""
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+
+    tipos = ("Reintegro de comisión", "Reintegro comision", "Reintegro de comisiones",
+             "Devolución de comisión cobrada")
+    movimientos = tuple(
+        MovimientoEstadoCuentaMp(i, datetime(2026, 1, 1), tipo, f"R-{i}", Decimal("1"),
+                                 None, "hash", "ACCOUNT_STATEMENT")
+        for i, tipo in enumerate(tipos, 1)
+    )
+    resumen = ResumenEstadoCuentaMp(Decimal("0"), Decimal("4"), Decimal("0"), Decimal("4"),
+                                    movimientos, datetime(2026, 1, 1), datetime(2026, 1, 1))
+    control = controlar_estado_cuenta_mp(resumen, [])
+
+    assert all(m.categoria == CategoriaEstadoCuentaMp.OTROS_INGRESOS_NO_ML for m in control.movimientos)
+    assert all(m.subtipo == "Reintegro de comisiones" for m in control.movimientos)
+    assert all("Account Statement" in m.motivo for m in control.movimientos)
+    assert control.cobertura_comercial_completa
+
+
+def test_salida_requiere_evidencia_y_ml_prevalece_sobre_comision():
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+
+    movimientos = (
+        MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), "Transferencia enviada", "OUT", Decimal("-2"), None, "h", "S"),
+        MovimientoEstadoCuentaMp(2, datetime(2026, 1, 1), "Movimiento", "UNKNOWN", Decimal("-3"), None, "h", "S"),
+        MovimientoEstadoCuentaMp(3, datetime(2026, 1, 1), "Comisión", "ML", Decimal("-4"), None, "h", "S"),
+    )
+    resumen = ResumenEstadoCuentaMp(Decimal("9"), Decimal("0"), Decimal("-9"), Decimal("0"), movimientos,
+                                    datetime(2026, 1, 1), datetime(2026, 1, 1))
+    settlement_ml = _settlement(3, "ML", "ORD", "Mercado Libre", "Checkout")
+    control = controlar_estado_cuenta_mp(resumen, [settlement_ml], {"ML": "G-ML"})
+
+    assert control.movimientos[0].categoria == CategoriaEstadoCuentaMp.SALIDAS_NO_ML
+    assert control.movimientos[1].categoria == CategoriaEstadoCuentaMp.SIN_CLASIFICACION_COMERCIAL
+    assert control.movimientos[2].categoria == CategoriaEstadoCuentaMp.MOVIMIENTOS_ASOCIADOS_A_ML
+    assert not control.cobertura_comercial_completa
+
+
+def test_settlement_grande_retiene_solo_ids_requeridos_antes_de_agrupar():
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+
+    movimiento = MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), "Pago a proveedor", "NEEDED",
+                                          Decimal("-1"), None, "h", "S")
+    resumen = ResumenEstadoCuentaMp(Decimal("1"), Decimal("0"), Decimal("-1"), Decimal("0"),
+                                    (movimiento,), datetime(2026, 1, 1), datetime(2026, 1, 1))
+    settlement_grande = tuple(_settlement(i, f"OTHER-{i}", canal=None, plataforma=None)
+                              for i in range(1, 2001)) + (_settlement(3000, "NEEDED", canal=None, plataforma=None),)
+    control = controlar_estado_cuenta_mp(resumen, settlement_grande)
+    metricas = dict(control.metadatos_procesamiento)
+
+    assert metricas["IDs requeridos por Statement"] == "1"
+    assert metricas["IDs encontrados en Settlement"] == "1"
+    assert metricas["Filas Settlement retenidas para B2/B3"] == "1"
+
+
+@pytest.mark.parametrize("tipo", [
+    "Devolución", "Reclamo", "Comisión", "Impuesto", "Retención",
+    "Cancelación", "Contracargo", "Ajuste",
+])
+def test_ajuste_generico_negativo_sin_canal_permanece_pendiente(tipo):
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+    mov = MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), tipo, "REF", Decimal("-1"), None, "h", "S")
+    resumen = ResumenEstadoCuentaMp(Decimal("1"), Decimal("0"), Decimal("-1"), Decimal("0"),
+                                    (mov,), datetime(2026, 1, 1), datetime(2026, 1, 1))
+    clasificado = controlar_estado_cuenta_mp(resumen, []).movimientos[0]
+    assert clasificado.categoria == CategoriaEstadoCuentaMp.SIN_CLASIFICACION_COMERCIAL
+    assert "no acredita" in clasificado.motivo
+
+
+@pytest.mark.parametrize("tipo", ["Devolución", "Reclamo", "Comisión", "Impuesto", "Retención"])
+def test_ajuste_generico_con_evidencia_ml_permanece_en_ml(tipo):
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+    mov = MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), tipo, "REF", Decimal("-1"), None, "h", "S")
+    resumen = ResumenEstadoCuentaMp(Decimal("1"), Decimal("0"), Decimal("-1"), Decimal("0"),
+                                    (mov,), datetime(2026, 1, 1), datetime(2026, 1, 1))
+    clasificado = controlar_estado_cuenta_mp(
+        resumen, [_settlement(1, "REF", "ORD", "Mercado Libre", "Checkout")], {"REF": "G"}
+    ).movimientos[0]
+    assert clasificado.categoria == CategoriaEstadoCuentaMp.MOVIMIENTOS_ASOCIADOS_A_ML
+
+
+@pytest.mark.parametrize("tipo", ["Transferencia enviada", "Pago a proveedor", "Retiro", "Extracción", "Envío de dinero"])
+def test_salida_financiera_inequivoca_sigue_siendo_salida_no_ml(tipo):
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+    mov = MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), tipo, "REF", Decimal("-1"), None, "h", "S")
+    resumen = ResumenEstadoCuentaMp(Decimal("1"), Decimal("0"), Decimal("-1"), Decimal("0"),
+                                    (mov,), datetime(2026, 1, 1), datetime(2026, 1, 1))
+    assert controlar_estado_cuenta_mp(resumen, []).movimientos[0].categoria == CategoriaEstadoCuentaMp.SALIDAS_NO_ML
+
+
+@pytest.mark.parametrize(("plataforma", "subtipo"), [
+    ("Código QR", "Venta por mostrador con Código QR"),
+    ("Point Smart", "Venta con Point"),
+    (None, "Ingreso Mercado Pago — medio no determinado"),
+    ("Checkout", "Ingreso Mercado Pago — medio no determinado"),
+    ("Link de pago", "Ingreso Mercado Pago — medio no determinado"),
+])
+def test_canal_mercado_pago_no_presupone_qr(plataforma, subtipo):
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+    mov = MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), "Liquidación", "REF", Decimal("1"), None, "h", "S")
+    resumen = ResumenEstadoCuentaMp(Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1"),
+                                    (mov,), datetime(2026, 1, 1), datetime(2026, 1, 1))
+    clasificado = controlar_estado_cuenta_mp(
+        resumen, [_settlement(1, "REF", None, "Mercado Pago", plataforma)]
+    ).movimientos[0]
+    assert clasificado.categoria == CategoriaEstadoCuentaMp.OTROS_INGRESOS_NO_ML
+    assert clasificado.subtipo == subtipo
+
+
+def test_tipo_original_qr_es_evidencia_explicita_sin_plataforma():
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+    mov = MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), "Cobro con Codigo QR", "REF", Decimal("1"), None, "h", "S")
+    resumen = ResumenEstadoCuentaMp(Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1"),
+                                    (mov,), datetime(2026, 1, 1), datetime(2026, 1, 1))
+    item = controlar_estado_cuenta_mp(resumen, [_settlement(1, "REF", None, "Mercado Pago", None)]).movimientos[0]
+    assert item.subtipo == "Venta por mostrador con Código QR"
 
 
 def test_consolidado_agrega_hojas_solo_cuando_hay_account_statement():
