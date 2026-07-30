@@ -32,7 +32,10 @@ from kiki_control.presentation.explanations import (
     explicar_operacion,
     guia_general,
 )
-from kiki_control.presentation.account_statement_view import aclaracion_b1_b2, aclaracion_sin_movimientos_ml, mensaje_cobertura_comercial_parcial
+from kiki_control.presentation.account_statement_view import (
+    aclaracion_b1_b2, aclaracion_sin_movimientos_ml, detalle_cobertura_tecnica,
+    leyenda_cobertura_tecnica, mensaje_cobertura_comercial_parcial, sintesis_ejecutiva,
+)
 from kiki_control.presentation.review_cases import (
     DEFINICIONES_REVISION,
     clasificar_revisiones,
@@ -821,12 +824,12 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
     # Universo explícito
     st.info(texto_universo_comparable(diag_bloque_b))
 
-    st.subheader("Movimientos MP asociados")
-    st.caption(
-        "PAGO_ENVIO permanece visible para trazabilidad como componente ya incluido en el pago aprobado; "
-        "no se suma nuevamente al neto comparable."
-    )
-    st.dataframe(filas_movimientos_bloque_b(diag_bloque_b), use_container_width=True, hide_index=True)
+    with st.expander("Ver movimientos MP asociados", expanded=False):
+        st.caption(
+            "PAGO_ENVIO permanece visible para trazabilidad como componente ya incluido en el pago aprobado; "
+            "no se suma nuevamente al neto comparable."
+        )
+        st.dataframe(filas_movimientos_bloque_b(diag_bloque_b), use_container_width=True, hide_index=True)
 
     # Operaciones con diferencia
     st.subheader("Operaciones con diferencia ML–MP")
@@ -909,10 +912,10 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
         d1.write(f"Con ID de orden: {pagos_diag.detectados_con_id} · Sin ID de orden: {pagos_diag.detectados_sin_id}")
         d2.markdown("**Candidatos válidos**")
         d2.write(f"Con ID de orden: {pagos_diag.candidatos_con_id} · Sin ID de orden: {pagos_diag.candidatos_sin_id}")
-        st.markdown("**Candidatos válidos a venta ML no encontrada**")
-        st.dataframe(filas_candidatos_venta_faltante(diag_bloque_b), use_container_width=True, hide_index=True)
-        st.markdown("**Pagos aprobados excluidos por inconsistencia**")
-        st.dataframe(filas_pagos_aprobados_inconsistentes(diag_bloque_b), use_container_width=True, hide_index=True)
+        with st.expander(f"Ver {len(pagos_diag.candidatos_validos)} candidatos a venta faltante", expanded=False):
+            st.dataframe(filas_candidatos_venta_faltante(diag_bloque_b), use_container_width=True, hide_index=True)
+        with st.expander(f"Ver {len(pagos_diag.inconsistentes)} movimientos inconsistentes", expanded=False):
+            st.dataframe(filas_pagos_aprobados_inconsistentes(diag_bloque_b), use_container_width=True, hide_index=True)
     st.dataframe(filas_resumen_operativo_dentro_periodo(diag_bloque_b), use_container_width=True, hide_index=True)
     if diag_bloque_b.coherencia_operativa_dentro_periodo:
         st.success("La composición operativa coincide con el universo dentro del período ML.")
@@ -927,49 +930,48 @@ def _mostrar_bloque_b(reporte: Any, diag_bloque_b: Any) -> None:
 
     calidad = diag_bloque_b.calidad_monetaria_mp_sin_venta
     if calidad is not None:
-        st.subheader("Control de calidad monetaria por fila")
-        q1 = st.columns(4)
-        q1[0].metric("Grupos coherentes", calidad.grupos_coherentes)
-        q1[1].metric("Grupos incoherentes", calidad.grupos_incoherentes)
-        q1[2].metric("Grupos no verificables", calidad.grupos_no_verificables)
-        q1[3].metric("Grupos excluidos", calidad.cantidad_grupos_excluidos)
-        q2 = st.columns(3)
-        q2[0].metric("Movimientos con correspondencia inconsistente", calidad.movimientos_correspondencia_inconsistente)
-        q2[1].metric("Pagos aprobados negativos", calidad.pagos_aprobados_negativos)
-        q2[2].metric("Importe reconstruido confiable", formato_importe(calidad.importe_reconstruido_confiable))
-        q3 = st.columns(4)
-        q3[0].metric(
-            "Importe reconstruido excluido de KPI",
-            (formato_importe(calidad.importe_reconstruido_excluido_kpi)
-             if calidad.importe_reconstruido_excluido_kpi is not None else "No verificable"),
-        )
-        q3[1].metric(
-            "Agregado original de referencia",
-            (formato_importe(calidad.agregado_original_referencia)
-             if calidad.agregado_original_referencia is not None else "No disponible"),
-        )
-        q3[2].metric(
-            "Diferencia agregado − detalle",
-            (formato_importe(calidad.diferencia_agregado_detalle)
-             if calidad.diferencia_agregado_detalle is not None else "No verificable"),
-        )
-        q3[3].metric(
-            "Importe no verificable",
-            (formato_importe(calidad.importe_no_verificable)
-             if calidad.importe_no_verificable is not None else "Desconocido"),
-            help=f"Grupos sin reconstrucción completa: {calidad.cantidad_grupos_sin_reconstruccion}",
-        )
-        solo_inconsistentes = st.checkbox(
-            "Solo movimientos inconsistentes o no verificables",
-            value=True,
-            key="bloque_b_solo_inconsistencias_monetarias",
-        )
-        st.dataframe(
-            filas_inconsistencias_mp_sin_venta(diag_bloque_b, solo_inconsistentes),
-            use_container_width=True,
-            hide_index=True,
-        )
-
+        with st.expander("Ver Control de calidad monetaria por fila", expanded=False):
+            q1 = st.columns(4)
+            q1[0].metric("Grupos coherentes", calidad.grupos_coherentes)
+            q1[1].metric("Grupos incoherentes", calidad.grupos_incoherentes)
+            q1[2].metric("Grupos no verificables", calidad.grupos_no_verificables)
+            q1[3].metric("Grupos excluidos", calidad.cantidad_grupos_excluidos)
+            q2 = st.columns(3)
+            q2[0].metric("Movimientos con correspondencia inconsistente", calidad.movimientos_correspondencia_inconsistente)
+            q2[1].metric("Pagos aprobados negativos", calidad.pagos_aprobados_negativos)
+            q2[2].metric("Importe reconstruido confiable", formato_importe(calidad.importe_reconstruido_confiable))
+            q3 = st.columns(4)
+            q3[0].metric(
+                "Importe reconstruido excluido de KPI",
+                (formato_importe(calidad.importe_reconstruido_excluido_kpi)
+                 if calidad.importe_reconstruido_excluido_kpi is not None else "No verificable"),
+            )
+            q3[1].metric(
+                "Agregado original de referencia",
+                (formato_importe(calidad.agregado_original_referencia)
+                 if calidad.agregado_original_referencia is not None else "No disponible"),
+            )
+            q3[2].metric(
+                "Diferencia agregado − detalle",
+                (formato_importe(calidad.diferencia_agregado_detalle)
+                 if calidad.diferencia_agregado_detalle is not None else "No verificable"),
+            )
+            q3[3].metric(
+                "Importe no verificable",
+                (formato_importe(calidad.importe_no_verificable)
+                 if calidad.importe_no_verificable is not None else "Desconocido"),
+                help=f"Grupos sin reconstrucción completa: {calidad.cantidad_grupos_sin_reconstruccion}",
+            )
+            solo_inconsistentes = st.checkbox(
+                "Solo movimientos inconsistentes o no verificables",
+                value=True,
+                key="bloque_b_solo_inconsistencias_monetarias",
+            )
+            st.dataframe(
+                filas_inconsistencias_mp_sin_venta(diag_bloque_b, solo_inconsistentes),
+                use_container_width=True,
+                hide_index=True,
+            )
     movs_sin_venta = diag_bloque_b.movimientos_mp_sin_venta
     if movs_sin_venta:
         b1, b2, b3 = st.columns([2, 2, 2])
@@ -1133,11 +1135,10 @@ def _mostrar_resultados() -> None:
         tratamientos_mp_por_fila=_enriq_tratamientos_mp(),
         enriquecimientos_mp_por_fila=st.session_state.get("enriq_movimientos_mp_por_fila"),
     )
-    if any(
+    advertencia_monetaria = any(
         d.estado_correspondencia_fila != "CORRESPONDENCIA_OK"
         for _, detalles in diag_bloque_b.grupos_movimientos_asociados for d in detalles
-    ):
-        st.warning("Existen movimientos con datos monetarios no verificables o inconsistentes. Los conteos y la composición coinciden, pero algunos importes globales no se consideran confiables.")
+    )
     tab_resumen, tab_operacion, tab_auditoria = st.tabs(["Resumen ejecutivo", "Control por operación", "Auditoría y descargas"])
 
     with tab_resumen:
@@ -1172,6 +1173,29 @@ def _mostrar_resultados() -> None:
                     "La diferencia temporal no implica por sí sola un error."
                 )
         st.header("Conclusión ejecutiva")
+        sintesis = sintesis_ejecutiva(diag_bloque_b, control_estado_definitivo)
+        if control_estado_definitivo is not None and control_estado_definitivo.resumen.control_contable_verificable and control_estado_definitivo.resumen.diferencia_control != Decimal("0"):
+            st.error(sintesis)
+        elif control_estado_definitivo is not None and not control_estado_definitivo.cobertura_comercial_completa:
+            st.warning(sintesis)
+        else:
+            st.success(sintesis)
+        st.subheader("Indicadores principales")
+        fila_1 = st.columns(4)
+        fila_1[0].metric("B1 conciliado", f"{diag_bloque_b.resumen.coincidencias} de {diag_bloque_b.resumen.comparables_totales}")
+        fila_1[1].metric("Diferencia ML–MP", formato_importe(diag_bloque_b.resumen.diferencia_universo_comparable))
+        fila_1[2].metric("Resultados completos", reporte.total_completa)
+        fila_1[3].metric("Requieren revisión", reporte.total_requieren_revision)
+        fila_2 = st.columns(4)
+        if control_estado_definitivo is None:
+            valores_b23 = ("No disponible",) * 4
+        else:
+            valores_b23 = (f"{control_estado_definitivo.porcentaje_cobertura_comercial.quantize(Decimal('0.01'))}%", control_estado_definitivo.cantidad_sin_clasificacion_comercial, formato_importe(control_estado_definitivo.resumen.diferencia_control), control_estado_definitivo.estado_contable.replace(" contablemente", ""))
+        etiquetas_b23 = ("Cobertura comercial B2", "Movimientos sin atribución comercial suficiente", "Diferencia de saldo B3", "Estado contable")
+        for columna, etiqueta, valor in zip(fila_2, etiquetas_b23, valores_b23, strict=True):
+            columna.metric(etiqueta, valor)
+        if advertencia_monetaria:
+            st.warning("Existen movimientos con datos monetarios no verificables o inconsistentes. Los conteos y la composición coinciden, pero algunos importes globales no se consideran confiables.")
         st.info(conclusion_ejecutiva_consolidada(reporte, diag_bloque_b))
         for texto in textos_secundarios_conclusion(reporte):
             st.caption(texto)
@@ -1320,12 +1344,12 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
     st.markdown("### B2 — Composición comercial de los movimientos de Mercado Pago")
     st.info(aclaracion_b1_b2(cantidad_grupos_conciliados))
     conteos = {c: sum(m.categoria == c for m in control.movimientos) for c in CategoriaEstadoCuentaMp}
-    etiquetas = (("Líneas del estado de cuenta", len(control.movimientos), None), ("Reference IDs únicos", control.reference_ids_unicos, None), ("Líneas vinculadas al settlement", control.lineas_vinculadas, None), ("Operaciones settlement vinculadas", control.operaciones_settlement_vinculadas, None), ("Líneas sin vínculo settlement", control.lineas_sin_vinculo_settlement, None), ("Movimientos del saldo asociados a ventas ML del período cargado", conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML], "Corresponde únicamente a movimientos del estado de cuenta que pudieron vincularse al settlement cargado y a un grupo ML del período. No representa la cantidad total de ventas conciliadas en B1."), ("Otros ingresos identificados", conteos[CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO], None), ("Salidas o ajustes identificados", conteos[CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO], None), ("Sin asociación suficiente", conteos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE], None))
+    etiquetas = (("Líneas del estado de cuenta", len(control.movimientos), None), ("Reference IDs únicos", control.reference_ids_unicos, None), ("Líneas vinculadas al Settlement", control.lineas_vinculadas, None), ("Operaciones Settlement vinculadas", control.operaciones_settlement_vinculadas, None), ("Líneas sin vínculo Settlement", control.lineas_sin_vinculo_settlement, None), ("Movimientos asociados a ventas Mercado Libre", conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML], "Corresponde únicamente a movimientos del estado de cuenta vinculados al Settlement y a un grupo ML del período."), ("Otros ingresos no asociados a Mercado Libre", conteos[CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO], None), ("Salidas y ajustes no asociados a Mercado Libre", conteos[CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO], None), ("Movimientos sin atribución comercial suficiente", conteos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE], None))
     cols = st.columns(3)
     for index, (nombre, valor, ayuda) in enumerate(etiquetas): cols[index % 3].metric(nombre, valor, help=ayuda)
     st.metric("Cobertura comercial", f"{control.porcentaje_cobertura_comercial.quantize(Decimal('0.01'))}%")
     st.caption(control.estado_cobertura_comercial)
-    with st.expander("Auditoría de universos Settlement", expanded=False):
+    with st.expander("Ver auditoría técnica de universos", expanded=False):
         st.table([{"Métrica": clave, "Valor": valor} for clave, valor in control.metadatos_procesamiento])
     if not control.cobertura_comercial_completa:
         st.warning(mensaje_cobertura_comercial_parcial(control))
@@ -1343,11 +1367,12 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
         CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO: "Salidas o ajustes identificados",
         CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE: "Vinculadas pero sin atribución comercial suficiente",
     }
-    st.markdown("#### Composición de las líneas vinculadas al settlement")
+    st.markdown("#### Composición de las líneas vinculadas al Settlement")
     st.table([{"Clasificación": nombres[c], "Cantidad de líneas": (e := control.estadisticas_vinculadas_categoria(c)).cantidad_movimientos, "Reference IDs únicos": e.reference_ids_unicos, "Importe neto": formato_importe(e.impacto_neto), "Interpretación": interpretaciones[c]} for c in CategoriaEstadoCuentaMp])
+    st.caption("Esta tabla incluye únicamente líneas vinculadas al Settlement. El total comercial de otros ingresos también incorpora movimientos clasificados mediante evidencia explícita del Account Statement.")
 
     st.markdown("#### Importes por categoría")
-    st.table([{"Categoría": nombres[c] if c != CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE else "Sin asociación suficiente", "Cantidad de movimientos": (e := control.estadisticas_categoria(c)).cantidad_movimientos, "Reference IDs únicos": e.reference_ids_unicos, "Total de importes positivos": formato_importe(e.importes_positivos), "Total de importes negativos": formato_importe(e.importes_negativos), "Impacto neto": formato_importe(e.impacto_neto)} for c in CategoriaEstadoCuentaMp])
+    st.table([{"Categoría comercial": nombres[c] if c != CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE else "Sin atribución comercial suficiente", "Cantidad de movimientos": (e := control.estadisticas_categoria(c)).cantidad_movimientos, "Reference IDs únicos": e.reference_ids_unicos, "Total de importes positivos": formato_importe(e.importes_positivos), "Total de importes negativos": formato_importe(e.importes_negativos), "Impacto neto": formato_importe(e.impacto_neto)} for c in CategoriaEstadoCuentaMp])
 
     etiquetas_estado = {
         EstadoVinculacionEstadoCuentaMp.VINCULADO_SETTLEMENT: "Vinculadas al Settlement",
@@ -1356,13 +1381,13 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
         EstadoVinculacionEstadoCuentaMp.ID_AMBIGUO: "ID ambiguo",
         EstadoVinculacionEstadoCuentaMp.ID_VACIO: "ID vacío",
     }
-    st.markdown("#### Estados de vinculación de las líneas del estado de cuenta")
-    st.caption("Los estados de vinculación y las categorías comerciales son dimensiones diferentes. Una línea sin vínculo Settlement puede estar comercialmente clasificada mediante evidencia explícita del Account Statement.")
-    st.table([{"Estado de vinculación": etiqueta, "Cantidad": (e := control.estadisticas_estado(estado)).cantidad_movimientos, "Importe": formato_importe(e.impacto_neto)} for estado, etiqueta in etiquetas_estado.items()])
+    with st.expander("Ver estados de vinculación detallados", expanded=False):
+        st.caption("El Estado de vinculación y la Categoría comercial son dimensiones diferentes. Una línea sin vínculo Settlement puede tener atribución comercial mediante evidencia explícita del Account Statement.")
+        st.table([{"Estado de vinculación": etiqueta, "Cantidad": (e := control.estadisticas_estado(estado)).cantidad_movimientos, "Importe": formato_importe(e.impacto_neto)} for estado, etiqueta in etiquetas_estado.items()])
     pendientes = tuple(m for m in control.movimientos if m.categoria == CategoriaEstadoCuentaMp.SIN_CLASIFICACION_COMERCIAL)
-    st.markdown("#### Movimientos sin clasificación comercial")
+    st.markdown("#### Movimientos pendientes de atribución comercial")
     if not pendientes:
-        st.success("No existen movimientos sin clasificación comercial.")
+        st.success("No existen movimientos pendientes de atribución comercial.")
     else:
         motivos_pendientes = {
             EstadoVinculacionEstadoCuentaMp.SIN_VINCULO_SETTLEMENT: "Sin vínculo y sin evidencia",
@@ -1372,7 +1397,7 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
         }
         st.table([{"Motivo": etiqueta, "Cantidad": sum(m.estado_vinculacion == estado for m in pendientes)}
                   for estado, etiqueta in motivos_pendientes.items()])
-    for titulo, categoria in (("Otros ingresos no asociados a ML", CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO), ("Salidas y ajustes", CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO), ("Movimientos asociados a ventas ML", CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML), ("Movimientos sin asociación suficiente", CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE)):
+    for titulo, categoria in (("Otros ingresos no asociados a Mercado Libre", CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO), ("Salidas y ajustes no asociados a Mercado Libre", CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO), ("Movimientos asociados a ventas Mercado Libre", CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML), ("Movimientos sin atribución comercial suficiente", CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE)):
         with st.expander(titulo):
             st.dataframe([{"Reference ID": x.movimiento.reference_id, "Fila": x.movimiento.numero_fila_origen, "Fecha": x.movimiento.fecha_liberacion, "Tipo": x.movimiento.tipo_movimiento_original, "Importe": x.movimiento.importe_neto, "Canal": ", ".join(x.canales), "Plataforma": ", ".join(x.plataformas), "Filas Settlement": ", ".join(map(str, x.filas_settlement)), "IDs de orden": ", ".join(x.ids_orden), "Subtipo": x.subtipo, "Motivo": x.motivo, "Evidencia encontrada": " ".join(x.evidencia_encontrada), "Evidencia faltante": x.evidencia_faltante, "Acción recomendada": x.accion_recomendada} for x in control.movimientos if x.categoria == categoria], hide_index=True, use_container_width=True)
     st.markdown("### B3 — Control de saldo de Mercado Pago")
@@ -1385,8 +1410,9 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
     impactos = {c: control.estadisticas_categoria(c).impacto_neto for c in CategoriaEstadoCuentaMp}
     st.table([{"Impacto neto de ventas ML identificadas": formato_importe(impactos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML]), "Impacto neto de otros ingresos": formato_importe(impactos[CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO]), "Impacto neto de salidas y ajustes": formato_importe(impactos[CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO]), "Impacto neto sin asociación suficiente": formato_importe(impactos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE]), "Suma total de categorías": formato_importe(control.suma_categorias), "Variación neta del estado de cuenta": formato_importe(r.variacion_neta), "Diferencia": formato_importe(control.diferencia_cobertura_monetaria)}])
     if conteos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE] and r.control_contable_verificable:
-        st.info("El control monetario cierra, pero existen movimientos sin asociación suficiente; por lo tanto, el saldo no puede atribuirse comercialmente en su totalidad.")
-    st.caption(f"Cobertura calculada: {control.cantidad_lineas_entrada} líneas · {control.cantidad_lineas_clasificadas} clasificadas exactamente una vez · {control.cantidad_no_clasificadas} sin clasificación · {control.cantidad_clasificadas_mas_de_una_vez} con conflicto · diferencia monetaria {formato_importe(control.diferencia_cobertura_monetaria)}")
+        st.info("El control monetario cierra, pero existen movimientos sin atribución comercial suficiente; por lo tanto, el saldo no puede atribuirse comercialmente en su totalidad.")
+    st.caption(leyenda_cobertura_tecnica(control))
+    st.caption(detalle_cobertura_tecnica(control))
     if not control.cobertura_completa:
         st.warning("La cobertura de clasificación presenta inconsistencias. Se conserva el detalle auditable, pero no se informa cobertura correcta.")
 
