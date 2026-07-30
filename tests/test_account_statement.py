@@ -28,6 +28,52 @@ def settlement():
     return SimpleNamespace(id_operacion_mercado_pago="169679883346", numero_fila_origen=781, id_orden=None, canal_venta="Mercado Pago", plataforma_cobro="Código QR")
 
 
+def test_leyenda_b3_distingue_categoria_tecnica_y_atribucion_comercial():
+    from kiki_control.presentation.account_statement_view import detalle_cobertura_tecnica, leyenda_cobertura_tecnica
+
+    control = controlar_estado_cuenta_mp(normalizar_estado_cuenta_mp("a.xlsx", archivo_estado()), [settlement()])
+    texto = leyenda_cobertura_tecnica(control)
+    assert texto == ("Cobertura calculada: 4 líneas procesadas · 4 categorizadas exactamente una vez · "
+                     "2 sin atribución comercial suficiente · 0 con conflicto · diferencia monetaria $ 0,00.")
+    assert detalle_cobertura_tecnica(control) == "Sin categoría técnica: 0 · procesadas exactamente una vez: 4."
+    assert "sin clasificación" not in texto
+
+
+def test_leyenda_b3_es_dinamica_para_cero_pendientes_faltante_y_conflicto():
+    from dataclasses import replace
+    from kiki_control.domain.account_statement import ControlEstadoCuentaMp
+    from kiki_control.presentation.account_statement_view import detalle_cobertura_tecnica, leyenda_cobertura_tecnica
+
+    base = controlar_estado_cuenta_mp(normalizar_estado_cuenta_mp("a.xlsx", archivo_estado()), [settlement()])
+    cero = ControlEstadoCuentaMp(base.resumen, tuple(
+        replace(m, categoria=CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO)
+        if m.categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE else m
+        for m in base.movimientos
+    ))
+    # Una entrada omitida y otra repetida representan, respectivamente, falta técnica y conflicto.
+    inconsistente = ControlEstadoCuentaMp(base.resumen, base.movimientos[:-1] + (base.movimientos[0],))
+    assert "0 sin atribución comercial suficiente" in leyenda_cobertura_tecnica(cero)
+    assert "Sin categoría técnica: 1" in detalle_cobertura_tecnica(inconsistente)
+    assert "1 con conflicto" in leyenda_cobertura_tecnica(inconsistente)
+    assert "$ 50,00" in leyenda_cobertura_tecnica(inconsistente)
+
+
+def test_sintesis_ejecutiva_singular_plural_y_sin_pendientes():
+    from dataclasses import replace
+    from kiki_control.presentation.account_statement_view import sintesis_ejecutiva
+
+    control = controlar_estado_cuenta_mp(normalizar_estado_cuenta_mp("a.xlsx", archivo_estado()), [settlement()])
+    b1 = SimpleNamespace(resumen=SimpleNamespace(con_diferencia=0))
+    assert sintesis_ejecutiva(b1, control) == ("Conciliación ML–MP sin diferencias. El saldo de Mercado Pago cierra. "
+                                               "Quedan 2 movimientos pendientes de atribución comercial.")
+    pendiente = next(m for m in control.movimientos if m.categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE)
+    uno = replace(control, movimientos=tuple(m for m in control.movimientos if m is not pendiente))
+    assert "Queda 1 movimiento pendiente" in sintesis_ejecutiva(b1, uno)
+    sin_pendientes = replace(control, movimientos=tuple(m for m in control.movimientos if m.categoria != CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE))
+    assert "No quedan movimientos pendientes" in sintesis_ejecutiva(b1, sin_pendientes)
+    assert "con 1 diferencia" in sintesis_ejecutiva(SimpleNamespace(resumen=SimpleNamespace(con_diferencia=1)), uno)
+
+
 def test_parser_decimal_argentino_y_control_de_saldo():
     assert parsear_decimal_estado_cuenta("$ 26.316.618,06", "saldo") == Decimal("26316618.06")
     resumen = normalizar_estado_cuenta_mp("account_statement.xlsx", archivo_estado())
