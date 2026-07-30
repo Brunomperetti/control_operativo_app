@@ -516,7 +516,7 @@ def test_cobertura_temporal_compacta_observacion_y_descargas_diferenciadas():
 
 def test_conclusion_breve_requerida_y_decimal_sin_float():
     from tests.test_control_consolidado_diagnostics import r, rep, D, E
-    from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
+    from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b
     from kiki_control.presentation.control_consolidado_view import conclusion_ejecutiva_consolidada
 
     reporte = rep([
@@ -524,10 +524,58 @@ def test_conclusion_breve_requerida_y_decimal_sin_float():
         r("diff-1", E.COMPLETA, ml=D("10000"), mp=D("20000"), dif=D("10000")),
         r("diff-2", E.COMPLETA, ml=D("10000"), mp=D("24044.34"), dif=D("14044.34")),
     ])
-    texto = conclusion_ejecutiva_consolidada(reporte, diagnosticar_control_consolidado(reporte))
+    texto = conclusion_ejecutiva_consolidada(reporte, diagnosticar_bloque_b(reporte))
     assert texto == "609 de 611 grupos comparables coinciden dentro de la tolerancia. 2 presentan diferencias por un total de $ 24.044,34."
     source = open("src/kiki_control/presentation/control_consolidado_view.py", encoding="utf-8").read()
     assert "float(" not in source
+
+
+def test_conclusion_b1_no_reduce_comparables_a_cobertura_de_utilidad():
+    from tests.test_control_consolidado_diagnostics import r, rep, D, E
+    from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b
+    from kiki_control.presentation.control_consolidado_view import conclusion_ejecutiva_consolidada
+
+    reporte = rep([
+        r("utilidad-apta", E.COMPLETA, ml=D("100"), mp=D("100"), costo=D("40"), dif=D("0")),
+        r("sin-utilidad", E.SIN_COSTO_PRODUCTO, ml=D("50"), mp=D("50"), costo=None, dif=D("0")),
+    ])
+
+    assert sum(resultado.utilidad_preliminar_control is not None for resultado in reporte.resultados) == 1
+    assert conclusion_ejecutiva_consolidada(reporte, diagnosticar_bloque_b(reporte)).startswith(
+        "2 de 2 grupos comparables coinciden dentro de la tolerancia."
+    )
+
+
+def test_resumen_compacto_separa_diagnostico_mp_del_reporte_comercial():
+    from datetime import date
+    from tests.test_control_consolidado_diagnostics import r, rep, D, E
+    from kiki_control.presentation.control_consolidado_diagnostics import diagnosticar_control_consolidado
+    from kiki_control.presentation.control_consolidado_view import kpis_consolidados, revisiones_resumen_compacto
+
+    comercial = rep([
+        r("ml-sin-ec", E.SIN_COSTO_PRODUCTO, costo=None, tiene_ec=False, revision=True),
+        r("fin:comercial", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("10"), costo=None,
+          dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(31,)),
+    ])
+    reporte_diagnostico_mp = rep([
+        *comercial.resultados,
+        r("fin:solo-diagnostico", E.SOLO_MOVIMIENTO_FINANCIERO, ml=None, mp=D("20"), costo=None,
+          dif=None, tiene_ml=False, tiene_ec=False, filas_mp=(32,)),
+    ])
+    fechas = {31: date(2026, 7, 15), 32: date(2026, 7, 16)}
+    diag_comercial = diagnosticar_control_consolidado(comercial, date(2026, 7, 1), date(2026, 7, 31), fechas)
+    diag_mp = diagnosticar_control_consolidado(reporte_diagnostico_mp, date(2026, 7, 1), date(2026, 7, 31), fechas)
+    bloques_comerciales_antes = kpis_consolidados(comercial)
+    filas = {fila.motivo_visible: fila for fila in revisiones_resumen_compacto(diag_comercial, diag_mp)}
+
+    assert filas["MP sin venta dentro del período ML"].cantidad == diag_mp.temporal_mp_sin_venta.dentro.cantidad == 2
+    assert filas["ML sin Eccomapp"].cantidad == 1
+    bloques_comerciales_despues = kpis_consolidados(comercial)
+    assert bloques_comerciales_despues["Bloque C — Costos y utilidad"] == bloques_comerciales_antes["Bloque C — Costos y utilidad"]
+    assert bloques_comerciales_despues["Bloque D — Calidad y pendientes"] == bloques_comerciales_antes["Bloque D — Calidad y pendientes"]
+    assert "settlement_comparable_b1" not in revisiones_resumen_compacto.__code__.co_names
+    source = open("src/kiki_control/ui/streamlit_app.py", encoding="utf-8").read()
+    assert 'st.session_state.get("reporte_diagnostico_mp", reporte)' in source
 
 def test_excel_consolidado_exporta_costo_productos_eccomapp_numero_vacio_y_formato():
     from copy import deepcopy
