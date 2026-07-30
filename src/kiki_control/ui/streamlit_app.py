@@ -32,7 +32,7 @@ from kiki_control.presentation.explanations import (
     explicar_operacion,
     guia_general,
 )
-from kiki_control.presentation.account_statement_view import aclaracion_b1_b2, aclaracion_sin_movimientos_ml
+from kiki_control.presentation.account_statement_view import aclaracion_b1_b2, aclaracion_sin_movimientos_ml, mensaje_cobertura_comercial_parcial
 from kiki_control.presentation.review_cases import (
     DEFINICIONES_REVISION,
     clasificar_revisiones,
@@ -470,12 +470,13 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
                     st.session_state["estado_b1"] = EstadoBloqueB1.SIN_VINCULO_MP
                     st.session_state["motivo_b1"] = "El Settlement no contiene operaciones vinculadas a los grupos comerciales seleccionados."
                 else:
-                    # El motor financiero recibe el universo de diagnóstico,
-                    # no solo el comparable B1: así conserva pagos, payouts y
-                    # movimientos sin venta. El consolidado decide después qué
-                    # grupos son comparables, sin recortar por liquidación.
-                    reporte_financiero = reconciliar(eccomapp_b1, settlement_diagnostico_periodo, tolerancia)
+                    # El consolidado comercial no incorpora grupos creados solo
+                    # para diagnosticar movimientos MP sin venta. El universo de
+                    # diagnóstico se procesa y conserva de forma independiente.
+                    reporte_financiero = reconciliar(eccomapp_b1, settlement_b1, tolerancia)
                     reporte_consolidado = consolidar_control_financiero(reporte_comercial, reporte_financiero)
+                    reporte_financiero_diagnostico = reconciliar(eccomapp_b1, settlement_diagnostico_periodo, tolerancia)
+                    reporte_diagnostico_mp = consolidar_control_financiero(reporte_comercial, reporte_financiero_diagnostico)
                     estado_b1 = (EstadoBloqueB1.PARCIAL if any(r.requiere_revision for r in reporte_consolidado.resultados)
                                  else EstadoBloqueB1.COMPLETO)
                     st.session_state["estado_b1"] = estado_b1
@@ -484,6 +485,7 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
                     st.session_state["reporte_financiero"] = reporte_financiero
                     st.session_state["reporte"] = reporte_financiero
                     st.session_state["reporte_consolidado"] = reporte_consolidado
+                    st.session_state["reporte_diagnostico_mp"] = reporte_diagnostico_mp
                     st.session_state["diagnostico_ml_eccomapp"] = diagnosticar_ml_eccomapp(ventas_b1, eccomapp_b1)
                     st.session_state["cobertura_consolidada"] = cobertura_tres_fuentes(ventas_b1, eccomapp_b1, settlement_b1)
                     st.session_state["cobertura"] = cobertura_archivos(eccomapp_b1, settlement_b1)
@@ -1115,7 +1117,7 @@ def _mostrar_resultados() -> None:
     inicio_ml, fin_ml = _periodo_ventas_ml_normalizadas()
     diagnostico = diagnosticar_control_consolidado(reporte, inicio_ml, fin_ml, _fechas_mp_por_fila_normalizadas())
     diag_bloque_b = diagnosticar_bloque_b(
-        reporte,
+        st.session_state.get("reporte_diagnostico_mp", reporte),
         inicio_ml=inicio_ml,
         fin_ml=fin_ml,
         fechas_origen_mp_por_fila=_fechas_mp_por_fila_normalizadas(),
@@ -1319,7 +1321,7 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
     with st.expander("Auditoría de universos Settlement", expanded=False):
         st.table([{"Métrica": clave, "Valor": valor} for clave, valor in control.metadatos_procesamiento])
     if not control.cobertura_comercial_completa:
-        st.warning("Cobertura comercial parcial. El Settlement Report cargado no cubre todas las operaciones que impactaron el saldo durante el período seleccionado. Descargá el mismo reporte de Mercado Pago con un período de origen más amplio.")
+        st.warning(mensaje_cobertura_comercial_parcial(control))
     st.caption(aclaracion_sin_movimientos_ml(cantidad_grupos_conciliados) if not conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML] else "La cantidad refleja movimientos del saldo vinculados al período cargado, no el total de ventas conciliadas en B1.")
 
     interpretaciones = {

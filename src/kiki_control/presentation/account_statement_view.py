@@ -1,5 +1,51 @@
 """Textos puros para presentar el control diario de Mercado Pago."""
 
+from kiki_control.domain.account_statement import (
+    CategoriaEstadoCuentaMp,
+    ControlEstadoCuentaMp,
+    EstadoVinculacionEstadoCuentaMp,
+)
+
+
+_MENSAJES_CAUSA_COBERTURA = {
+    EstadoVinculacionEstadoCuentaMp.SIN_VINCULO_SETTLEMENT: (
+        "Existen líneas sin vínculo Settlement y sin evidencia comercial; "
+        "descargá el Settlement Report con un período de origen más amplio."
+    ),
+    EstadoVinculacionEstadoCuentaMp.VINCULADO_SIN_ORIGEN_COMERCIAL: (
+        "La cobertura comercial es parcial porque existen movimientos vinculados al "
+        "Settlement cuya evidencia no permite determinar responsablemente el origen comercial."
+    ),
+    EstadoVinculacionEstadoCuentaMp.ID_AMBIGUO: (
+        "Existen IDs con evidencia contradictoria en el Settlement; revisá sus filas antes de atribuir el origen comercial."
+    ),
+    EstadoVinculacionEstadoCuentaMp.ID_VACIO: (
+        "Existen movimientos con la referencia vacía; completá o verificá el reference ID del estado de cuenta."
+    ),
+}
+
+
+def mensaje_cobertura_comercial_parcial(control: ControlEstadoCuentaMp) -> str:
+    """Explica cada causa real de cobertura parcial, sin inferencias por importe."""
+    pendientes = tuple(
+        movimiento for movimiento in control.movimientos
+        if movimiento.categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE
+    )
+    causas = tuple(
+        estado for estado in _MENSAJES_CAUSA_COBERTURA
+        if any(m.estado_vinculacion == estado for m in pendientes)
+    )
+    if not causas:
+        return "La cobertura comercial es parcial; revisá el detalle de movimientos sin asociación suficiente."
+    mensajes = tuple(_MENSAJES_CAUSA_COBERTURA[estado] for estado in causas)
+    if len(mensajes) == 1:
+        return mensajes[0]
+    resumen = "; ".join(
+        f"{sum(m.estado_vinculacion == estado for m in pendientes)} {estado.value}"
+        for estado in causas
+    )
+    return f"La cobertura comercial es parcial por varias causas ({resumen}). " + " ".join(mensajes)
+
 
 def aclaracion_b1_b2(cantidad_grupos_conciliados: int) -> str:
     return (

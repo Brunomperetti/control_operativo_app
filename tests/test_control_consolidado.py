@@ -385,3 +385,23 @@ def test_contador_total_ml_ausente_y_suma_de_estados_cierra():
     sin_total = next(r for r in rep.resultados if r.estado == EstadoControlConsolidado.TOTAL_ML_AUSENTE)
     assert sin_total.diferencia_ml_mp is None
     assert sin_total.utilidad_preliminar_control is None
+
+
+def test_universo_diagnostico_mp_no_contamina_metricas_comerciales():
+    from kiki_control.presentation.control_consolidado_view import kpis_consolidados
+
+    comercial = reporte([venta("O1")], [op("O1")], [fin("O1")])
+    diagnostico_mp = reporte(
+        [venta("O1")], [op("O1")],
+        [fin("O1"), fin(None, fila=2, neto=D("25"), comercial_hashes=())],
+    )
+
+    assert comercial.total_resultados == comercial.total_completa == 1
+    assert comercial.total_requieren_revision == 0
+    assert diagnostico_mp.total_resultados == 2
+    assert diagnostico_mp.total_requieren_revision == 1
+    cobertura = next(k for k in kpis_consolidados(comercial)["Bloque C — Costos y utilidad"]
+                     if k.nombre == "Cobertura de utilidad")
+    assert cobertura.valor == "1 de 1"
+    assert all(r.tiene_mercado_libre_oficial for r in comercial.resultados)
+    assert any(not r.tiene_mercado_libre_oficial for r in diagnostico_mp.resultados)
