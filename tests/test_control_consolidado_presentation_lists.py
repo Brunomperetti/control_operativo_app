@@ -27,7 +27,11 @@ def test_grupos_excluidos_se_filtran_visual_sin_limitar_registros_y_con_conteos(
     assert len(por_motivo) == 75
     assert contar_mostrando(por_motivo, grupos) == "Mostrando 75 de 150 grupos"
     assert len(filtrar_grupos_excluidos(grupos, "", "")) == len(grupos)
-    assert set(filas_grupos_excluidos(por_id)[0]) == {"Grupo", "Motivo", "Neto ML", "Neto Eccomapp", "Neto aprobado MP", "Aporte MP–ML"}
+    assert set(filas_grupos_excluidos(por_id)[0]) == {
+        "Grupo", "Motivo", "Neto ML", "Neto Eccomapp", "Neto aprobado MP", "Aporte MP–ML",
+        "IDs de orden", "Filas ML", "Filas Eccomapp", "Filas MP", "Costo",
+        "Presencia Total (ARS)", "Presencia pago principal",
+    }
 
 
 def test_revisiones_resumen_no_incluye_ids_extensos_y_detalle_una_fila_por_grupo():

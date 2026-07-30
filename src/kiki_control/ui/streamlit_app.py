@@ -22,7 +22,7 @@ from kiki_control.domain.temporal import (
     ETIQUETAS_ESTADO, EstadoBloqueB1, EstadoBloqueB2B3, TipoSeleccionPeriodo,
     calcular_disponibilidad_bloques, filtrar_estado_cuenta,
     filtrar_por_periodo, reconocer_cuatro_fuentes, resolver_periodo,
-    universos_settlement,
+    construir_universos_settlement, universos_settlement,
 )
 from kiki_control.ingestion.file_inspector import inspeccionar_archivo
 from kiki_control.presentation.explanations import (
@@ -462,7 +462,10 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
             else:
                 eccomapp = replace(eccomapp, operaciones=eccomapp_b1)
                 reporte_comercial = vincular_ventas_oficiales_con_eccomapp(ventas_b1, eccomapp_b1)
-                settlement_b1, _ = universos_settlement(ventas_b1, eccomapp_b1, settlement_completo, periodo_b1, reporte_comercial)
+                universos_mp = construir_universos_settlement(
+                    ventas_b1, eccomapp_b1, settlement_completo, periodo_b1, reporte_comercial)
+                settlement_b1 = universos_mp.settlement_comparable_b1
+                settlement_diagnostico_periodo = universos_mp.settlement_diagnostico_periodo
                 if not settlement_b1:
                     st.session_state["estado_b1"] = EstadoBloqueB1.SIN_VINCULO_MP
                     st.session_state["motivo_b1"] = "El Settlement no contiene operaciones vinculadas a los grupos comerciales seleccionados."
@@ -471,7 +474,7 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
                     # no solo el comparable B1: así conserva pagos, payouts y
                     # movimientos sin venta. El consolidado decide después qué
                     # grupos son comparables, sin recortar por liquidación.
-                    reporte_financiero = reconciliar(eccomapp_b1, settlement_completo, tolerancia)
+                    reporte_financiero = reconciliar(eccomapp_b1, settlement_diagnostico_periodo, tolerancia)
                     reporte_consolidado = consolidar_control_financiero(reporte_comercial, reporte_financiero)
                     estado_b1 = (EstadoBloqueB1.PARCIAL if any(r.requiere_revision for r in reporte_consolidado.resultados)
                                  else EstadoBloqueB1.COMPLETO)
@@ -504,7 +507,11 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
                 estado_b23 = EstadoBloqueB2B3.COMPLETO
             st.session_state["estado_b2_b3"] = estado_b23
             st.session_state["motivo_b2_b3"] = "Composición financiera procesada de forma independiente de B1."
-            control = replace(control, metadatos_procesamiento=control.metadatos_procesamiento + (
+            metadatos_universos = universos_mp.metadatos if ventas_b1 and 'universos_mp' in locals() else (
+                ("Filas Settlement totales", str(len(settlement_completo))),
+                ("Criterio diagnóstico", "Sin universo B1 por ausencia de actividad comercial"),
+            )
+            control = replace(control, metadatos_procesamiento=control.metadatos_procesamiento + metadatos_universos + (
                 ("Período solicitado", _texto_periodo(periodo)),
                 ("Período efectivo B1", _texto_periodo(disponibilidad.periodo_efectivo_b1)),
                 ("Período efectivo B2/B3", _texto_periodo(disponibilidad.periodo_efectivo_b2_b3)),
@@ -514,7 +521,7 @@ def _procesar(info_ml_oficial: dict[str, Any], info_eccomapp: dict[str, Any], in
             st.session_state["control_estado_cuenta_mp"] = control
 
         # Se conserva un único Settlement cargado. Los tres universos derivados
-        # son: ``settlement_b1`` (comparable), el completo (diagnóstico) y el
+        # son: comparable B1, diagnóstico temporal expandido por relaciones y el
         # subconjunto filtrado internamente por ``controlar_estado_cuenta_mp``.
         mercado_pago = replace(mercado_pago, movimientos=settlement_completo)
         st.session_state["normalizacion"] = {"Ventas oficiales ML": ventas_ml, "Eccomapp": eccomapp, "Mercado Pago": mercado_pago}
@@ -1309,6 +1316,8 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
     for index, (nombre, valor, ayuda) in enumerate(etiquetas): cols[index % 3].metric(nombre, valor, help=ayuda)
     st.metric("Cobertura comercial", f"{control.porcentaje_cobertura_comercial.quantize(Decimal('0.01'))}%")
     st.caption(control.estado_cobertura_comercial)
+    with st.expander("Auditoría de universos Settlement", expanded=False):
+        st.table([{"Métrica": clave, "Valor": valor} for clave, valor in control.metadatos_procesamiento])
     if not control.cobertura_comercial_completa:
         st.warning("Cobertura comercial parcial. El Settlement Report cargado no cubre todas las operaciones que impactaron el saldo durante el período seleccionado. Descargá el mismo reporte de Mercado Pago con un período de origen más amplio.")
     st.caption(aclaracion_sin_movimientos_ml(cantidad_grupos_conciliados) if not conteos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML] else "La cantidad refleja movimientos del saldo vinculados al período cargado, no el total de ventas conciliadas en B1.")
@@ -1356,7 +1365,7 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
                   for estado, etiqueta in motivos_pendientes.items()])
     for titulo, categoria in (("Otros ingresos no asociados a ML", CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO), ("Salidas y ajustes", CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO), ("Movimientos asociados a ventas ML", CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML), ("Movimientos sin asociación suficiente", CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE)):
         with st.expander(titulo):
-            st.dataframe([{"Reference ID": x.movimiento.reference_id, "Fila": x.movimiento.numero_fila_origen, "Fecha": x.movimiento.fecha_liberacion, "Tipo": x.movimiento.tipo_movimiento_original, "Importe": x.movimiento.importe_neto, "Subtipo": x.subtipo, "Motivo": x.motivo, "Acción recomendada": x.accion_recomendada} for x in control.movimientos if x.categoria == categoria], hide_index=True, use_container_width=True)
+            st.dataframe([{"Reference ID": x.movimiento.reference_id, "Fila": x.movimiento.numero_fila_origen, "Fecha": x.movimiento.fecha_liberacion, "Tipo": x.movimiento.tipo_movimiento_original, "Importe": x.movimiento.importe_neto, "Canal": ", ".join(x.canales), "Plataforma": ", ".join(x.plataformas), "Filas Settlement": ", ".join(map(str, x.filas_settlement)), "IDs de orden": ", ".join(x.ids_orden), "Subtipo": x.subtipo, "Motivo": x.motivo, "Evidencia encontrada": " ".join(x.evidencia_encontrada), "Evidencia faltante": x.evidencia_faltante, "Acción recomendada": x.accion_recomendada} for x in control.movimientos if x.categoria == categoria], hide_index=True, use_container_width=True)
     st.markdown("### B3 — Control de saldo de Mercado Pago")
     r = control.resumen
     st.info(control.estado_contable)

@@ -98,6 +98,11 @@ class MovimientoEstadoCuentaClasificado:
     accion_recomendada: str
     filas_settlement: tuple[int, ...] = tuple()
     id_grupo_ml: str | None = None
+    canales: tuple[str, ...] = tuple()
+    plataformas: tuple[str, ...] = tuple()
+    ids_orden: tuple[str, ...] = tuple()
+    evidencia_encontrada: tuple[str, ...] = tuple()
+    evidencia_faltante: str | None = None
 
     @property
     def fila_settlement(self) -> int | None:

@@ -9,7 +9,7 @@ from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, Resu
 from kiki_control.domain.temporal import (
     EstadoBloqueB1, EstadoBloqueB2B3, EstadoReconocimiento, TipoSeleccionPeriodo,
     calcular_disponibilidad_bloques, filtrar_estado_cuenta,
-    reconocer_cuatro_fuentes, resolver_periodo, universos_settlement,
+    construir_universos_settlement, reconocer_cuatro_fuentes, resolver_periodo, universos_settlement,
 )
 from kiki_control.ui.session_cycle import construir_firma_procesamiento_cuatro_fuentes
 
@@ -75,7 +75,7 @@ def test_archivo_sin_fechas_e_incompatibilidad():
     assert rec.coberturas[2].estado == EstadoReconocimiento.ARCHIVO_SIN_FECHAS_VALIDAS
 
 
-def test_b1_solo_vinculos_y_b23_settlement_completo():
+def test_comparable_y_diagnostico_excluyen_historico_ajeno():
     p = resolver_periodo(TipoSeleccionPeriodo.PERSONALIZADO, "UTC", desde=date(2026, 7, 20), hasta=date(2026, 7, 20))
     ml = (Item(id_venta="ORDER-1", fecha_venta=datetime(2026, 7, 20)),)
     relacionados = Item(id_orden="ORDER-1", id_operacion_mercado_pago="MP-1", fecha_liquidacion_local=datetime(2026, 8, 20))
@@ -83,7 +83,20 @@ def test_b1_solo_vinculos_y_b23_settlement_completo():
     ec = (Item(id_orden="ORDER-1", fecha_hora_venta=datetime(2026, 7, 20)),)
     b1, b23 = universos_settlement(ml, ec, (relacionados, historico), p)
     assert b1 == (relacionados,)
-    assert b23 == (relacionados, historico)
+    assert b23 == (relacionados,)
+
+
+def test_diagnostico_expande_relaciones_y_no_equivale_al_settlement_ampliado():
+    p = resolver_periodo(TipoSeleccionPeriodo.PERSONALIZADO, "UTC", desde=date(2026, 7, 20), hasta=date(2026, 7, 20))
+    dentro = Item(id_orden="ORD-D", id_operacion_mercado_pago="MP-D", fecha_origen_local=datetime(2026, 7, 20), fecha_liquidacion_local=datetime(2026, 8, 20))
+    posterior = Item(id_orden=None, id_operacion_mercado_pago="MP-D", fecha_origen_local=datetime(2026, 8, 1), fecha_liquidacion_local=datetime(2026, 9, 1))
+    anterior = Item(id_orden="ORD-D", id_operacion_mercado_pago="MP-ANT", fecha_origen_local=datetime(2026, 7, 1))
+    ajeno = Item(id_orden="OLD", id_operacion_mercado_pago="MP-OLD", fecha_origen_local=datetime(2026, 3, 1))
+    universos = construir_universos_settlement((), (), (dentro, posterior, anterior, ajeno), p)
+    assert universos.settlement_comparable_b1 == ()
+    assert universos.settlement_diagnostico_periodo == (dentro, posterior, anterior)
+    assert universos.settlement_diagnostico_periodo != (dentro, posterior, anterior, ajeno)
+    assert dict(universos.metadatos)["Filas settlement_diagnostico_periodo"] == "3"
 
 
 def test_b1_usa_grupo_canonico_y_expande_toda_la_operacion():

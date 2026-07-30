@@ -102,6 +102,13 @@ class GrupoExcluidoPuente:
     neto_eccomapp: Decimal | None
     neto_aprobado_mp: Decimal | None
     aporte_diferencia_ml_mp: Decimal | None
+    ids_orden: tuple[str, ...] = ()
+    filas_ml: tuple[int, ...] = ()
+    filas_eccomapp: tuple[int, ...] = ()
+    filas_mp: tuple[int, ...] = ()
+    costo: Decimal | None = None
+    tiene_total_ars: bool = False
+    tiene_pago_principal: bool = False
 
 
 @dataclass(frozen=True)
@@ -266,7 +273,13 @@ def _grupo_excluido_puente(r: ResultadoControlConsolidado) -> GrupoExcluidoPuent
     if r.neto_mp_eccomapp_informado is None: faltan.append("Neto Eccomapp")
     if r.neto_aprobado_mp is None: faltan.append("Neto aprobado MP")
     aporte = r.neto_aprobado_mp - r.total_informado_ml if r.neto_aprobado_mp is not None and r.total_informado_ml is not None else None
-    return GrupoExcluidoPuente(_grupo(r), "Fuera del puente triple por faltar " + ", ".join(faltan), r.total_informado_ml, r.neto_mp_eccomapp_informado, r.neto_aprobado_mp, aporte)
+    return GrupoExcluidoPuente(
+        _grupo(r), "Fuera del puente triple por faltar " + ", ".join(faltan),
+        r.total_informado_ml, r.neto_mp_eccomapp_informado, r.neto_aprobado_mp, aporte,
+        r.ids_orden, r.filas_origen_ml, r.filas_origen_eccomapp, r.filas_origen_mp,
+        r.costo_productos_eccomapp, r.total_informado_ml is not None,
+        r.neto_aprobado_mp is not None,
+    )
 
 
 def diagnosticar_utilidad(reporte: ReporteControlConsolidado) -> DiagnosticoCoberturaUtilidad:

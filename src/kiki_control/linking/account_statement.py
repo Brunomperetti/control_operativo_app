@@ -179,11 +179,16 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp],
         "reintegro comisiones", "devolucion de comision cobrada",
         "devolucion de comisiones cobradas",
     ))
-    evidencia_salida = any(x in texto for x in (
+    # Una salida inequívoca identifica expresamente un egreso financiero no
+    # comercial. Los ajustes genéricos se registran aparte: no acreditan canal.
+    salida_no_ml_inequivoca = any(x in texto for x in (
         "transferencia enviada", "pago a tercero", "pago a proveedor",
-        "pago de servicio", "retiro", "salida de dinero", "debito",
-        "dinero retenido", "retencion", "cancelada", "devolucion", "reclamo",
-        "impuesto", "comision",
+        "pago de servicio", "retiro", "extraccion", "envio de dinero",
+        "debito por transferencia", "salida de dinero",
+    ))
+    ajuste_comercial_generico = any(x in texto for x in (
+        "devolucion", "reclamo", "impuesto", "comision", "retencion",
+        "cancelacion", "cancelada", "contracargo", "ajuste", "dinero retenido",
     ))
     # La evidencia canónica ML prevalece sobre el signo y sobre el tipo: una
     # devolución, retención o comisión vinculada continúa perteneciendo a ML.
@@ -199,7 +204,7 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp],
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta con Point", " ".join(evidencia.evidencia)
     elif m.importe_neto > 0 and es_reintegro_comision:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Reintegro de comisiones", "Account Statement — tipo explícito informado por Mercado Pago."
-    elif m.importe_neto <= 0 and evidencia_salida:
+    elif m.importe_neto <= 0 and salida_no_ml_inequivoca:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO, m.tipo_movimiento_original, "El tipo original identifica explícitamente una salida o ajuste no vinculada a ML."
     elif coherente and m.importe_neto > 0 and ("mercado pago" in canales or any("código qr" in p or "codigo qr" in p for p in plataformas)):
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta por mostrador con Código QR", "El settlement identifica canal Mercado Pago o plataforma Código QR y no pertenece a un grupo ML."
@@ -207,6 +212,9 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp],
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, m.tipo_movimiento_original, "El tipo original aporta evidencia explícita de un ingreso no ML."
     else:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE, "Origen no determinado", "No existe vínculo settlement inequívoco ni evidencia suficiente en el estado de cuenta."
+        if ajuste_comercial_generico:
+            subtipo = "Ajuste comercial genérico sin canal acreditado"
+            motivo = "El tipo describe un ajuste comercial, pero no acredita si pertenece a Mercado Libre o a otro canal."
         if grupo_settlement and grupo_settlement.es_ambiguo:
             motivo = f"El ID settlement es ambiguo: {grupo_settlement.motivo_ambiguedad}."
     if estado == EstadoVinculacionEstadoCuentaMp.VINCULADO_SETTLEMENT and categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE:
@@ -219,7 +227,16 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp],
     }
     accion = acciones_revision[estado] if categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE else "Sin acción; conservar para trazabilidad."
     filas = grupo_settlement.filas_origen if grupo_settlement else tuple()
-    return MovimientoEstadoCuentaClasificado(m, estado, categoria, subtipo, motivo, accion, filas, id_grupo_ml)
+    evidencia_texto = evidencia.evidencia if evidencia else tuple()
+    faltante = ("Canal o plataforma inequívocos y vínculo comercial de la operación."
+                if categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE else None)
+    return MovimientoEstadoCuentaClasificado(
+        m, estado, categoria, subtipo, motivo, accion, filas, id_grupo_ml,
+        grupo_settlement.canales if grupo_settlement else tuple(),
+        grupo_settlement.plataformas if grupo_settlement else tuple(),
+        grupo_settlement.ids_orden if grupo_settlement else tuple(),
+        evidencia_texto, faltante,
+    )
 
 
 def _valores(movimientos: Iterable[Any], atributo: str) -> tuple[str, ...]:
