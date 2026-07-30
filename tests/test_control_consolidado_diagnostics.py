@@ -59,6 +59,18 @@ def test_particion_revisiones_multietiqueta_temporal_y_presentacion_sin_hashes()
     assert 'hash' not in etiqueta_selector_detalle(fila) and etiqueta_selector_detalle(fila).startswith('Movimiento MP sin orden')
     assert estado_visible(E.SOLO_MOVIMIENTO_FINANCIERO) == 'Solo movimiento de Mercado Pago'
 
+
+def test_aclaracion_revisiones_no_fija_contadores_y_separa_universos():
+    aclaracion = diagnosticar_control_consolidado(rep([r('ok')])).revisiones.aclaracion
+
+    assert '206' not in aclaracion
+    assert '122' not in aclaracion
+    assert not any(caracter.isdigit() for caracter in aclaracion)
+    assert 'Conteos multietiqueta: no deben sumarse para obtener el total.' in aclaracion
+    assert 'Los indicadores comerciales y financieros pertenecen a universos diferentes' in aclaracion
+    assert 'no deben sumarse ni compararse directamente' in aclaracion
+
+
 def test_decimal_sin_float_pii_y_modelo_inmutable():
     source = open('src/kiki_control/presentation/control_consolidado_diagnostics.py', encoding='utf-8').read()
     assert 'float(' not in source and 'comprador' not in source.lower() and 'documento' not in source.lower()

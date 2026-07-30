@@ -1362,7 +1362,7 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
         CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE: "Vínculo settlement existente, sin evidencia comercial suficiente.",
     }
     nombres = {
-        CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML: "Asociadas a ventas ML del período",
+        CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML: "Movimientos asociados a ventas Mercado Libre",
         CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO: "Otros ingresos no ML identificados",
         CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO: "Salidas o ajustes identificados",
         CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE: "Vinculadas pero sin atribución comercial suficiente",
@@ -1408,7 +1408,7 @@ def _mostrar_estado_cuenta_mp(cantidad_grupos_conciliados: int) -> None:
         st.warning(r.motivo_control_no_disponible)
     st.table([{"Saldo inicial": formato_importe(r.saldo_inicial), "Créditos informados": formato_importe(r.creditos_informados), "Débitos informados": formato_importe(r.debitos_informados), "Variación neta": formato_importe(r.variacion_neta), "Saldo final calculado": formato_importe(r.saldo_final_calculado), "Saldo final informado": formato_importe(r.saldo_final_informado), "Diferencia de control": formato_importe(r.diferencia_control)}])
     impactos = {c: control.estadisticas_categoria(c).impacto_neto for c in CategoriaEstadoCuentaMp}
-    st.table([{"Impacto neto de ventas ML identificadas": formato_importe(impactos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML]), "Impacto neto de otros ingresos": formato_importe(impactos[CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO]), "Impacto neto de salidas y ajustes": formato_importe(impactos[CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO]), "Impacto neto sin asociación suficiente": formato_importe(impactos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE]), "Suma total de categorías": formato_importe(control.suma_categorias), "Variación neta del estado de cuenta": formato_importe(r.variacion_neta), "Diferencia": formato_importe(control.diferencia_cobertura_monetaria)}])
+    st.table([{"Impacto neto de ventas ML identificadas": formato_importe(impactos[CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML]), "Impacto neto de otros ingresos": formato_importe(impactos[CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO]), "Impacto neto de salidas y ajustes": formato_importe(impactos[CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO]), "Impacto neto sin atribución comercial suficiente": formato_importe(impactos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE]), "Suma total de categorías": formato_importe(control.suma_categorias), "Variación neta del estado de cuenta": formato_importe(r.variacion_neta), "Diferencia": formato_importe(control.diferencia_cobertura_monetaria)}])
     if conteos[CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE] and r.control_contable_verificable:
         st.info("El control monetario cierra, pero existen movimientos sin atribución comercial suficiente; por lo tanto, el saldo no puede atribuirse comercialmente en su totalidad.")
     st.caption(leyenda_cobertura_tecnica(control))
