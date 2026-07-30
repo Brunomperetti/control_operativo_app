@@ -335,7 +335,7 @@ def diagnosticar_revisiones(
     for categoria, nombre, accion in categorias:
         rs = tuple(r for r in universo_mp_sin_venta if categoria_principal_mp(r.filas_origen_mp, fechas, _as_date(inicio_ml), _as_date(fin_ml)) == categoria)
         items.append(DiagnosticoRevision(nombre, len(rs), _sum(r.neto_financiero_total_mp for r in rs), accion, tuple(_grupo(r) for r in rs)))
-    return DiagnosticoRevisionesConsolidadas(reporte.total_requieren_revision, tuple(items), "Conteos multietiqueta: no deben sumarse para obtener el total. Revisiones consolidadas: tres fuentes. Revisiones históricas: Eccomapp–Mercado Pago. Los contadores 206 y 122 pertenecen a universos diferentes y no son comparables directamente.")
+    return DiagnosticoRevisionesConsolidadas(reporte.total_requieren_revision, tuple(items), "Conteos multietiqueta: no deben sumarse para obtener el total. Revisiones consolidadas: tres fuentes. Revisiones históricas: Eccomapp–Mercado Pago. Los indicadores comerciales y financieros pertenecen a universos diferentes y no deben sumarse ni compararse directamente.")
 
 
 def _as_date(v: date | datetime | None) -> date | None:
