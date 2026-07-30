@@ -206,18 +206,21 @@ def fuentes_disponibles(r: ResultadoControlConsolidado) -> str:
     return ", ".join(fuentes) if fuentes else "Sin fuente comercial asociada"
 
 
-def conclusion_ejecutiva_consolidada(reporte: ReporteControlConsolidado, diagnostico: Any | None = None) -> str:
-    """Conclusión principal breve, sin recalcular valores del dominio."""
-    diag = diagnostico or diagnosticar_control_consolidado(reporte)
-    diferencias = diag.diferencias
+def conclusion_ejecutiva_consolidada(reporte: ReporteControlConsolidado, diagnostico_b1: Any | None = None) -> str:
+    """Conclusión principal breve basada exclusivamente en el universo B1."""
+    if diagnostico_b1 is None:
+        from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b
+
+        diagnostico_b1 = diagnosticar_bloque_b(reporte)
+    diferencias = diagnostico_b1.resumen
     extra_total_ml = (
         f" {reporte.total_total_ml_ausente} venta oficial sin Total (ARS) requiere revisión monetaria."
         if reporte.total_total_ml_ausente
         else ""
     )
     return (
-        f"{diferencias.coincidencias_dentro_tolerancia} de {diferencias.comparables_totales} grupos comparables coinciden dentro de la tolerancia. "
-        f"{diferencias.con_diferencia_ml_mp} presentan diferencias por un total de {formato_importe(diferencias.suma_diferencia_ml_mp)}."
+        f"{diferencias.coincidencias} de {diferencias.comparables_totales} grupos comparables coinciden dentro de la tolerancia. "
+        f"{diferencias.con_diferencia} presentan diferencias por un total de {formato_importe(diferencias.diferencia_operaciones_fuera_tolerancia)}."
         f"{extra_total_ml}"
     )
 
@@ -464,6 +467,38 @@ def filas_resumen_revisiones(revisiones: Iterable[Any]) -> list[dict[str, str | 
         "Importe afectado": formato_importe(r.importe_afectado),
         "Acción recomendada": r.accion_recomendada,
     } for r in revisiones]
+
+
+def revisiones_resumen_compacto(diagnostico_comercial: Any, diagnostico_mp: Any) -> tuple[Any, ...]:
+    """Compone el resumen sin mezclar los universos comercial y diagnóstico MP."""
+    nombres_mp = {
+        "MP sin venta anterior al período ML",
+        "MP sin venta dentro del período ML",
+        "MP sin venta posterior al período ML",
+        "MP sin venta sin fecha de origen",
+        "Revisión financiera",
+    }
+    comerciales = tuple(
+        revision
+        for revision in diagnostico_comercial.revisiones.revisiones_multietiqueta
+        if revision.motivo_visible not in nombres_mp
+    )
+    revisiones_mp = {
+        revision.motivo_visible: revision
+        for revision in diagnostico_mp.revisiones.revisiones_multietiqueta
+        if revision.motivo_visible in nombres_mp
+    }
+    return comerciales + tuple(
+        revisiones_mp[nombre]
+        for nombre in (
+            "MP sin venta anterior al período ML",
+            "MP sin venta dentro del período ML",
+            "MP sin venta posterior al período ML",
+            "MP sin venta sin fecha de origen",
+            "Revisión financiera",
+        )
+        if nombre in revisiones_mp
+    )
 
 
 def filtrar_grupos_involucrados_por_motivo(revisiones: Iterable[Any], motivo: str, busqueda_grupo: str = "") -> tuple[str, ...]:

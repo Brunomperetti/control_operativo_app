@@ -93,6 +93,7 @@ from kiki_control.presentation.control_consolidado_view import (
     filas_movimientos_bloque_b,
     filas_movimientos_diferencia,
     filas_resumen_revisiones,
+    revisiones_resumen_compacto,
     filas_tabla_consolidada,
     filas_cobertura_presentacion,
     filtrar_filas_consolidadas,
@@ -1171,7 +1172,7 @@ def _mostrar_resultados() -> None:
                     "La diferencia temporal no implica por sí sola un error."
                 )
         st.header("Conclusión ejecutiva")
-        st.info(conclusion_ejecutiva_consolidada(reporte, diagnostico))
+        st.info(conclusion_ejecutiva_consolidada(reporte, diag_bloque_b))
         for texto in textos_secundarios_conclusion(reporte):
             st.caption(texto)
         with st.expander("Ver interpretación y alcance completo", expanded=False):
@@ -1197,7 +1198,13 @@ def _mostrar_resultados() -> None:
         )
         st.subheader("Resumen compacto de revisiones")
         st.caption(diagnostico.revisiones.aclaracion)
-        st.table(filas_resumen_revisiones(diagnostico.revisiones.revisiones_multietiqueta))
+        diagnostico_mp = diagnosticar_control_consolidado(
+            st.session_state.get("reporte_diagnostico_mp", reporte),
+            inicio_ml,
+            fin_ml,
+            _fechas_mp_por_fila_normalizadas(),
+        )
+        st.table(filas_resumen_revisiones(revisiones_resumen_compacto(diagnostico, diagnostico_mp)))
 
     with tab_operacion:
         st.header("Control por operación")

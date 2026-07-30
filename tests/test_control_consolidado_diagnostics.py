@@ -274,6 +274,7 @@ def test_diferencia_final_queda_pendiente_si_faltan_componentes_base():
 
 
 def test_conclusion_con_diferencias_usa_diagnostico_no_estado_principal():
+    from kiki_control.presentation.bloque_b_diagnostics import diagnosticar_bloque_b
     from kiki_control.presentation.control_consolidado_view import conclusion_ejecutiva_consolidada
 
     reporte = rep([
@@ -282,7 +283,7 @@ def test_conclusion_con_diferencias_usa_diagnostico_no_estado_principal():
         r('ok', E.COMPLETA, ml=D('50'), mp=D('50'), dif=D('0')),
     ])
     diagnostico = diagnosticar_control_consolidado(reporte)
-    texto = conclusion_ejecutiva_consolidada(reporte, diagnostico)
+    texto = conclusion_ejecutiva_consolidada(reporte, diagnosticar_bloque_b(reporte))
 
     assert reporte.total_con_diferencia == 0
     assert diagnostico.diferencias.con_diferencia_ml_mp == 2
