@@ -391,9 +391,13 @@ def _agregar_hojas_estado_cuenta(wb: Workbook, control: ControlEstadoCuentaMp) -
     for nombre, categoria in mapas:
         ws_detalle = wb.create_sheet(nombre)
         if categoria == CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE:
-            ws_detalle.append(["Desglose de estados de vinculación", "Cantidad", "Importe neto"])
+            ws_detalle.append(["Movimientos sin clasificación comercial", "Cantidad", "Importe neto"])
             for estado in (EstadoVinculacionEstadoCuentaMp.SIN_VINCULO_SETTLEMENT, EstadoVinculacionEstadoCuentaMp.VINCULADO_SIN_ORIGEN_COMERCIAL, EstadoVinculacionEstadoCuentaMp.ID_AMBIGUO, EstadoVinculacionEstadoCuentaMp.ID_VACIO):
-                estadisticas = control.estadisticas_estado(estado)
+                estadisticas = control.estadisticas(tuple(
+                    m for m in control.movimientos
+                    if m.categoria == CategoriaEstadoCuentaMp.SIN_CLASIFICACION_COMERCIAL
+                    and m.estado_vinculacion == estado
+                ))
                 ws_detalle.append((estado.value, estadisticas.cantidad_movimientos, estadisticas.impacto_neto))
             ws_detalle.append([])
         _escribir_detalle_estado_cuenta(ws_detalle, (m for m in control.movimientos if m.categoria == categoria))

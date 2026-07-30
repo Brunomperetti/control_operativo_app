@@ -212,6 +212,63 @@ def test_acciones_recomendadas_se_diferencian_por_estado_de_vinculacion():
     assert identificado.accion_recomendada == "Sin acción; conservar para trazabilidad."
 
 
+def test_prioridad_reintegros_comision_positivos_sin_settlement():
+    """La semántica explícita prevalece sobre la palabra genérica comisión."""
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+
+    tipos = ("Reintegro de comisión", "Reintegro comision", "Reintegro de comisiones",
+             "Devolución de comisión cobrada")
+    movimientos = tuple(
+        MovimientoEstadoCuentaMp(i, datetime(2026, 1, 1), tipo, f"R-{i}", Decimal("1"),
+                                 None, "hash", "ACCOUNT_STATEMENT")
+        for i, tipo in enumerate(tipos, 1)
+    )
+    resumen = ResumenEstadoCuentaMp(Decimal("0"), Decimal("4"), Decimal("0"), Decimal("4"),
+                                    movimientos, datetime(2026, 1, 1), datetime(2026, 1, 1))
+    control = controlar_estado_cuenta_mp(resumen, [])
+
+    assert all(m.categoria == CategoriaEstadoCuentaMp.OTROS_INGRESOS_NO_ML for m in control.movimientos)
+    assert all(m.subtipo == "Reintegro de comisiones" for m in control.movimientos)
+    assert all("Account Statement" in m.motivo for m in control.movimientos)
+    assert control.cobertura_comercial_completa
+
+
+def test_salida_requiere_evidencia_y_ml_prevalece_sobre_comision():
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+
+    movimientos = (
+        MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), "Transferencia enviada", "OUT", Decimal("-2"), None, "h", "S"),
+        MovimientoEstadoCuentaMp(2, datetime(2026, 1, 1), "Movimiento", "UNKNOWN", Decimal("-3"), None, "h", "S"),
+        MovimientoEstadoCuentaMp(3, datetime(2026, 1, 1), "Comisión", "ML", Decimal("-4"), None, "h", "S"),
+    )
+    resumen = ResumenEstadoCuentaMp(Decimal("9"), Decimal("0"), Decimal("-9"), Decimal("0"), movimientos,
+                                    datetime(2026, 1, 1), datetime(2026, 1, 1))
+    settlement_ml = _settlement(3, "ML", "ORD", "Mercado Libre", "Checkout")
+    control = controlar_estado_cuenta_mp(resumen, [settlement_ml], {"ML": "G-ML"})
+
+    assert control.movimientos[0].categoria == CategoriaEstadoCuentaMp.SALIDAS_NO_ML
+    assert control.movimientos[1].categoria == CategoriaEstadoCuentaMp.SIN_CLASIFICACION_COMERCIAL
+    assert control.movimientos[2].categoria == CategoriaEstadoCuentaMp.MOVIMIENTOS_ASOCIADOS_A_ML
+    assert not control.cobertura_comercial_completa
+
+
+def test_settlement_grande_retiene_solo_ids_requeridos_antes_de_agrupar():
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+
+    movimiento = MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), "Pago a proveedor", "NEEDED",
+                                          Decimal("-1"), None, "h", "S")
+    resumen = ResumenEstadoCuentaMp(Decimal("1"), Decimal("0"), Decimal("-1"), Decimal("0"),
+                                    (movimiento,), datetime(2026, 1, 1), datetime(2026, 1, 1))
+    settlement_grande = tuple(_settlement(i, f"OTHER-{i}", canal=None, plataforma=None)
+                              for i in range(1, 2001)) + (_settlement(3000, "NEEDED", canal=None, plataforma=None),)
+    control = controlar_estado_cuenta_mp(resumen, settlement_grande)
+    metricas = dict(control.metadatos_procesamiento)
+
+    assert metricas["IDs requeridos por Statement"] == "1"
+    assert metricas["IDs encontrados en Settlement"] == "1"
+    assert metricas["Filas Settlement retenidas para B2/B3"] == "1"
+
+
 def test_consolidado_agrega_hojas_solo_cuando_hay_account_statement():
     from kiki_control.exporting import generar_reporte_consolidado_excel
     from tests.test_control_consolidado_diagnostics import r, rep

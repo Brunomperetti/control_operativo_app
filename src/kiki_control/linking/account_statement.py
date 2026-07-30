@@ -2,7 +2,10 @@
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+import logging
+from time import perf_counter
 from typing import Any
+import unicodedata
 
 from kiki_control.domain.account_statement import (
     CategoriaEstadoCuentaMp,
@@ -88,10 +91,27 @@ def controlar_estado_cuenta_mp(
     movimientos_settlement: Iterable[Any],
     operacion_a_grupo_ml: Mapping[str, str | Iterable[str]] | None = None,
 ) -> ControlEstadoCuentaMp:
-    grupos = agrupar_settlement_por_operacion(movimientos_settlement, operacion_a_grupo_ml)
+    inicio = perf_counter()
+    ids_requeridos = {m.reference_id.strip() for m in resumen.movimientos
+                      if m.reference_id and m.reference_id.strip()}
+    # Un único recorrido: B2/B3 no agrupa ni enriquece las decenas de miles
+    # de operaciones ajenas a los reference IDs del Statement seleccionado.
+    seleccionados = tuple(m for m in movimientos_settlement
+                          if str(getattr(m, "id_operacion_mercado_pago", "") or "").strip()
+                          in ids_requeridos)
+    grupos = agrupar_settlement_por_operacion(seleccionados, operacion_a_grupo_ml)
     evidencias = construir_evidencias_comerciales_operaciones(grupos)
     clasificados = tuple(_clasificar(m, grupos, evidencias) for m in resumen.movimientos)
-    return ControlEstadoCuentaMp(resumen, clasificados)
+    encontrados = ids_requeridos.intersection(grupos)
+    logging.getLogger(__name__).info(
+        "Clasificación Statement: ids_requeridos=%d ids_encontrados=%d filas_seleccionadas=%d tiempo_segundos=%.3f",
+        len(ids_requeridos), len(encontrados), len(seleccionados), perf_counter() - inicio,
+    )
+    return ControlEstadoCuentaMp(resumen, clasificados, (
+        ("IDs requeridos por Statement", str(len(ids_requeridos))),
+        ("IDs encontrados en Settlement", str(len(encontrados))),
+        ("Filas Settlement retenidas para B2/B3", str(len(seleccionados))),
+    ))
 
 
 def construir_evidencias_comerciales_operaciones(
@@ -149,15 +169,27 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp],
     else:
         estado = EstadoVinculacionEstadoCuentaMp.VINCULADO_SETTLEMENT
     coherente = grupo_settlement if estado == EstadoVinculacionEstadoCuentaMp.VINCULADO_SETTLEMENT else None
-    texto = m.tipo_movimiento_original.casefold()
+    texto = _texto_normalizado(m.tipo_movimiento_original)
     canales = tuple(c.casefold() for c in coherente.canales) if coherente else tuple()
     plataformas = tuple(p.casefold() for p in coherente.plataformas) if coherente else tuple()
     id_grupo_ml = coherente.ids_grupo_ml[0] if coherente and len(coherente.ids_grupo_ml) == 1 else None
     evidencia = evidencias.get(m.reference_id or "")
-    es_salida = any(x in texto for x in ("transferencia enviada", "pago a proveedor", "retenido", "cancelada", "devolución", "devolucion", "reclamo", "impuesto", "comisión", "comision", "débito", "debito"))
+    es_reintegro_comision = any(x in texto for x in (
+        "reintegro de comision", "reintegro de comisiones", "reintegro comision",
+        "reintegro comisiones", "devolucion de comision cobrada",
+        "devolucion de comisiones cobradas",
+    ))
+    evidencia_salida = any(x in texto for x in (
+        "transferencia enviada", "pago a tercero", "pago a proveedor",
+        "pago de servicio", "retiro", "salida de dinero", "debito",
+        "dinero retenido", "retencion", "cancelada", "devolucion", "reclamo",
+        "impuesto", "comision",
+    ))
     # La evidencia canónica ML prevalece sobre el signo y sobre el tipo: una
     # devolución, retención o comisión vinculada continúa perteneciendo a ML.
-    if evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.MERCADO_LIBRE_PERIODO_B1:
+    if evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.AMBIGUO:
+        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE, "Evidencia contradictoria", " ".join(evidencia.evidencia)
+    elif evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.MERCADO_LIBRE_PERIODO_B1:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML, "Movimiento de venta Mercado Libre", "El motor consolidado vinculó las filas settlement a un único grupo ML canónico."
     elif evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.MERCADO_LIBRE_HISTORICO:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.ASOCIADO_A_VENTA_ML, "Movimiento de operación Mercado Libre histórica", " ".join(evidencia.evidencia)
@@ -165,13 +197,13 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp],
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta por mostrador con Código QR", " ".join(evidencia.evidencia)
     elif evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.MERCADO_PAGO_POINT and m.importe_neto > 0:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta con Point", " ".join(evidencia.evidencia)
-    elif evidencia and evidencia.origen_comercial == OrigenComercialOperacionMp.AMBIGUO:
-        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE, "Origen comercial ambiguo", " ".join(evidencia.evidencia)
-    elif es_salida:
+    elif m.importe_neto > 0 and es_reintegro_comision:
+        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Reintegro de comisiones", "Account Statement — tipo explícito informado por Mercado Pago."
+    elif m.importe_neto <= 0 and evidencia_salida:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO, m.tipo_movimiento_original, "El tipo original identifica explícitamente una salida o ajuste no vinculada a ML."
     elif coherente and m.importe_neto > 0 and ("mercado pago" in canales or any("código qr" in p or "codigo qr" in p for p in plataformas)):
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta por mostrador con Código QR", "El settlement identifica canal Mercado Pago o plataforma Código QR y no pertenece a un grupo ML."
-    elif m.importe_neto > 0 and any(x in texto for x in ("rendimiento", "código qr", "codigo qr", "programa de protección", "programa de proteccion", "reintegro de comisión", "reintegro de comision")):
+    elif m.importe_neto > 0 and any(x in texto for x in ("rendimiento", "codigo qr", "programa de proteccion")):
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, m.tipo_movimiento_original, "El tipo original aporta evidencia explícita de un ingreso no ML."
     else:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE, "Origen no determinado", "No existe vínculo settlement inequívoco ni evidencia suficiente en el estado de cuenta."
@@ -192,3 +224,9 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp],
 
 def _valores(movimientos: Iterable[Any], atributo: str) -> tuple[str, ...]:
     return tuple(sorted({str(valor).strip() for m in movimientos if (valor := getattr(m, atributo, None)) is not None and str(valor).strip()}))
+
+
+def _texto_normalizado(valor: object) -> str:
+    """Normaliza variantes ortográficas sin depender de IDs ni importes."""
+    texto = unicodedata.normalize("NFKD", str(valor).casefold())
+    return " ".join("".join(c for c in texto if not unicodedata.combining(c)).split())
