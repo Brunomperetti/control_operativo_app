@@ -25,6 +25,7 @@ class Item:
     fecha_hora_venta: datetime | None = None
     fecha_origen_local: datetime | None = None
     fecha_liquidacion_local: datetime | None = None
+    refund_id: str | None = None
 
 
 def movimiento(fila, fecha, importe, parcial, ref):
@@ -97,6 +98,28 @@ def test_diagnostico_expande_relaciones_y_no_equivale_al_settlement_ampliado():
     assert universos.settlement_diagnostico_periodo == (dentro, posterior, anterior)
     assert universos.settlement_diagnostico_periodo != (dentro, posterior, anterior, ajeno)
     assert dict(universos.metadatos)["Filas settlement_diagnostico_periodo"] == "3"
+
+
+def test_diagnostico_cruza_refund_con_operacion_sin_cruzar_campos_incompatibles():
+    p = resolver_periodo(TipoSeleccionPeriodo.PERSONALIZADO, "UTC", desde=date(2026, 7, 20), hasta=date(2026, 7, 20))
+    original = Item(id_operacion_mercado_pago="OP-123", fecha_origen_local=datetime(2026, 7, 20))
+    devolucion_posterior = Item(id_operacion_mercado_pago="REFUND-1", refund_id="OP-123", fecha_origen_local=datetime(2026, 8, 1))
+    devolucion_anterior = Item(id_operacion_mercado_pago="REFUND-0", refund_id="OP-123", fecha_origen_local=datetime(2026, 7, 1))
+    refund_huerfano = Item(id_operacion_mercado_pago="ORPHAN", refund_id="NO-EXISTE", fecha_origen_local=datetime(2026, 3, 1))
+    # Igual texto, pero orden y operación son campos incompatibles y no deben cruzarse.
+    falso_cruce = Item(id_operacion_mercado_pago="OTRA", id_orden="OP-123", fecha_origen_local=datetime(2026, 2, 1))
+    historico_ajeno = Item(id_operacion_mercado_pago="OLD", fecha_origen_local=datetime(2026, 1, 1))
+    filas = (original, devolucion_posterior, devolucion_anterior, refund_huerfano, falso_cruce, historico_ajeno)
+    diag = construir_universos_settlement((), (), filas, p).settlement_diagnostico_periodo
+    assert diag == (original, devolucion_posterior, devolucion_anterior)
+
+
+def test_diagnostico_incluye_operacion_original_desde_refund_semilla():
+    p = resolver_periodo(TipoSeleccionPeriodo.PERSONALIZADO, "UTC", desde=date(2026, 7, 20), hasta=date(2026, 7, 20))
+    original_historico = Item(id_operacion_mercado_pago="OP-9", fecha_origen_local=datetime(2026, 6, 1))
+    reclamo_en_periodo = Item(id_operacion_mercado_pago="CLAIM-9", refund_id="OP-9", fecha_origen_local=datetime(2026, 7, 20))
+    diag = construir_universos_settlement((), (), (original_historico, reclamo_en_periodo), p).settlement_diagnostico_periodo
+    assert diag == (original_historico, reclamo_en_periodo)
 
 
 def test_b1_usa_grupo_canonico_y_expande_toda_la_operacion():

@@ -308,6 +308,15 @@ def construir_universos_settlement(ventas: Sequence[object], operaciones: Sequen
                 if relacionado not in indices_diagnostico:
                     indices_diagnostico.add(relacionado)
                     pendientes.append(relacionado)
+            # Relación semántica cruzada segura: una referencia de devolución
+            # apunta al ID de la operación original. No se cruzan orden, paquete
+            # u otros campos solo porque contengan el mismo texto.
+            atributo_cruzado = ({"refund_id": "id_operacion_mercado_pago",
+                                 "id_operacion_mercado_pago": "refund_id"}.get(atributo))
+            for relacionado in indice_relaciones.get((atributo_cruzado, valor), ()) if valor and atributo_cruzado else ():
+                if relacionado not in indices_diagnostico:
+                    indices_diagnostico.add(relacionado)
+                    pendientes.append(relacionado)
     diag = tuple(m for i, m in enumerate(settlement) if i in indices_diagnostico)
     ids = lambda filas: len({str(getattr(m, "id_operacion_mercado_pago", "") or "").strip()
                              for m in filas if str(getattr(m, "id_operacion_mercado_pago", "") or "").strip()})
@@ -317,7 +326,7 @@ def construir_universos_settlement(ventas: Sequence[object], operaciones: Sequen
         ("IDs settlement_comparable_b1", str(ids(b1))),
         ("Filas settlement_diagnostico_periodo", str(len(diag))),
         ("IDs settlement_diagnostico_periodo", str(ids(diag))),
-        ("Criterio diagnóstico", "Origen en período + expansión por operación/orden/paquete/devolución + comparable B1"),
+        ("Criterio diagnóstico", "Origen en período + expansión por operación/orden/paquete y refund↔operación + comparable B1"),
         ("Tiempo construcción universos (s)", f"{perf_counter() - inicio:.3f}"),
     )
     return UniversosSettlement(b1, diag, meta)

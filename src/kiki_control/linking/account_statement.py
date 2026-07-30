@@ -204,11 +204,17 @@ def _clasificar(m: Any, grupos: Mapping[str, GrupoSettlementPorOperacionMp],
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta con Point", " ".join(evidencia.evidencia)
     elif m.importe_neto > 0 and es_reintegro_comision:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Reintegro de comisiones", "Account Statement — tipo explícito informado por Mercado Pago."
+    elif m.importe_neto > 0 and ("codigo qr" in texto or texto.strip() == "qr"):
+        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta por mostrador con Código QR", "El tipo original del Account Statement informa Código QR de forma explícita."
     elif m.importe_neto <= 0 and salida_no_ml_inequivoca:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SALIDA_O_AJUSTE_IDENTIFICADO, m.tipo_movimiento_original, "El tipo original identifica explícitamente una salida o ajuste no vinculada a ML."
-    elif coherente and m.importe_neto > 0 and ("mercado pago" in canales or any("código qr" in p or "codigo qr" in p for p in plataformas)):
+    elif coherente and m.importe_neto > 0 and any(
+        "código qr" in p or "codigo qr" in p or p.strip() == "qr" for p in plataformas
+    ):
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Venta por mostrador con Código QR", "El settlement identifica canal Mercado Pago o plataforma Código QR y no pertenece a un grupo ML."
-    elif m.importe_neto > 0 and any(x in texto for x in ("rendimiento", "codigo qr", "programa de proteccion")):
+    elif coherente and m.importe_neto > 0 and "mercado pago" in canales:
+        categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, "Ingreso Mercado Pago — medio no determinado", "El canal Mercado Pago acredita un origen no ML, pero la evidencia no permite determinar el medio específico."
+    elif m.importe_neto > 0 and any(x in texto for x in ("rendimiento", "programa de proteccion")):
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.OTRO_INGRESO_NO_ML_IDENTIFICADO, m.tipo_movimiento_original, "El tipo original aporta evidencia explícita de un ingreso no ML."
     else:
         categoria, subtipo, motivo = CategoriaEstadoCuentaMp.SIN_ASOCIACION_SUFICIENTE, "Origen no determinado", "No existe vínculo settlement inequívoco ni evidencia suficiente en el estado de cuenta."

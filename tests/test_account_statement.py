@@ -306,6 +306,34 @@ def test_salida_financiera_inequivoca_sigue_siendo_salida_no_ml(tipo):
     assert controlar_estado_cuenta_mp(resumen, []).movimientos[0].categoria == CategoriaEstadoCuentaMp.SALIDAS_NO_ML
 
 
+@pytest.mark.parametrize(("plataforma", "subtipo"), [
+    ("Código QR", "Venta por mostrador con Código QR"),
+    ("Point Smart", "Venta con Point"),
+    (None, "Ingreso Mercado Pago — medio no determinado"),
+    ("Checkout", "Ingreso Mercado Pago — medio no determinado"),
+    ("Link de pago", "Ingreso Mercado Pago — medio no determinado"),
+])
+def test_canal_mercado_pago_no_presupone_qr(plataforma, subtipo):
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+    mov = MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), "Liquidación", "REF", Decimal("1"), None, "h", "S")
+    resumen = ResumenEstadoCuentaMp(Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1"),
+                                    (mov,), datetime(2026, 1, 1), datetime(2026, 1, 1))
+    clasificado = controlar_estado_cuenta_mp(
+        resumen, [_settlement(1, "REF", None, "Mercado Pago", plataforma)]
+    ).movimientos[0]
+    assert clasificado.categoria == CategoriaEstadoCuentaMp.OTROS_INGRESOS_NO_ML
+    assert clasificado.subtipo == subtipo
+
+
+def test_tipo_original_qr_es_evidencia_explicita_sin_plataforma():
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+    mov = MovimientoEstadoCuentaMp(1, datetime(2026, 1, 1), "Cobro con Codigo QR", "REF", Decimal("1"), None, "h", "S")
+    resumen = ResumenEstadoCuentaMp(Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1"),
+                                    (mov,), datetime(2026, 1, 1), datetime(2026, 1, 1))
+    item = controlar_estado_cuenta_mp(resumen, [_settlement(1, "REF", None, "Mercado Pago", None)]).movimientos[0]
+    assert item.subtipo == "Venta por mostrador con Código QR"
+
+
 def test_consolidado_agrega_hojas_solo_cuando_hay_account_statement():
     from kiki_control.exporting import generar_reporte_consolidado_excel
     from tests.test_control_consolidado_diagnostics import r, rep
