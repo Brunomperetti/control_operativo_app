@@ -271,6 +271,48 @@ def test_settlement_grande_retiene_solo_ids_requeridos_antes_de_agrupar():
     assert metricas["Filas Settlement retenidas para B2/B3"] == "1"
 
 
+def test_mensaje_cobertura_distingue_causas_y_resume_combinaciones():
+    from kiki_control.domain.account_statement import MovimientoEstadoCuentaMp, ResumenEstadoCuentaMp
+    from kiki_control.presentation.account_statement_view import mensaje_cobertura_comercial_parcial
+
+    def control_para(referencias, settlements=()):
+        movimientos = tuple(
+            MovimientoEstadoCuentaMp(i, datetime(2026, 7, 28), "Movimiento", referencia,
+                                     Decimal("-1"), None, "h", "S")
+            for i, referencia in enumerate(referencias, 1)
+        )
+        resumen = ResumenEstadoCuentaMp(Decimal(len(movimientos)), Decimal("0"),
+                                        -Decimal(len(movimientos)), Decimal("0"), movimientos,
+                                        datetime(2026, 7, 28), datetime(2026, 7, 28))
+        return controlar_estado_cuenta_mp(resumen, settlements)
+
+    falta = mensaje_cobertura_comercial_parcial(control_para(("FALTA",)))
+    vinculado = mensaje_cobertura_comercial_parcial(
+        control_para(("VINC",), (_settlement(10, "VINC", canal=None, plataforma=None),))
+    )
+    ambiguo = mensaje_cobertura_comercial_parcial(control_para(
+        ("AMB",), (_settlement(11, "AMB", "A"), _settlement(12, "AMB", "B"))))
+    vacio = mensaje_cobertura_comercial_parcial(control_para((None,)))
+    combinado = mensaje_cobertura_comercial_parcial(control_para(
+        ("FALTA", "VINC", "AMB", None),
+        (_settlement(20, "VINC", canal=None, plataforma=None),
+         _settlement(21, "AMB", "A"), _settlement(22, "AMB", "B"))))
+
+    assert "período de origen más amplio" in falta
+    assert vinculado == ("La cobertura comercial es parcial porque existen movimientos vinculados al "
+                         "Settlement cuya evidencia no permite determinar responsablemente el origen comercial.")
+    assert "más amplio" not in vinculado
+    assert "evidencia contradictoria" in ambiguo
+    assert "referencia vacía" in vacio
+    assert "varias causas" in combinado
+    assert all(estado.value in combinado for estado in (
+        EstadoVinculacionEstadoCuentaMp.SIN_VINCULO_SETTLEMENT,
+        EstadoVinculacionEstadoCuentaMp.VINCULADO_SIN_ORIGEN_COMERCIAL,
+        EstadoVinculacionEstadoCuentaMp.ID_AMBIGUO,
+        EstadoVinculacionEstadoCuentaMp.ID_VACIO,
+    ))
+
+
 @pytest.mark.parametrize("tipo", [
     "Devolución", "Reclamo", "Comisión", "Impuesto", "Retención",
     "Cancelación", "Contracargo", "Ajuste",
